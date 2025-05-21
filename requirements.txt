@@ -1,0 +1,15 @@
+deep-translator==1.11.4
+langchain==0.2.15
+langchain-community==0.2.14
+langchain-core==0.2.36
+langchain-openai==0.1.23
+langchain-text-splitters==0.2.2
+numpy==1.26.4
+Pillow==10.4.0
+spacy==3.7.6
+streamlit==1.38.0
+faiss-cpu==1.8.0.post1
+pdfplumber
+openpyxl
+img2table
+tesseract-ocr-por-br
