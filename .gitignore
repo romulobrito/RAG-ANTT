@@ -73,3 +73,15 @@ output/
 *.xlsx
 *.json
 *.csv
+
+# Arquivos sensíveis
+secrets.toml
+*.env
+config.json
+
+# Arquivos de sistema
+*:Zone.Identifier
+.DS_Store
+
+# Arquivos de configuração
+*.toml
