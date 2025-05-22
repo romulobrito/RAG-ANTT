@@ -85,3 +85,7 @@ config.json
 
 # Arquivos de configuração
 *.toml
+
+# Arquivos de configuração com informações sensíveis
+.env.local
+.env.*.local

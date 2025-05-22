@@ -12,4 +12,4 @@ faiss-cpu==1.8.0.post1
 pdfplumber
 openpyxl
 img2table
-tesseract-ocr-por-br
+python-dotenv==1.0.0

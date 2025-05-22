@@ -1,20 +1,6 @@
 import logging
 import time
 from datetime import datetime
-
-def setup_logging():
-    """Configura o sistema de logging"""
-    logging.basicConfig(
-        level=logging.INFO,
-        format='%(asctime)s - %(levelname)s - %(message)s',
-        datefmt='%Y-%m-%d %H:%M:%S'
-    )
-    return logging.getLogger(__name__)
-
-# Inicializa o logger globalmente
-logger = setup_logging()
-
-# Resto das importações
 import os
 import tempfile
 import streamlit as st
@@ -22,9 +8,11 @@ from langchain_community.document_loaders import PyPDFLoader
 from langchain.text_splitter import RecursiveCharacterTextSplitter
 from langchain_community.vectorstores import FAISS
 from langchain_openai import OpenAIEmbeddings, ChatOpenAI
-from langchain.prompts import ChatPromptTemplate
+from langchain.prompts import ChatPromptTemplate, PromptTemplate
+from langchain.chains import RetrievalQA
 from langchain_core.output_parsers import StrOutputParser
 from langchain_core.runnables import RunnablePassthrough
+from langchain_core.documents import Document
 from PIL import Image
 import numpy as np
 from img2table.document import PDF
@@ -38,33 +26,168 @@ from tenacity import (
 from openai import RateLimitError
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import multiprocessing
+import json
+import re
 
-# Constantes
-OPENAI_API_KEY = 'sk-proj-SJzLGfezVCxJLft228F2T3BlbkFJ2lSCkYReBn53ZYbMfmKh'
-# "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"
-#"sk-proj-Ceq96zToY4PU7ezy732IT3BlbkFJL1cCp66BEjeN21b88XIf" #lenep
-# 'sk-proj-SJzLGfezVCxJLft228F2T3BlbkFJ2lSCkYReBn53ZYbMfmKh'
-DB_FAISS_PATH = "vectorstore/db_faiss"
-
-from PIL import Image
-import numpy as np
-from img2table.document import PDF
-from img2table.ocr import TesseractOCR
-
-
-import logging
-import time
-from datetime import datetime
-
-
-import time
-from tenacity import (
-    retry,
-    stop_after_attempt,
-    wait_exponential,
-    retry_if_exception_type
+# Importar configurações do config.py
+from config import (
+    get_openai_api_key,
+    DB_FAISS_PATH,
+    CHUNK_SIZE,
+    CHUNK_OVERLAP,
+    DEFAULT_EMBEDDING_MODEL,
+    DEFAULT_LLM_MODEL,
+    STREAMLIT_PAGE_TITLE,
+    STREAMLIT_PAGE_ICON,
+    STREAMLIT_LAYOUT,
+    setup_logging,
+    logger
 )
-from openai import RateLimitError
+
+# Inicializa o logger globalmente
+logger = setup_logging()
+
+# Templates de prompts otimizados
+TEMPLATE_RESPOSTA_COM_CITACOES = """
+Você é um assistente especializado em regulamentação da ANTT (Agência Nacional de Transportes Terrestres).
+Para a consulta: "{question}"
+
+INSTRUÇÕES IMPORTANTES PARA GERAÇÃO DE RESPOSTA:
+1. ANALISE PROFUNDAMENTE os documentos fornecidos para extrair todas as informações relevantes
+2. Sua resposta deve ser COMPLETA, PRECISA e ESTRUTURADA - use listas, marcadores e formatação quando apropriado
+3. Inclua TODOS os detalhes relevantes, como datas, números, prazos, valores e requisitos específicos
+4. Organize informações complexas em seções claras com subtítulos quando necessário
+5. Ao citar regulamentações:
+   - Mencione o tipo de documento, número e ano EXATAMENTE como aparecem no original
+   - Destaque artigos, parágrafos e incisos específicos
+   - Explique claramente as implicações práticas das normas
+6. Quando houver dados numéricos ou técnicos, apresente-os de forma estruturada
+7. NÃO INVENTE INFORMAÇÕES! Se algo não estiver nos documentos, indique claramente a limitação
+8. Após sua resposta, SEMPRE adicione uma seção "TRECHOS DOS DOCUMENTOS CITADOS" estruturada assim:
+
+### TRECHOS DOS DOCUMENTOS CITADOS:
+
+**Documento: [TIPO] [NÚMERO]/[ANO]**
+"[Trecho exato usado]"
+
+**Documento: [TIPO] [NÚMERO]/[ANO]**
+"[Trecho exato usado]"
+
+Contextos:
+{context}
+
+Sua resposta em português:
+"""
+
+TEMPLATE_EXTRACAO_AGRESSIVA = """
+Você é um especialista em análise documental com foco em regulamentações da ANTT.
+Nos documentos abaixo, ANALISE MINUCIOSAMENTE todas as informações relevantes para: "{question}"
+
+INSTRUÇÕES DE EXTRAÇÃO:
+1. EXAMINE cada documento com atenção - informações importantes podem estar em qualquer parte
+2. CONECTE informações fragmentadas de diferentes documentos para formar uma resposta coesa
+3. EXTRAIA todos os detalhes relevantes: datas, números, requisitos, procedimentos, exceções
+4. ORGANIZE as informações de forma lógica e estruturada, usando:
+   - Listas para sequências ou itens relacionados
+   - Seções com subtítulos para diferentes aspectos da resposta
+5. NUNCA diga que não encontrou informações se houver QUALQUER conteúdo útil
+6. Se os documentos apresentarem informações contraditórias ou ambíguas, EXPLIQUE as diferentes interpretações
+7. Para cada informação, CITE A FONTE EXATA de onde a extraiu
+8. Ao final, SEMPRE adicione uma seção "TRECHOS DOS DOCUMENTOS CITADOS" estruturada assim:
+
+### TRECHOS DOS DOCUMENTOS CITADOS:
+
+**Documento: [TIPO] [NÚMERO]/[ANO]**
+"[Trecho exato usado]"
+
+**Documento: [TIPO] [NÚMERO]/[ANO]**
+"[Trecho exato usado]"
+
+Documentos analisados:
+{context}
+
+Sua resposta completa em português:
+"""
+
+# Template especializado para parâmetros técnicos
+TEMPLATE_PARAMETROS_TECNICOS = """
+Você é um especialista técnico em regulamentações da ANTT.
+Para a consulta sobre parâmetros ou especificações técnicas: "{question}"
+
+INSTRUÇÕES DE ANÁLISE TÉCNICA:
+1. IDENTIFIQUE todos os parâmetros técnicos, especificações, limites ou critérios mencionados
+2. Para cada parâmetro técnico, DETALHE:
+   - Nome/tipo do parâmetro
+   - Valores numéricos, faixas ou limites especificados
+   - Unidades de medida
+   - Metodologias de verificação ou equipamentos
+   - Frequência de monitoramento ou avaliação
+   - Critérios de conformidade ou aceitação
+   - Exceções ou condições especiais de aplicação
+
+3. ORGANIZE os parâmetros técnicos em formato estruturado:
+   - Use tabelas conceituais para apresentar dados numéricos
+   - Agrupe parâmetros relacionados em seções lógicas
+   - Destaque visualmente valores críticos ou limites importantes
+
+4. EXPLIQUE o contexto técnico e a finalidade de cada parâmetro
+5. COMPARE diferentes requisitos quando existirem variações por categoria, situação ou período
+6. CITE a fonte específica de cada parâmetro (documento, artigo, anexo) 
+7. SEMPRE adicione uma seção "TRECHOS DOS DOCUMENTOS CITADOS" estruturada assim:
+
+### TRECHOS DOS DOCUMENTOS CITADOS:
+
+**Documento: [TIPO] [NÚMERO]/[ANO]**
+"[Trecho exato usado]"
+
+**Documento: [TIPO] [NÚMERO]/[ANO]**
+"[Trecho exato usado]"
+
+Contextos técnicos analisados:
+{context}
+
+Sua resposta técnica detalhada em português:
+"""
+
+# Template para análise de normativas
+TEMPLATE_ANALISE_NORMATIVA = """
+Você é um especialista jurídico em regulamentações da ANTT.
+Para a consulta sobre normativas, regulamentações ou aspectos legais: "{question}"
+
+INSTRUÇÕES DE ANÁLISE JURÍDICA:
+1. IDENTIFIQUE todas as normativas relevantes nos documentos (resoluções, instruções, deliberações, etc.)
+2. Para cada normativa importante, FORNEÇA:
+   - Tipo, número e data da normativa
+   - Objetivo principal e escopo de aplicação
+   - Estrutura básica (capítulos/seções principais)
+   - Dispositivos específicos relacionados à consulta (artigos, parágrafos, incisos)
+   - Requisitos, prazos, procedimentos ou obrigações estabelecidos
+   - Penalidades ou consequências pelo descumprimento (quando mencionadas)
+   - Relação com outras normativas citadas
+
+3. ANALISE as implicações práticas das normativas para os diferentes atores
+   
+4. ESTRUTURE sua resposta de forma clara:
+   - Use seções e subtítulos para diferentes aspectos ou normativas
+   - Cite textualmente trechos importantes, destacando-os adequadamente
+   - Explique termos técnico-jurídicos quando necessário
+   
+5. CONTEXTUALIZE a evolução normativa quando relevante (alterações, revogações, etc.)
+6. SEMPRE adicione uma seção "TRECHOS DOS DOCUMENTOS CITADOS" estruturada assim:
+
+### TRECHOS DOS DOCUMENTOS CITADOS:
+
+**Documento: [TIPO] [NÚMERO]/[ANO]**
+"[Trecho exato usado]"
+
+**Documento: [TIPO] [NÚMERO]/[ANO]**
+"[Trecho exato usado]"
+
+Documentos normativos analisados:
+{context}
+
+Sua análise jurídica em português:
+"""
 
 @retry(
     stop=stop_after_attempt(3),
@@ -83,15 +206,6 @@ def call_openai_with_retry(llm, prompt, context):
     except Exception as e:
         logger.error(f"Erro na chamada OpenAI: {str(e)}")
         raise
-
-def setup_logging():
-    """Configura o sistema de logging"""
-    logging.basicConfig(
-        level=logging.INFO,
-        format='%(asctime)s - %(levelname)s - %(message)s',
-        datefmt='%Y-%m-%d %H:%M:%S'
-    )
-    return logging.getLogger(__name__)
 
 def create_processing_metrics():
     """Cria containers para métricas de processamento"""
@@ -151,14 +265,6 @@ def get_cropped_table(table, page, pdf):
     # Converte o array numpy em uma imagem PIL
     return Image.fromarray(table_array.astype('uint8'))
 
-
-
-
-from concurrent.futures import ThreadPoolExecutor, as_completed
-import multiprocessing
-
-
-
 def process_single_table(table_info):
     """
     Processa uma única tabela com foco em descumprimentos.
@@ -214,7 +320,7 @@ def extract_tables_with_context(pdf_path, metrics=None):
         llm = ChatOpenAI(
             model_name="gpt-4",
             temperature=0,
-            api_key=OPENAI_API_KEY
+            api_key=get_openai_api_key()
         )
         
         if metrics:
@@ -395,8 +501,8 @@ def process_pdf(uploaded_file):
 
                 # Divide o texto em chunks
                 text_splitter = RecursiveCharacterTextSplitter(
-                    chunk_size=1500,
-                    chunk_overlap=300
+                    chunk_size=CHUNK_SIZE,
+                    chunk_overlap=CHUNK_OVERLAP
                 )
                 splits = text_splitter.create_documents(documents)
 
@@ -407,7 +513,7 @@ def process_pdf(uploaded_file):
                 # Cria embeddings com retry
                 try:
                     embeddings = OpenAIEmbeddings(
-                        api_key=OPENAI_API_KEY,
+                        api_key=get_openai_api_key(),
                         max_retries=3,
                         timeout=30
                     )
@@ -455,1382 +561,951 @@ def format_docs(docs):
     """Formata os documentos para o contexto."""
     return "\n\n".join(doc.page_content for doc in docs)
 
+def verificar_documentos_importantes():
+    """Verifica se documentos importantes estão no vectorstore e os adiciona se necessário."""
+    documentos_importantes = [
+        "dados_antt/INM/2024/INM-00000034-2024.md",  # Instrução Normativa 34 de 2024 - Parâmetros de Desempenho de Pavimento
+        "dados_antt/RES/2024/RES-00006057-2024.md",  # Resolução 6057 de 2024 - Programa de Sustentabilidade
+        "dados_antt/DLB/2024/DLB-00000092-2024.md"   # Deliberação 92 de 2024 - Limites de Peso
+    ]
+    
+    documentos_indexados = []
+    
+    # Verificar quais documentos existem
+    for caminho in documentos_importantes:
+        if os.path.exists(caminho):
+            with open(caminho, 'r', encoding='utf-8') as f:
+                conteudo = f.read()
+            
+            # Extrair metadados básicos do caminho
+            partes_caminho = caminho.split('/')
+            tipo_documento = partes_caminho[1] if len(partes_caminho) > 1 else None
+            ano = partes_caminho[2] if len(partes_caminho) > 2 else None
+            numero = None
+            
+            # Extrair número do nome do arquivo
+            nome_arquivo = os.path.basename(caminho)
+            if '-' in nome_arquivo:
+                partes = nome_arquivo.split('-')
+                if len(partes) >= 2:
+                    numero = partes[1]
+            
+            # Mapear tipo para nome completo
+            tipo_nome = {
+                "RES": "Resolução",
+                "POR": "Portaria",
+                "INM": "Instrução Normativa",
+                "DLB": "Deliberação",
+                "INC": "Instrução Normativa Complementar"
+            }.get(tipo_documento, tipo_documento)
+            
+            # Dividir em chunks menores para capturar informações específicas
+            text_splitter = RecursiveCharacterTextSplitter(
+                chunk_size=500,  # Chunks menores para capturar detalhes específicos
+                chunk_overlap=200,
+                length_function=len,
+            )
+            
+            # Criar documentos
+            chunks = text_splitter.split_text(conteudo)
+            for i, chunk in enumerate(chunks):
+                documento = Document(
+                    page_content=chunk,
+                    metadata={
+                        "tipo_documento": tipo_documento,
+                        "nome_tipo": tipo_nome,
+                        "ano": ano,
+                        "numero": numero,
+                        "caminho": caminho,
+                        "chunk": i + 1,
+                        "total_chunks": len(chunks)
+                    }
+                )
+                documentos_indexados.append(documento)
+    
+    return documentos_indexados
 
+def atualizar_vectorstore_com_documentos_importantes(vectorstore, embeddings):
+    """Atualiza o vectorstore com documentos importantes se necessário."""
+    documentos = verificar_documentos_importantes()
+    if documentos:
+        print(f"Atualizando vectorstore com {len(documentos)} documentos importantes...")
+        vectorstore.add_documents(documentos)
+        # Salvar o vectorstore atualizado
+        vectorstore.save_local(DB_FAISS_PATH)
+        print("Vectorstore atualizado e salvo.")
+    return vectorstore
 
+def carregar_vectorstore(api_key, caminho_vectorstore="vectorstore"):
+    """Carrega o vectorstore ANTT."""
+    print(f"Carregando vectorstore de {caminho_vectorstore}...")
+    embeddings = OpenAIEmbeddings(openai_api_key=api_key)
+    vectorstore = FAISS.load_local(caminho_vectorstore, embeddings, allow_dangerous_deserialization=True)
+    
+    # Atualizar com documentos importantes
+    vectorstore = atualizar_vectorstore_com_documentos_importantes(vectorstore, embeddings)
+    
+    return vectorstore
 
-# def query_performance_parameters(question, tables_analysis, metrics=None, llm=None):
-#     """
-#     Responde a perguntas sobre parâmetros de desempenho com controle de tokens.
-#     """
-#     if metrics:
-#         update_metrics(metrics, "Iniciando análise da consulta", progress=0)
-        
-#     if llm is None:
-#         llm = ChatOpenAI(
-#             model_name="gpt-4",
-#             temperature=0,
-#             api_key=OPENAI_API_KEY,
-#             max_tokens=2000
-#         )
-#     time.sleep(3.5)
+def criar_filtro_metadados(tipo_documento=None, ano=None, numero=None):
+    """Cria um filtro para busca por metadados."""
+    filtro = {}
     
-#     try:
-#         if metrics:
-#             update_metrics(metrics, "Filtrando tabelas relevantes", progress=20)
-            
-#         # Filtra tabelas relevantes
-#         non_conforming_tables = []
-#         conforming_tables = []
-        
-#         for table in tables_analysis:
-#             if ("não atende" in table['descumprimentos'].lower() or 
-#                 "não conforme" in table['descumprimentos'].lower()):
-#                 non_conforming_tables.append(table)
-#             else:
-#                 conforming_tables.append(table)
-        
-#         if metrics:
-#             update_metrics(metrics, "Preparando contexto", progress=40)
-            
-#         # Prepara contexto em chunks menores
-#         def prepare_table_summary(table):
-#             return f"""
-#             Página {table['page_number']}, Tabela {table['table_number']}:
-#             Análise: {table['descumprimentos'][:500]}
-#             """
-        
-#         context = "RESUMO DAS NÃO CONFORMIDADES:\n"
-#         if non_conforming_tables:
-#             for table in non_conforming_tables[:5]:
-#                 context += prepare_table_summary(table)
-        
-#         context += "\n\nRESUMO DAS CONFORMIDADES:\n"
-#         if conforming_tables:
-#             context += f"Total de {len(conforming_tables)} tabelas em conformidade.\n"
-#             for table in conforming_tables[:3]:
-#                 context += prepare_table_summary(table)
-        
-#         context = context[:4000]
-        
-#         if metrics:
-#             update_metrics(metrics, "Gerando resposta", progress=60)
-        
-#         prompt = ChatPromptTemplate.from_template("""
-#         Você é um especialista em análise de parâmetros de desempenho da ANTT.
-#         Analise o contexto resumido e responda à pergunta do usuário.
-        
-#         Contexto:
-#         {context}
-        
-#         Pergunta:
-#         {question}
-        
-#         Forneça uma resposta objetiva focando em:
-#         1. Não conformidades encontradas (se houver)
-#         2. Localização das não conformidades
-#         3. Motivos principais das não conformidades
-#         4. Resumo dos parâmetros em conformidade
-        
-#         Limite sua resposta a 2000 caracteres.
-#         """)
-        
-#         chain = prompt | llm | StrOutputParser()
-        
-#         if metrics:
-#             update_metrics(metrics, "Processando resposta final", progress=80)
-            
-#         response = chain.invoke({
-#             "context": context,
-#             "question": question
-#         })
-        
-#         if metrics:
-#             update_metrics(metrics, "Análise concluída", progress=100)
-            
-#         return response, non_conforming_tables
-        
-#     except Exception as e:
-#         if "rate_limit_exceeded" in str(e):
-#             if metrics:
-#                 update_metrics(metrics, "Limite de taxa atingido, aguardando...", progress=50)
-#             logger.warning("Limite de taxa atingido, aguardando...")
-#             time.sleep(5)
-#             return query_performance_parameters(question, tables_analysis, metrics, llm)
-#         else:
-#             if metrics:
-#                 update_metrics(metrics, f"Erro: {str(e)}", progress=0, error=str(e))
-#             logger.error(f"Erro ao processar pergunta: {str(e)}")
-#             return "Erro ao processar pergunta. Por favor, tente novamente em alguns segundos.", []
+    if tipo_documento:
+        filtro["tipo_documento"] = tipo_documento
+    
+    if ano:
+        filtro["ano"] = ano
+    
+    if numero:
+        filtro["numero"] = numero
+    
+    return filtro if filtro else None
 
-# def main():
-#     """
-#     Função principal do aplicativo Streamlit.
-#     """
-#     logger = setup_logging()
-#     st.set_page_config(page_title="Chatbot ANTT", page_icon="🤖", layout="wide")
+def pesquisar_documentos(query, vectorstore, k=12, tipo_documento=None, ano=None, numero=None):
+    """Pesquisa documentos com base em uma query, podendo filtrar por metadados."""
+    resultados = []
+    resultados_finais = []
+    query_original = query
     
-#     st.header("Análise de Descumprimentos de Parâmetros de Desempenho ANTT")
-#     st.write("Este sistema é especializado em identificar e analisar descumprimentos de parâmetros de desempenho em documentos contratuais.")
+    # Log da consulta
+    print(f"\n===== NOVA CONSULTA =====")
+    print(f"Pesquisando: '{query}'")
+    if tipo_documento or ano or numero:
+        print(f"Filtros: Tipo={tipo_documento}, Ano={ano}, Número={numero}")
     
-#     # Métricas do sistema na barra lateral
-#     system_metrics = st.sidebar.container()
-#     with system_metrics:
-#         st.subheader("Status do Sistema")
-#         st.write("🟢 Sistema Online")
-#         st.write(f"⏰ Atualizado em: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+    # Criar filtro de metadados
+    filtro = criar_filtro_metadados(tipo_documento, ano, numero)
     
-#     uploaded_file = st.file_uploader("Carregue um documento PDF para análise 📄", type=["pdf"])
-    
-#     if uploaded_file:
-#         try:
-#             # Métricas para processamento do PDF
-#             pdf_metrics = create_processing_metrics()
-#             update_metrics(pdf_metrics, 
-#                          status="Iniciando análise do documento",
-#                          progress=0,
-#                          info="Preparando para identificar descumprimentos")
+    # ESTRATÉGIA 1: Hybrid search - combinar busca semântica com keywords
+    try:
+        # Extrair palavras-chave da consulta (remover stop words)
+        keywords = extrair_keywords(query)
+        
+        # Executar busca semântica com MMR (para diversidade)
+        print(f"Executando busca semântica com MMR...")
+        docs_semantic = vectorstore.max_marginal_relevance_search(
+            query,
+            k=k,
+            fetch_k=k*3,
+            lambda_mult=0.7,
+            filter=filtro
+        )
+        
+        # Adicionar resultados da busca semântica
+        resultados.extend(docs_semantic)
+        print(f"Busca semântica: {len(docs_semantic)} resultados")
+        
+        # Se temos keywords relevantes, fazer busca por keywords também
+        if keywords and len(keywords) > 1:
+            keyword_query = " ".join(keywords)
+            print(f"Executando busca adicional por keywords: '{keyword_query}'")
+            docs_keywords = vectorstore.similarity_search(
+                keyword_query,
+                k=max(3, k//2),
+                filter=filtro
+            )
             
-#             vectorstore, tables_data = process_pdf(uploaded_file)
+            # Adicionar apenas documentos não duplicados
+            docs_ids = set(doc.metadata.get('caminho', '') + str(doc.metadata.get('chunk', '')) 
+                           for doc in resultados)
             
-#             if tables_data:
-#                 num_descumprimentos = len([t for t in tables_data if "Nenhum descumprimento identificado" not in t.get('descumprimentos', '')])
-#                 update_metrics(pdf_metrics,
-#                              status="Análise concluída",
-#                              progress=100,
-#                              info=f"Identificados {num_descumprimentos} casos de descumprimento em {len(tables_data)} tabelas analisadas")
+            for doc in docs_keywords:
+                doc_id = doc.metadata.get('caminho', '') + str(doc.metadata.get('chunk', ''))
+                if doc_id not in docs_ids:
+                    resultados.append(doc)
+                    docs_ids.add(doc_id)
+            
+            print(f"Após busca por keywords: {len(resultados)} resultados")
+    except Exception as e:
+        print(f"Erro na busca híbrida: {str(e)}")
+    
+    # ESTRATÉGIA 2: Se não obtivemos resultados suficientes, fazer busca normal
+    if len(resultados) < 2:
+        print("Resultados insuficientes. Tentando busca direta...")
+        try:
+            resultados = vectorstore.similarity_search(query_original, k=k, filter=filtro)
+            print(f"Busca direta: {len(resultados)} resultados")
+        except Exception as e:
+            print(f"Erro na busca direta: {str(e)}")
+    
+    # ESTRATÉGIA 3: Busca por termos mais amplos como último recurso
+    if len(resultados) < 2:
+        print("Resultados ainda insuficientes. Tentando busca com termos amplos...")
+        try:
+            # Tentar com uma versão simplificada da query
+            termos_gerais = simplificar_query(query_original)
+            resultados = vectorstore.similarity_search(termos_gerais, k=k)
+            print(f"Busca com termos amplos: {len(resultados)} resultados")
+        except Exception as e:
+            print(f"Erro na busca com termos amplos: {str(e)}")
+    
+    # Reranking dos documentos recuperados
+    if resultados:
+        resultados_finais = reranking_documentos(query_original, resultados)
+        print(f"Após reranking: {len(resultados_finais)} documentos retornados")
+    
+    return resultados_finais
+
+def extrair_keywords(query):
+    """Extrai palavras-chave relevantes da consulta."""
+    # Lista de stop words em português
+    stop_words = set([
+        "a", "ao", "aos", "aquela", "aquelas", "aquele", "aqueles", "aquilo", "as", "até",
+        "com", "como", "da", "das", "de", "dela", "delas", "dele", "deles", "depois",
+        "do", "dos", "e", "ela", "elas", "ele", "eles", "em", "entre", "era",
+        "eram", "essa", "essas", "esse", "esses", "esta", "estas", "este", "estes", "eu",
+        "foi", "fomos", "for", "foram", "fosse", "fossem", "há", "isso", "isto", "já",
+        "lhe", "lhes", "mais", "mas", "me", "mesmo", "meu", "meus", "minha", "minhas",
+        "muito", "na", "não", "nas", "nem", "no", "nos", "nós", "nossa", "nossas",
+        "nosso", "nossos", "num", "numa", "o", "os", "ou", "para", "pela", "pelas",
+        "pelo", "pelos", "por", "qual", "quando", "que", "quem", "se", "seja", "sejam",
+        "sem", "seu", "seus", "só", "somos", "são", "sua", "suas", "também", "te",
+        "tem", "temos", "tenho", "teu", "teus", "tu", "tua", "tuas", "um", "uma",
+        "você", "vocês", "vos"
+    ])
+    
+    # Extrair palavras da consulta, filtrar stop words e palavras curtas
+    keywords = [w.lower() for w in query.split() 
+                if w.lower() not in stop_words and len(w) > 3]
+    return keywords
+
+def simplificar_query(query):
+    """Simplifica a consulta para busca mais geral."""
+    # Extrair substantivos e palavras-chave mais importantes
+    keywords = extrair_keywords(query)
+    
+    # Se temos pelo menos 2 keywords, usar as mais longas (provavelmente mais específicas)
+    if len(keywords) >= 2:
+        # Ordenar por tamanho decrescente e pegar até 3 palavras-chave mais longas
+        keywords_sorted = sorted(keywords, key=len, reverse=True)[:3]
+        return " ".join(keywords_sorted)
+    
+    # Se não temos keywords suficientes, usar a query original
+    return query
+
+def reranking_documentos(query, documentos):
+    """
+    Reordena os documentos com base na relevância para a consulta.
+    Implementa uma versão simplificada de reranking baseada em heurísticas.
+    """
+    if not documentos:
+        return []
+    
+    # Extrair keywords da consulta
+    keywords = set(extrair_keywords(query))
+    
+    # Função para calcular score de relevância
+    def calcular_score_documento(doc):
+        score = 0
+        conteudo = doc.page_content.lower()
+        metadados = doc.metadata
+        
+        # Fator 1: Presença de keywords no conteúdo (match lexical)
+        for keyword in keywords:
+            if keyword in conteudo:
+                # Mais pontos para matches exatos de palavras completas
+                score += 1
+            # Pontos parciais para substrings
+            elif any(keyword in palavra for palavra in conteudo.split()):
+                score += 0.5
+        
+        # Fator 2: Densidade de keywords (quanto maior a densidade, melhor)
+        palavras_total = len(conteudo.split())
+        if palavras_total > 0:
+            score += (score / palavras_total) * 5  # Multiplicador para dar mais peso
+        
+        # Fator 3: Metadados de relevância específica
+        if metadados.get("relevancia_tecnica") == "Alta":
+            score += 2
+        
+        # Fator 4: Conteúdo de tabelas (valorizar documentos com dados estruturados)
+        if metadados.get("contem_tabelas") == "Sim":
+            score += 1
+        
+        # Fator 5: Primeiros chunks têm precedência (geralmente mais contextuais)
+        if metadados.get("chunk") == 1:
+            score += 0.5
+        
+        return score
+    
+    # Calcular scores e ordenar documentos
+    docs_com_score = [(doc, calcular_score_documento(doc)) for doc in documentos]
+    docs_ordenados = [doc for doc, score in sorted(docs_com_score, key=lambda x: x[1], reverse=True)]
+    
+    return docs_ordenados
+
+def criar_qa_chain(vectorstore, llm):
+    """Cria uma chain QA usando o template especializado para ANTT."""
+    prompt = PromptTemplate(
+        template=TEMPLATE_RESPOSTA_COM_CITACOES,
+        input_variables=["context", "question"]
+    )
+    
+    # Configurar o retriever para usar MMR (Maximum Marginal Relevance)
+    retriever = vectorstore.as_retriever(
+        search_type="mmr",  # Maximum Marginal Relevance
+        search_kwargs={
+            "k": 12,        # Número de documentos a recuperar
+            "fetch_k": 20,  # Número de documentos a buscar antes de aplicar MMR
+            "lambda_mult": 0.7  # Equilíbrio entre relevância (1.0) e diversidade (0.0)
+        }
+    )
+    
+    # Criar chain RAG otimizada
+    chain = RetrievalQA.from_chain_type(
+        llm=llm,
+        chain_type="stuff",  # Combina todos os documentos em um único contexto
+        retriever=retriever,
+        chain_type_kwargs={
+            "prompt": prompt,
+            "verbose": False
+        },
+        return_source_documents=True  # Retorna os documentos fonte junto com a resposta
+    )
+    
+    return chain
+
+def gerar_resposta(pergunta, documentos, llm):
+    """Gera uma resposta baseada nos documentos recuperados."""
+    if not documentos:
+        return "Não encontrei documentos relevantes para esta pergunta. Por favor, reformule sua consulta ou forneça mais detalhes."
+    
+    # Preparar o contexto a partir dos documentos
+    contextos = []
+    documentos_info = {}  # Para armazenar informações sobre cada documento
+    
+    # Categorizar documentos encontrados por tipo
+    tipos_documentos = set()
+    contagem_por_tipo = {}
+    
+    for i, doc in enumerate(documentos):
+        metadados = doc.metadata
+        tipo = metadados.get('nome_tipo', 'Documento')
+        tipos_documentos.add(tipo)
+        
+        # Contar ocorrências por tipo
+        contagem_por_tipo[tipo] = contagem_por_tipo.get(tipo, 0) + 1
+        
+        # Criar identificador único para o documento
+        numero = metadados.get('numero', 'N/A')
+        ano = metadados.get('ano', 'N/A')
+        doc_id = f"{tipo} {numero}/{ano}"
+        
+        # Armazenar informações do documento para uso posterior
+        if doc_id not in documentos_info:
+            documentos_info[doc_id] = {
+                'tipo': tipo,
+                'numero': numero,
+                'ano': ano,
+                'caminho': metadados.get('caminho', 'Não especificado'),
+                'trechos': []
+            }
+        
+        # Adicionar o trecho atual à lista de trechos deste documento
+        documentos_info[doc_id]['trechos'].append({
+            'chunk': metadados.get('chunk', 'N/A'),
+            'total_chunks': metadados.get('total_chunks', 'N/A'),
+            'conteudo': doc.page_content
+        })
+        
+        # Formatação para o contexto enviado ao LLM
+        contexto = f"""
+[Documento: {doc_id} - Parte {metadados.get('chunk', 'N/A')}/{metadados.get('total_chunks', 'N/A')}]
+Fonte: {metadados.get('caminho', 'Não especificado')}
+Conteúdo:
+{doc.page_content}
+"""
+        contextos.append(contexto)
+    
+    # Limitar o tamanho total do contexto para não exceder limites de token
+    contexto_completo = "\n\n".join(contextos)
+    
+    # Log para depuração
+    print(f"Documentos encontrados: {len(documentos)}")
+    for tipo, contagem in contagem_por_tipo.items():
+        print(f"- {tipo}: {contagem} documentos")
+    
+    # Determinar o tipo de consulta com base em palavras-chave e documentos recuperados
+    palavras_parametros_tecnicos = ['parâmetro', 'técnico', 'valor', 'limite', 'medida', 'metodologia', 
+                                   'pavimento', 'deflexão', 'iri', 'atrito', 'índice']
+    
+    palavras_normativas = ['resolução', 'instrução normativa', 'deliberação', 'portaria', 'regulamento', 
+                           'normativo', 'legal', 'direito', 'obrigação', 'dever', 'prazo', 'penalidade']
+    
+    # Verificar tipo de consulta
+    pergunta_lower = pergunta.lower()
+    
+    # Verificar se é consulta técnica
+    if any(palavra in pergunta_lower for palavra in palavras_parametros_tecnicos) or \
+       'INSTRUÇÃO NORMATIVA' in ' '.join(tipos_documentos) and 'parâmetro' in pergunta_lower:
+        print("Detectada consulta sobre parâmetros técnicos")
+        template_escolhido = TEMPLATE_PARAMETROS_TECNICOS
+    
+    # Verificar se é consulta normativa/jurídica
+    elif any(palavra in pergunta_lower for palavra in palavras_normativas) or \
+         any(tipo in ['Resolução', 'Deliberação', 'Portaria'] for tipo in tipos_documentos):
+        print("Detectada consulta sobre aspectos normativos/jurídicos")
+        template_escolhido = TEMPLATE_ANALISE_NORMATIVA
+    
+    # Caso padrão - resposta geral
+    else:
+        print("Usando template padrão de resposta")
+        template_escolhido = TEMPLATE_RESPOSTA_COM_CITACOES
+    
+    # Usar o template escolhido
+    prompt = PromptTemplate(
+        template=template_escolhido,
+        input_variables=["context", "question"]
+    )
+    
+    # Executar a chain de pergunta e resposta com o contexto
+    chain = prompt | llm
+    
+    try:
+        # Gerar resposta
+        resposta = chain.invoke({
+            "context": contexto_completo,
+            "question": pergunta
+        })
+        
+        # Se a resposta for muito genérica ou indicar falta de informações, tentar extração agressiva
+        conteudo_resposta = resposta.content
+        if any(frase in conteudo_resposta.lower() for frase in 
+              ["não encontrei informações", "não há informações", "não foi possível encontrar", 
+               "não foram encontradas", "não disponível nos documentos"]):
+            print("Resposta inicial insatisfatória. Tentando extração agressiva de informações...")
+            
+            # Tentar extração agressiva
+            prompt_extracao = PromptTemplate(
+                template=TEMPLATE_EXTRACAO_AGRESSIVA,
+                input_variables=["context", "question"]
+            )
+            
+            chain_extracao = prompt_extracao | llm
+            nova_resposta = chain_extracao.invoke({
+                "context": contexto_completo,
+                "question": pergunta
+            })
+            
+            # Se a nova resposta for mais informativa, use-a
+            if len(nova_resposta.content) > 100 and not any(frase in nova_resposta.content.lower() 
+                                                          for frase in ["não encontrei", "não foi possível"]):
+                conteudo_resposta = nova_resposta.content
+                print("Usado resultado da extração agressiva")
+            else:
+                print("Mantida resposta original")
+        
+        return conteudo_resposta
+        
+    except Exception as e:
+        print(f"Erro ao gerar resposta: {str(e)}")
+        # Tentar com o template de extração como fallback em caso de erro
+        try:
+            prompt_fallback = PromptTemplate(
+                template=TEMPLATE_EXTRACAO_AGRESSIVA,
+                input_variables=["context", "question"]
+            )
+            
+            chain_fallback = prompt_fallback | llm
+            resposta_fallback = chain_fallback.invoke({
+                "context": contexto_completo,
+                "question": pergunta
+            })
+            
+            return resposta_fallback.content
+        except Exception as e2:
+            print(f"Erro no fallback: {str(e2)}")
+            return f"Não foi possível gerar uma resposta devido a um erro interno. Tente reformular sua consulta de forma mais específica."
+
+def interface_usuario(vectorstore, llm):
+    st.set_page_config(
+        page_title=STREAMLIT_PAGE_TITLE,
+        page_icon=STREAMLIT_PAGE_ICON,
+        layout=STREAMLIT_LAYOUT
+    )
+    
+    # Carregar logo e exibir cabeçalho
+    try:
+        logo = Image.open("antt-logo.png")
+        col1, col2 = st.columns([1, 5])
+        with col1:
+            st.image(logo, width=100)
+        with col2:
+            st.title("Sistema RAG - Consulta a Documentos da ANTT")
+    except:
+        # Fallback se não encontrar a imagem
+        st.title("Sistema RAG - Consulta a Documentos da ANTT")
+    
+    # Carregar os tipos de documentos e anos disponíveis do relatório
+    try:
+        with open("relatorio_documentos.json", "r") as f:
+            relatorio = json.load(f)
+        
+        tipos_documento = sorted(list(set([doc["tipo"] for doc in relatorio if doc["tipo"]])))
+        anos = sorted(list(set([doc["ano"] for doc in relatorio if doc["ano"]])))
+    except Exception as e:
+        st.warning(f"Não foi possível carregar o relatório de documentos. Erro: {str(e)}")
+        tipos_documento = []
+        anos = []
+    
+    # Filtros laterais
+    with st.sidebar:
+        st.header("Filtros de Pesquisa")
+        
+        tipo_selecionado = st.selectbox(
+            "Tipo de Documento",
+            ["Todos"] + tipos_documento
+        )
+        
+        ano_selecionado = st.selectbox(
+            "Ano",
+            ["Todos"] + anos
+        )
+        
+        numero_documento = st.text_input("Número do Documento (opcional)")
+        
+        st.markdown("---")
+        st.markdown("### Configurações")
+        
+        col_a, col_b = st.columns(2)
+        with col_a:
+            mostrar_trechos = st.checkbox("Mostrar trechos", value=True)
+        with col_b:
+            modo_detalhado = st.checkbox("Exibição detalhada", value=False)
+        
+        num_documentos = st.slider("Documentos a recuperar", 3, 20, 10)
+        
+        st.markdown("---")
+        st.markdown("### Estatísticas")
+        
+        # Mostrar estatísticas básicas
+        if relatorio:
+            total_docs = len(relatorio)
+            st.metric("Total de Documentos", total_docs)
+            
+            # Top 3 tipos de documentos
+            tipos_count = {}
+            for doc in relatorio:
+                tipo = doc.get("tipo")
+                if tipo:
+                    tipos_count[tipo] = tipos_count.get(tipo, 0) + 1
+            
+            # Mostrar top 3 tipos
+            if tipos_count:
+                st.write("**Tipos mais comuns:**")
+                top_tipos = sorted(tipos_count.items(), key=lambda x: x[1], reverse=True)[:3]
+                for tipo, count in top_tipos:
+                    st.write(f"- {tipo}: {count}")
+    
+    # Converter seleções para valores para a busca
+    tipo_filtro = None if tipo_selecionado == "Todos" else tipo_selecionado
+    ano_filtro = None if ano_selecionado == "Todos" else ano_selecionado
+    numero_filtro = None if not numero_documento else numero_documento
+    
+    # Título e descrição
+    st.markdown("""
+    ### Assistente de Consulta Inteligente
+    
+    Este sistema utiliza Inteligência Artificial para consultar documentos oficiais da ANTT. 
+    Digite sua pergunta abaixo para obter informações detalhadas extraídas dos documentos.
+    """)
+    
+    # Mostrar filtros ativos
+    filtros_ativos = []
+    if tipo_filtro:
+        filtros_ativos.append(f"Tipo: {tipo_filtro}")
+    if ano_filtro:
+        filtros_ativos.append(f"Ano: {ano_filtro}")
+    if numero_filtro:
+        filtros_ativos.append(f"Número: {numero_filtro}")
+    
+    if filtros_ativos:
+        st.info("📋 **Filtros ativos:** " + ", ".join(filtros_ativos))
+    
+    # Campo de pergunta
+    pergunta = st.text_area("Digite sua pergunta sobre documentos da ANTT:", height=100)
+    
+    # Exemplos de perguntas
+    with st.expander("📝 Exemplos de perguntas"):
+        st.write("""
+        - Quais são os parâmetros de desempenho de pavimento definidos pela ANTT?
+        - Explique os principais pontos da Instrução Normativa nº 34 de 2024.
+        - Quais são os valores limites de deflexão para pavimentos segundo a normativa mais recente?
+        - Como são medidos os índices de irregularidade longitudinal nos contratos de concessão?
+        - Quais são os prazos para conformidade com os parâmetros técnicos estabelecidos?
+        """)
+    
+    col1, col2 = st.columns([1, 5])
+    with col1:
+        button = st.button("🔍 Pesquisar", type="primary", use_container_width=True)
+    with col2:
+        st.write("")  # Espaçamento
+    
+    if button and pergunta:
+        with st.spinner("⌛ Analisando documentos..."):
+            # Pesquisar documentos com os filtros aplicados
+            start_time = time.time()
+            documentos = pesquisar_documentos(
+                pergunta, 
+                vectorstore,
+                k=num_documentos,
+                tipo_documento=tipo_filtro, 
+                ano=ano_filtro, 
+                numero=numero_filtro
+            )
+            search_time = time.time() - start_time
+            
+            # Gerar resposta
+            if documentos:
+                with st.spinner("🧠 Gerando resposta..."):
+                    start_time = time.time()
+                    resposta = gerar_resposta(pergunta, documentos, llm)
+                    response_time = time.time() - start_time
+            else:
+                resposta = "Não encontrei documentos relevantes para sua consulta. Por favor, tente reformular sua pergunta ou ajustar os filtros."
+                response_time = 0
+            
+            # Mostrar tempos de processamento em formato discreto
+            st.caption(f"⏱️ Pesquisa: {search_time:.2f}s | Resposta: {response_time:.2f}s")
+            
+            # Exibir resposta em um container destacado
+            resposta_container = st.container(border=True)
+            with resposta_container:
+                st.markdown("### Resposta")
+                st.markdown(resposta)
+            
+            # Sempre exibir os trechos mais relevantes
+            # Independente da opção "mostrar_trechos" para exibir detalhes completos
+            st.markdown("---")
+            st.markdown("### Trechos dos Documentos Citados")
+            
+            # Extrair citações de documentos da resposta
+            documentos_citados = extrair_citacoes_da_resposta(resposta)
+            
+            # Exibir trechos relevantes para os documentos citados
+            documentos_encontrados = False
+            
+            if documentos_citados:
+                # Criar mapeamento de documentos para facilitar a busca
+                docs_por_id = {}
+                for doc in documentos:
+                    meta = doc.metadata
+                    tipo = meta.get('nome_tipo', 'Documento')
+                    numero = meta.get('numero', 'N/A')
+                    ano = meta.get('ano', 'N/A')
+                    doc_id = f"{tipo} {numero}/{ano}"
+                    
+                    # Normalizar o ID para comparação (tudo minúsculo, sem espaços extras)
+                    doc_id_norm = re.sub(r'\s+', ' ', doc_id.lower()).strip()
+                    
+                    # Criar versões alternativas do ID para melhorar correspondências
+                    alternativas = [
+                        doc_id_norm,
+                        f"{tipo.lower()} {numero}",
+                        f"{tipo.lower()} {numero.lstrip('0')}/{ano}",
+                        f"{tipo.lower()} {numero.lstrip('0')} de {ano}"
+                    ]
+                    
+                    for alt_id in alternativas:
+                        if alt_id not in docs_por_id:
+                            docs_por_id[alt_id] = []
+                        docs_por_id[alt_id].append((doc, meta, doc_id))
                 
-#                 # Interface de consulta
-#                 chat_container = st.container()
-#                 with chat_container:
-#                     st.markdown("### 🔍 Consulta de Descumprimentos")
-                    
-#                     # Campo de pergunta livre
-#                     question = st.text_input(
-#                         "Faça uma pergunta específica sobre os descumprimentos encontrados:",
-#                         placeholder="Ex: Quais os principais descumprimentos identificados na página 5?"
-#                     )
-                    
-#                     # Processamento da pergunta do usuário
-#                     if question:
-#                         chat_metrics = create_processing_metrics()
-#                         with st.spinner('Analisando sua pergunta...'):
-#                             try:
-#                                 response, relevant_tables = query_performance_parameters(
-#                                     question=question,
-#                                     tables_analysis=tables_data,
-#                                     metrics=chat_metrics,
-#                                     llm=ChatOpenAI(
-#                                         model_name="gpt-4",
-#                                         temperature=0,
-#                                         api_key=OPENAI_API_KEY
-#                                     )
-#                                 )
-                                
-#                                 # Exibe a resposta
-#                                 st.markdown("### 📊 Análise")
-#                                 st.write(response)
-                                
-#                                 # Exibe tabelas relevantes
-#                                 if relevant_tables:
-#                                     st.markdown("### ⚠️ Tabelas Relevantes")
-#                                     for table_data in relevant_tables:
-#                                         with st.expander(f"📑 Página {table_data['page_number']} - Tabela {table_data['table_number']}"):
-#                                             if table_data.get('table_image'):
-#                                                 st.image(table_data['table_image'],
-#                                                        caption=f"Visualização da Tabela")
-#                                             st.write(table_data['descumprimentos'])
-                                            
-#                             except Exception as e:
-#                                 update_metrics(chat_metrics,
-#                                              status="Erro na análise",
-#                                              progress=0,
-#                                              error=f"Erro ao processar consulta: {str(e)}")
-                    
-#                     # Sugestões de perguntas
-#                     st.markdown("### 💡 Sugestões de Perguntas")
-#                     col1, col2 = st.columns(2)
-                    
-#                     example_questions = [
-#                         "Quais são os principais descumprimentos encontrados?",
-#                         "Quais parâmetros estão fora dos limites estabelecidos?",
-#                         "Em quais páginas há descumprimentos críticos?",
-#                         "Qual o impacto dos descumprimentos identificados?",
-#                         "Quais são os valores limite para cada parâmetro?"
-#                     ]
-                    
-#                     # Distribui os botões em duas colunas
-#                     for i, q in enumerate(example_questions):
-#                         with col1 if i % 2 == 0 else col2:
-#                             if st.button(q, key=f"btn_{i}"):
-#                                 chat_metrics = create_processing_metrics()
-#                                 with st.spinner('Analisando...'):
-#                                     try:
-#                                         response, relevant_tables = query_performance_parameters(
-#                                             question=q,
-#                                             tables_analysis=tables_data,
-#                                             metrics=chat_metrics,
-#                                             llm=ChatOpenAI(
-#                                                 model_name="gpt-4",
-#                                                 temperature=0,
-#                                                 api_key=OPENAI_API_KEY
-#                                             )
-#                                         )
-                                        
-#                                         st.markdown("### 📊 Análise")
-#                                         st.write(response)
-                                        
-#                                         if relevant_tables:
-#                                             st.markdown("### ⚠️ Tabelas Relevantes")
-#                                             for table_data in relevant_tables:
-#                                                 with st.expander(f"📑 Página {table_data['page_number']} - Tabela {table_data['table_number']}"):
-#                                                     if table_data.get('table_image'):
-#                                                         st.image(table_data['table_image'],
-#                                                                caption=f"Visualização da Tabela")
-#                                                     st.write(table_data['descumprimentos'])
-                                                    
-#                                     except Exception as e:
-#                                         update_metrics(chat_metrics,
-#                                                      status="Erro na análise",
-#                                                      progress=0,
-#                                                      error=f"Erro ao processar consulta: {str(e)}")
-#             else:
-#                 st.warning("Nenhum descumprimento foi identificado no documento analisado.")
+                # Exibir documentos citados
+                st.subheader("Trechos dos documentos citados na resposta:", divider="blue")
                 
-#         except Exception as e:
-#             st.error(f"Erro ao processar o documento: {str(e)}")
-#             logger.error(f"Erro no processamento: {str(e)}")
+                documentos_exibidos = set()  # Para evitar duplicações
+                
+                for doc_citado in documentos_citados:
+                    # Normalizar a citação
+                    doc_citado_norm = re.sub(r'\s+', ' ', doc_citado.lower()).strip()
+                    doc_encontrado = False
+                    
+                    # Tentar diferentes variações da citação para encontrar correspondência
+                    for doc_key, doc_list in docs_por_id.items():
+                        # Verificar se a citação corresponde a alguma parte da chave
+                        if (doc_citado_norm in doc_key or 
+                            doc_key in doc_citado_norm or
+                            any(term in doc_citado_norm for term in doc_key.split())):
+                            
+                            for doc, meta, doc_id in doc_list:
+                                doc_display_id = f"{doc_id}_{meta.get('chunk', '')}"
+                                
+                                # Verificar se já exibimos este documento
+                                if doc_display_id in documentos_exibidos:
+                                    continue
+                                
+                                # Marcar como encontrado
+                                doc_encontrado = True
+                                documentos_encontrados = True
+                                documentos_exibidos.add(doc_display_id)
+                                
+                                # Adicionar um marcador colorido para destacar
+                                # Cor baseada no tipo de documento
+                                cor_borda = "green"
+                                if "Instrução" in doc_id:
+                                    cor_borda = "blue"
+                                elif "Resolução" in doc_id:
+                                    cor_borda = "orange"
+                                elif "Voto" in doc_id:
+                                    cor_borda = "violet"
+                                
+                                with st.container(border=True):
+                                    # Adicionar uma indicação visual da cor
+                                    if "Instrução" in doc_id:
+                                        st.markdown("🔵 **Instrução Normativa**")
+                                    elif "Resolução" in doc_id:
+                                        st.markdown("🟠 **Resolução**")
+                                    elif "Voto" in doc_id:
+                                        st.markdown("🟣 **Voto**")
+                                    else:
+                                        st.markdown("🟢 **Documento**")
+                                        
+                                    st.markdown(f"#### {doc_id}")
+                                    st.caption(f"Parte {meta.get('chunk', 'N/A')}/{meta.get('total_chunks', 'N/A')} • Fonte: `{meta.get('caminho', 'Não especificado')}`")
+                                    st.text_area(
+                                        "",
+                                        doc.page_content,
+                                        height=150,
+                                        key=f"citacao_{doc_display_id}",
+                                        disabled=True
+                                    )
+                    
+                    # Se não encontrou o documento, registrar isso
+                    if not doc_encontrado:
+                        print(f"Documento citado não encontrado: {doc_citado}")
+            
+            # Se não encontramos citações explícitas ou os documentos citados
+            if not documentos_citados or not documentos_encontrados:
+                st.info("⚠️ Não foram encontradas citações de documentos específicos na resposta, ou os documentos citados não estão entre os recuperados. Exibindo os documentos mais relevantes:")
+                
+                # Mostrar os 3 documentos mais relevantes
+                with st.container(border=True):
+                    for i, doc in enumerate(documentos[:3]):
+                        meta = doc.metadata
+                        tipo = meta.get('nome_tipo', 'Documento')
+                        numero = meta.get('numero', 'N/A')
+                        ano = meta.get('ano', 'N/A')
+                        doc_id = f"{tipo} {numero}/{ano}"
+                        
+                        # Adicionar indicação visual do tipo de documento
+                        if "Instrução" in tipo:
+                            st.markdown("🔵 **Instrução Normativa**")
+                        elif "Resolução" in tipo:
+                            st.markdown("🟠 **Resolução**")
+                        elif "Voto" in tipo:
+                            st.markdown("🟣 **Voto**")
+                        else:
+                            st.markdown("🟢 **Documento**")
+                        
+                        st.markdown(f"**{doc_id}** - Parte {meta.get('chunk', 'N/A')}/{meta.get('total_chunks', 'N/A')}")
+                        st.caption(f"Fonte: `{meta.get('caminho', 'Não especificado')}`")
+                        st.text_area(
+                            "",
+                            doc.page_content,
+                            height=130,
+                            key=f"relevante_{i}",
+                            disabled=True
+                        )
+                        
+                        if i < 2:  # Não adicionar separador após o último
+                            st.divider()
+            
+            # Se a opção de mostrar trechos estiver ativada, exibir todos os documentos
+            if mostrar_trechos and documentos:
+                st.markdown("---")
+                st.markdown("### Todas as Fontes Consultadas")
+                
+                # Agrupar documentos por tipo/número/ano
+                documentos_agrupados = {}
+                for doc in documentos:
+                    meta = doc.metadata
+                    tipo = meta.get('nome_tipo', 'Documento')
+                    numero = meta.get('numero', 'N/A')
+                    ano = meta.get('ano', 'N/A')
+                    
+                    doc_id = f"{tipo} {numero}/{ano}"
+                    if doc_id not in documentos_agrupados:
+                        documentos_agrupados[doc_id] = {
+                            'tipo': tipo,
+                            'numero': numero,
+                            'ano': ano,
+                            'caminho': meta.get('caminho', 'Não especificado'),
+                            'trechos': []
+                        }
+                    
+                    documentos_agrupados[doc_id]['trechos'].append({
+                        'chunk': meta.get('chunk', 'N/A'),
+                        'total_chunks': meta.get('total_chunks', 'N/A'),
+                        'conteudo': doc.page_content
+                    })
+                
+                # Exibir documentos agrupados
+                for i, (doc_id, info) in enumerate(documentos_agrupados.items()):
+                    # Criar um ícone baseado no tipo de documento
+                    icone = "📄"
+                    if "Resolução" in info['tipo']:
+                        icone = "📜"
+                    elif "Instrução" in info['tipo']:
+                        icone = "📝"
+                    elif "Deliberação" in info['tipo']:
+                        icone = "📋"
+                    elif "Voto" in info['tipo']:
+                        icone = "✅"
+                    
+                    # Destacar documentos mais relevantes
+                    destaque = " 🌟" if i < 3 else ""
+                    
+                    with st.expander(f"{icone} {doc_id}{destaque}"):
+                        
+                        # Mostrar metadados do documento
+                        if modo_detalhado:
+                            col1, col2, col3 = st.columns(3)
+                            with col1:
+                                st.markdown(f"**Tipo:** {info['tipo']}")
+                            with col2:
+                                st.markdown(f"**Número:** {info['numero']}")
+                            with col3:
+                                st.markdown(f"**Ano:** {info['ano']}")
+                            
+                            st.markdown(f"**Caminho:** `{info['caminho']}`")
+                        
+                        # Exibir trechos em tabs
+                        if len(info['trechos']) > 0:
+                            trechos_tabs = st.tabs([f"Trecho {t['chunk']}/{t['total_chunks']}" for t in info['trechos']])
+                            for i, tab in enumerate(trechos_tabs):
+                                with tab:
+                                    trecho = info['trechos'][i]
+                                    st.text_area(
+                                        "Conteúdo do trecho" if modo_detalhado else "", 
+                                        trecho['conteudo'],
+                                        height=150,
+                                        key=f"trecho_{doc_id}_{i}"  # Chave única para cada text_area
+                                    )
+    
+    # Adicionar rodapé com informações
+    st.markdown("---")
+    st.caption(
+        "Sistema RAG (Retrieval Augmented Generation) desenvolvido para consulta aos documentos normativos da ANTT. "
+        "Este sistema utiliza IA para extrair informações relevantes dos documentos oficiais."
+    )
 
-# if __name__ == "__main__":
-#     try:
-#         main()
-#     except Exception as e:
-#         st.error(f"Erro na inicialização: {str(e)}")
+def extrair_citacoes_da_resposta(resposta):
+    """Extrai as citações de documentos da resposta gerada."""
+    # Lista de padrões para identificar citações
+    padroes = [
+        # Padrões de citação formal
+        r"Documento:\s*([A-Za-zçÇáàâãéèêíìîóòôõúùûÁÀÂÃÉÈÊÍÌÎÓÒÔÕÚÙÛ]+\s+\d+\/\d{4})",  # "Documento: TIPO NUMERO/ANO"
+        r"Documento:\s*([A-Za-zçÇáàâãéèêíìîóòôõúùûÁÀÂÃÉÈÊÍÌÎÓÒÔÕÚÙÛ]+\s+\d+\s+de\s+\d{4})",  # "Documento: TIPO NUMERO de ANO"
+        
+        # Padrões da seção de trechos
+        r"TRECHOS DOS DOCUMENTOS CITADOS:[\s\S]*?(?:\*\*)?Documento:\s*([^\n\"]*\d{4})(?:\*\*)?",  # Após "TRECHOS DOS DOCUMENTOS CITADOS:"
+        r"TRECHOS[\s\S]+?(?:\*\*)?([A-Za-zçÇáàâãéèêíìîóòôõúùûÁÀÂÃÉÈÊÍÌÎÓÒÔÕÚÙÛ]+\s+\d+\/\d{4})(?:\*\*)?",  # Após palavra "TRECHOS"
+        
+        # Padrões específicos para tipos de documentos
+        r"(?:^|\s)(?:a\s+)?([Ii]nstrução\s+[Nn]ormativa\s+(?:n[°º\.]?\s*)?\d+\/?\d*\s*(?:de\s*)?\d{4})",  # Instrução Normativa
+        r"(?:^|\s)(?:a\s+)?([Rr]esolução\s+(?:n[°º\.]?\s*)?\d+\/?\d*\s*(?:de\s*)?\d{4})",  # Resolução
+        r"(?:^|\s)(?:o\s+)?([Vv]oto\s+(?:n[°º\.]?\s*)?\d+\/?\d*\s*(?:de\s*)?\d{4})",  # Voto
+        r"(?:^|\s)(?:a\s+)?([Dd]eliberação\s+(?:n[°º\.]?\s*)?\d+\/?\d*\s*(?:de\s*)?\d{4})",  # Deliberação
+        r"(?:^|\s)(?:a\s+)?([Pp]ortaria\s+(?:n[°º\.]?\s*)?\d+\/?\d*\s*(?:de\s*)?\d{4})",  # Portaria
 
-
-
-
+        # Padrões com números zerados
+        r"([A-Za-zçÇáàâãéèêíìîóòôõúùûÁÀÂÃÉÈÊÍÌÎÓÒÔÕÚÙÛ]+\s+0+(\d+)\/\d{4})",  # Tipo 00000NNN/ANO
+        
+        # Padrões da seção de fontes
+        r"FONTES CONSULTADAS[\s\S]*?(?:\*\*)?([^\n\"]*\d{4})(?:\*\*)?",  # Após "FONTES CONSULTADAS:"
+    ]
+    
+    # Verificar se há uma seção específica de trechos
+    secoes_trechos = [
+        r"TRECHOS DOS DOCUMENTOS CITADOS:([\s\S]+?)(?:$|(?:###|\*\*\*))",
+        r"FONTES CONSULTADAS:([\s\S]+?)(?:$|(?:###|\*\*\*))"
+    ]
+    
+    citacoes = []
+    
+    # Primeiro, tenta extrair da seção específica de trechos
+    for padrao_secao in secoes_trechos:
+        match_secao = re.search(padrao_secao, resposta, re.IGNORECASE)
+        if match_secao:
+            secao_trechos = match_secao.group(1)
+            # Dentro da seção, busca pelas citações
+            for padrao in padroes:
+                matches = re.findall(padrao, secao_trechos, re.IGNORECASE | re.MULTILINE)
+                for match in matches:
+                    # Pode ser uma tupla ou string, dependendo do padrão
+                    if isinstance(match, tuple):
+                        match = match[0]  # Pegar o primeiro grupo capturado
+                    citacao = match.strip()
+                    if citacao and citacao not in citacoes:
+                        citacoes.append(citacao)
+    
+    # Se não encontrou na seção específica, ou para complementar, busca no texto todo
+    if not citacoes:
+        for padrao in padroes:
+            matches = re.findall(padrao, resposta, re.IGNORECASE | re.MULTILINE)
+            for match in matches:
+                # Pode ser uma tupla ou string, dependendo do padrão
+                if isinstance(match, tuple):
+                    match = match[0]  # Pegar o primeiro grupo capturado
+                citacao = match.strip()
+                if citacao and citacao not in citacoes:
+                    citacoes.append(citacao)
+    
+    # Limpar e normalizar citações
+    citacoes_normalizadas = []
+    for citacao in citacoes:
+        # Remover marcações markdown
+        citacao = re.sub(r'[*_`]', '', citacao)
+        # Normalizar espaços
+        citacao = re.sub(r'\s+', ' ', citacao).strip()
+        if citacao and citacao not in citacoes_normalizadas:
+            citacoes_normalizadas.append(citacao)
+    
+    print(f"Citações encontradas: {citacoes_normalizadas}")
+    return citacoes_normalizadas
 
 def main():
-    """
-    Função principal do aplicativo Streamlit.
-    """
-    logger = setup_logging()
-    st.set_page_config(page_title="Chatbot ANTT", page_icon="🤖", layout="wide")
+    # Obter a chave API usando a função segura em config.py
+    api_key = get_openai_api_key()
     
-    st.header("Análise de Descumprimentos de Parâmetros de Desempenho ANTT")
-    st.write("Este sistema é especializado em identificar e analisar descumprimentos de parâmetros de desempenho em documentos contratuais.")
-    
-    # Métricas do sistema na barra lateral
-    system_metrics = st.sidebar.container()
-    with system_metrics:
-        st.subheader("Status do Sistema")
-        st.write("🟢 Sistema Online")
-        st.write(f"⏰ Atualizado em: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
-    
-    uploaded_file = st.file_uploader("Carregue um documento PDF para análise 📄", type=["pdf"])
-    
-    if uploaded_file:
-        try:
-            pdf_metrics = create_processing_metrics()
-            update_metrics(pdf_metrics, 
-                         status="Iniciando análise do documento",
-                         progress=0.0,
-                         info="Preparando para identificar descumprimentos")
+    # Verifica se a chave API está disponível
+    if not api_key or api_key.startswith("sk-") == False:
+        # Tenta obter da variável de ambiente
+        api_key = os.getenv("OPENAI_API_KEY", "")
+        
+        # Tenta obter da configuração de secrets, mas trata a exceção se não existir
+        if not api_key:
+            try:
+                api_key = st.secrets.get("OPENAI_API_KEY", "")
+            except:
+                # Ignora o erro se não existir arquivo de secrets
+                pass
+        
+        # Se ainda não tiver a chave, solicita ao usuário
+        if not api_key:
+            api_key = st.text_input("Insira sua chave da API OpenAI:", type="password")
             
-            vectorstore, tables_data = process_pdf(uploaded_file)
-            
-            if tables_data:
-                num_descumprimentos = len([t for t in tables_data if "Nenhum descumprimento identificado" not in t.get('descumprimentos', '')])
-                update_metrics(pdf_metrics,
-                             status="Análise concluída",
-                             progress=1.0,
-                             info=f"Identificados {num_descumprimentos} casos de descumprimento em {len(tables_data)} tabelas analisadas")
-                
-                # Interface de consulta
-                chat_container = st.container()
-                with chat_container:
-                    st.markdown("### 🔍 Consulta de Descumprimentos")
-                    question = st.text_input(
-                        "Faça uma pergunta específica sobre os descumprimentos encontrados:",
-                        placeholder="Ex: Quais os principais descumprimentos identificados na página 5?"
-                    )
-                    
-                    if question:
-                        chat_metrics = create_processing_metrics()
-                        update_metrics(chat_metrics, 
-                                     status="Processando consulta",
-                                     progress=0.0)
-                        
-                        try:
-                            llm = ChatOpenAI(
-                                model_name="gpt-4",
-                                temperature=0,
-                                api_key=OPENAI_API_KEY
-                            )
-                            
-                            retriever = vectorstore.as_retriever()
-                            
-                            update_metrics(chat_metrics, 
-                                         status="Analisando descumprimentos",
-                                         progress=0.3,
-                                         info="Buscando casos relevantes")
-                            
-                            prompt = ChatPromptTemplate.from_template("""
-                            Você é um especialista em análise de descumprimentos de parâmetros de desempenho da ANTT.
-                            Use o contexto fornecido para responder à pergunta, focando exclusivamente nos casos de descumprimento.
-
-                            Contexto:
-                            {context}
-
-                            Pergunta:
-                            {question}
-
-                            Forneça uma resposta estruturada com:
-                            1. Identificação dos parâmetros descumpridos
-                            2. Localização exata (página e tabela)
-                            3. Gravidade do descumprimento
-                            4. Impacto potencial
-                            5. Recomendações, se aplicável
-
-                            Se não houver descumprimentos relevantes para a pergunta, indique claramente.
-                            """)
-                            
-                            update_metrics(chat_metrics, 
-                                         status="Gerando análise",
-                                         progress=0.6,
-                                         info="Elaborando resposta detalhada")
-                            
-                            rag_chain = (
-                                {"context": retriever | format_docs, "question": RunnablePassthrough()}
-                                | prompt
-                                | llm
-                                | StrOutputParser()
-                            )
-                            
-                            response = rag_chain.invoke(question)
-                            
-                            update_metrics(chat_metrics, 
-                                         status="Preparando visualização",
-                                         progress=0.8,
-                                         info="Organizando resultados")
-                            
-                            # Exibe a resposta
-                            st.markdown("### 📊 Análise de Descumprimentos")
-                            st.write(response)
-                            
-                            # Identifica e exibe tabelas relevantes com descumprimentos
-                            relevant_tables = []
-                            for table_data in tables_data:
-                                if (str(table_data['page_number']) in response or 
-                                    str(table_data['table_number']) in response) and \
-                                    "Nenhum descumprimento identificado" not in table_data.get('descumprimentos', ''):
-                                    relevant_tables.append(table_data)
-                            
-                            if relevant_tables:
-                                st.markdown("### ⚠️ Tabelas com Descumprimentos Identificados")
-                                for table_data in relevant_tables:
-                                    with st.expander(f"📑 Página {table_data['page_number']} - Tabela {table_data['table_number']}"):
-                                        if table_data.get('table_image'):
-                                            st.image(table_data['table_image'],
-                                                   caption=f"Visualização da Tabela")
-                                        
-                                        # st.markdown("**🚫 Descumprimentos Identificados:**")
-                                        # st.write(table_data['descumprimentos'])
-                                        
-                                        # st.markdown("**📋 Dados da Tabela:**")
-                                        # st.write(table_data['table_content'])
-                            
-                            update_metrics(chat_metrics, 
-                                         status="Análise concluída",
-                                         progress=1.0,
-                                         info=f"Encontrados {len(relevant_tables)} casos relevantes")
-                            
-                        except Exception as e:
-                            update_metrics(chat_metrics, 
-                                         status="Erro na análise",
-                                         progress=0.0,
-                                         error=f"Erro ao processar consulta: {str(e)}",
-                                         info="Tente reformular sua pergunta")
-                            logger.error(f"Erro na análise: {str(e)}")
-            else:
-                st.warning("Nenhum descumprimento foi identificado no documento analisado.")
-                
-        except Exception as e:
-            st.error(f"Erro ao processar o documento: {str(e)}")
-            logger.error(f"Erro no processamento: {str(e)}")
+    if not api_key or api_key.startswith("sk-") == False:
+        st.error("Chave da API OpenAI não encontrada ou inválida. Por favor, insira uma chave válida.")
+        return
+    
+    # Carregar vectorstore
+    vectorstore = carregar_vectorstore(api_key)
+    
+    # Configurar LLM
+    llm = ChatOpenAI(
+        openai_api_key=api_key,
+        model_name=DEFAULT_LLM_MODEL, 
+        temperature=0
+    )
+    
+    # Criar chain QA
+    qa_chain = criar_qa_chain(vectorstore, llm)
+    
+    # Executar interface - passar vectorstore e llm como parâmetros
+    interface_usuario(vectorstore, llm)
 
 if __name__ == "__main__":
     main()
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-# import os
-# import tempfile
-# import streamlit as st
-# from img2table.document import PDF
-# from img2table.ocr import TesseractOCR
-# from langchain_openai import OpenAIEmbeddings, ChatOpenAI
-# from langchain.prompts import ChatPromptTemplate
-# from langchain_core.output_parsers import StrOutputParser
-# from langchain_community.vectorstores import FAISS
-# import numpy as np
-# from PIL import Image
-
-# from langchain.text_splitter import RecursiveCharacterTextSplitter
-
-# import logging
-# import time
-
-# from multiprocessing import Pool, cpu_count
-# import concurrent.futures
-
-
-# import concurrent.futures
-# from functools import partial
-# import multiprocessing
-
-# # Configuração do logging
-# logging.basicConfig(level=logging.INFO,
-#                    format='%(asctime)s - %(levelname)s - %(message)s',
-#                    datefmt='%Y-%m-%d %H:%M:%S')
-# logger = logging.getLogger(__name__)
-
-# OPENAI_API_KEY = "sk-proj-Ceq96zToY4PU7ezy732IT3BlbkFJL1cCp66BEjeN21b88XIf"
-# #'sk-proj-SJzLGfezVCxJLft228F2T3BlbkFJ2lSCkYReBn53ZYbMfmKh'   # 7d
-# DB_FAISS_PATH = "vectorstore/db_faiss"
-
-
-
-# from multiprocessing import Pool, cpu_count
-# import concurrent.futures
-# import time
-
-# def extract_and_analyze_tables(pdf_path, update_metrics_callback=None):
-#     """
-#     Extrai e analisa tabelas do PDF usando processamento paralelo otimizado.
-#     """
-#     logger.info(f"Iniciando processamento do PDF: {pdf_path}")
-    
-#     try:
-#         # Configuração básica do OCR
-#         ocr = TesseractOCR(
-#             n_threads=min(4, cpu_count()),  # Limita a 4 threads
-#             lang="por"
-#         )
-#         logger.info("OCR configurado com sucesso")
-        
-#         # Carrega o PDF
-#         pdf = PDF(
-#             src=pdf_path,
-#             detect_rotation=False,
-#             pdf_text_extraction=True
-#         )
-#         logger.info("PDF carregado com sucesso")
-        
-#         # Extrai tabelas com configurações mínimas
-#         extracted_tables = pdf.extract_tables(
-#             ocr=ocr,
-#             implicit_rows=False,
-#             borderless_tables=False
-#         )
-        
-#         if not extracted_tables:
-#             logger.warning("Nenhuma tabela encontrada")
-#             return []
-            
-#         # Prepara as tabelas para processamento
-#         tables_to_process = []
-#         total_tables = 0
-        
-#         for page_num, tables in extracted_tables.items():
-#             if not tables:
-#                 continue
-#             total_tables += len(tables)
-#             for idx, table in enumerate(tables):
-#                 if table and hasattr(table, 'html_repr'):
-#                     tables_to_process.append({
-#                         'page': page_num,
-#                         'idx': idx,
-#                         'table': table
-#                     })
-        
-#         logger.info(f"Total de tabelas encontradas: {total_tables}")
-        
-#         # Processa as tabelas em paralelo usando ThreadPoolExecutor
-#         tables_with_analysis = []
-#         processed = 0
-        
-#         with concurrent.futures.ThreadPoolExecutor(max_workers=4) as executor:
-#             futures = []
-            
-#             for table_info in tables_to_process:
-#                 futures.append(
-#                     executor.submit(
-#                         process_single_table,
-#                         table_info['table'],
-#                         table_info['page'],
-#                         table_info['idx'],
-#                         pdf
-#                     )
-#                 )
-            
-#             for future in concurrent.futures.as_completed(futures):
-#                 try:
-#                     result = future.result()
-#                     if result:
-#                         tables_with_analysis.append(result)
-#                         processed += 1
-                        
-#                         if update_metrics_callback:
-#                             current_page = result['page_number']
-#                             update_metrics_callback(
-#                                 current_page,
-#                                 processed,
-#                                 total_tables,
-#                                 f"Processada tabela {processed}/{total_tables}"
-#                             )
-#                 except Exception as e:
-#                     logger.error(f"Erro ao processar tabela: {str(e)}")
-        
-#         logger.info(f"Processamento concluído. Tabelas processadas: {len(tables_with_analysis)}")
-#         return tables_with_analysis
-        
-#     except Exception as e:
-#         logger.error(f"Erro ao extrair tabelas: {str(e)}")
-#         raise
-
-
-
-
-
-
-
-# def process_single_table(table, page_num, idx, pdf_doc):
-#     """
-#     Processa uma única tabela com seu contexto e imagem.
-#     """
-#     try:
-#         table_text = table.html_repr()
-#         if not table_text or not table_text.strip():
-#             return None
-        
-#         # Extrai o contexto e imagem da tabela
-#         context = get_table_context(pdf_doc, page_num, table)
-#         table_image = get_cropped_table(table, page_num, pdf_doc)
-        
-#         # Análise com texto, contexto e imagem
-#         analysis = process_table_content(
-#             table_text=table_text,
-#             context=context,
-#             table_image=table_image
-#         )
-        
-#         return {
-#             'page_number': page_num + 1,
-#             'table_number': idx + 1,
-#             'table_content': table_text,
-#             'table_image': table_image,
-#             'context': context,
-#             'performance_analysis': analysis
-#         }
-#     except Exception as e:
-#         logger.error(f"Erro ao processar tabela {idx + 1} da página {page_num + 1}: {str(e)}")
-#         return None
-
-
-# def get_cropped_table(table, page, pdf):
-#     """
-#     Extrai uma imagem recortada da tabela do PDF.
-#     """
-#     try:
-#         bbox = table.bbox
-#         if bbox and hasattr(pdf, 'images') and page in pdf.images:
-#             table_array = np.array(pdf.images[page][bbox.y1:bbox.y2, bbox.x1:bbox.x2])
-#             return Image.fromarray(table_array.astype('uint8'))
-#     except Exception as e:
-#         logger.error(f"Erro ao extrair imagem da tabela: {str(e)}")
-#     return None
-
-
-# # def process_tables_parallel(extracted_tables, pdf_doc, update_metrics_callback=None):
-# #     """
-# #     Processa as tabelas extraídas em paralelo.
-# #     """
-# #     logger.info("Iniciando processamento das tabelas...")
-# #     start_time = time.time()
-# #     tables_with_analysis = []
-# #     processed_tables = 0
-    
-# #     # Verifica se extracted_tables é um dicionário
-# #     if isinstance(extracted_tables, dict):
-# #         total_tables = sum(len(tables) for tables in extracted_tables.values())
-# #     else:
-# #         total_tables = len(extracted_tables)
-# #         # Converte para formato esperado
-# #         extracted_tables = {0: extracted_tables}
-    
-# #     if total_tables == 0:
-# #         logger.warning("Nenhuma tabela para processar")
-# #         return []
-    
-# #     for page, tables in extracted_tables.items():
-# #         if not tables:
-# #             continue
-            
-# #         for idx, table in enumerate(tables):
-# #             if table is None:
-# #                 continue
-                
-# #             try:
-# #                 # Verifica se a tabela tem conteúdo válido
-# #                 if not hasattr(table, 'html_repr'):
-# #                     continue
-                    
-# #                 table_text = table.html_repr()
-# #                 if not table_text or not table_text.strip():
-# #                     continue
-                
-# #                 # Processa a tabela
-# #                 logger.info(f"Processando tabela {idx + 1} da página {page + 1}")
-                
-# #                 try:
-# #                     table_image = get_cropped_table(table, page, pdf_doc)
-# #                     analysis = process_table_content(table_text)
-                    
-# #                     tables_with_analysis.append({
-# #                         'page_number': page + 1,
-# #                         'table_number': idx + 1,
-# #                         'table_content': table_text,
-# #                         'table_image': table_image,
-# #                         'performance_analysis': analysis
-# #                     })
-                    
-# #                     processed_tables += 1
-# #                     if update_metrics_callback:
-# #                         update_metrics_callback(
-# #                             page + 1,
-# #                             processed_tables,
-# #                             total_tables,
-# #                             f"Processada tabela {idx + 1} da página {page + 1}"
-# #                         )
-                        
-# #                 except Exception as e:
-# #                     logger.error(f"Erro ao processar conteúdo da tabela {idx + 1} da página {page + 1}: {str(e)}")
-                    
-# #             except Exception as e:
-# #                 logger.error(f"Erro ao processar tabela {idx + 1} da página {page + 1}: {str(e)}")
-    
-# #     logger.info(f"Processamento concluído. Tabelas processadas: {len(tables_with_analysis)}")
-# #     return tables_with_analysis
-
-
-
-
-
-# def analyze_performance_parameters(table_content, llm):
-#     """
-#     Analisa os parâmetros de desempenho na tabela com controle de tamanho.
-#     """
-#     # Dividir tabelas muito grandes
-#     text_splitter = RecursiveCharacterTextSplitter(
-#         chunk_size=3000,
-#         chunk_overlap=200,
-#         length_function=len,
-#     )
-    
-#     if len(table_content) > 3000:
-#         chunks = text_splitter.split_text(table_content)
-#         analyses = []
-        
-#         for chunk in chunks:
-#             prompt = ChatPromptTemplate.from_template("""
-#             Você é um especialista em análise de parâmetros de desempenho da ANTT.
-#             Analise o trecho da tabela abaixo com foco em não conformidades.
-            
-#             Trecho da Tabela:
-#             {table_content}
-            
-#             Identifique:
-#             1. Verifique qualquer conteúdo no contexto como "Não atende", "Não cumpre" ou termos similares. 
-#             Em caso, de existencia classifique como estando em Não Conformidade.
-#             1. Parâmetros que NÃO atendem aos requisitos
-#             2. Valores encontrados vs valores esperados
-#             3. Percentual de não conformidade (quando aplicável)
-            
-#             Análise:
-#             """)
-            
-#             chain = prompt | llm | StrOutputParser()
-#             analysis = chain.invoke({"table_content": chunk})
-#             analyses.append(analysis)
-        
-#         # Consolidar análises
-#         final_prompt = ChatPromptTemplate.from_template("""
-#         Consolide as análises parciais abaixo em uma única análise coerente.
-        
-#         Análises Parciais:
-#         {analyses}
-        
-#         Forneça uma análise consolidada que destaque as não conformidades encontradas.
-#         """)
-        
-#         chain = final_prompt | llm | StrOutputParser()
-#         return chain.invoke({"analyses": "\n\n".join(analyses)})
-    
-#     else:
-#         # Para tabelas pequenas, usar a análise original
-#         prompt = ChatPromptTemplate.from_template("""
-#         Você é um especialista em análise de parâmetros de desempenho da ANTT.
-#         Analise a tabela abaixo com foco em não conformidades.
-        
-#         Tabela:
-#         {table_content}
-        
-#         Por favor, forneça:
-#         1. Identificação clara dos parâmetros que NÃO atendem aos requisitos
-#         2. Valores encontrados vs valores esperados
-#         3. Percentual de não conformidade (quando aplicável)
-#         4. Impacto potencial dessas não conformidades
-        
-#         Se todos os parâmetros estiverem conformes, indique explicitamente.
-#         """)
-        
-#         chain = prompt | llm | StrOutputParser()
-#         return chain.invoke({"table_content": table_content})
-
-
-
-
-# @st.cache_data(ttl=3600, show_spinner=False)
-# def get_cropped_table(table, page, pdf):
-#     """
-#     Extrai uma imagem recortada da tabela do PDF com cache.
-#     """
-#     bbox = table.bbox
-#     table_array = np.array(pdf.images[page][bbox.y1:bbox.y2, bbox.x1:bbox.x2])
-#     return Image.fromarray(table_array.astype('uint8'))
-
-
-
-# def process_table_content(table_text, context=None, table_image=None):
-#     """
-#     Processa o conteúdo da tabela com foco específico em não conformidades.
-#     """
-#     try:
-#         # Inicializa o modelo
-#         llm = ChatOpenAI(
-#             model_name="gpt-4",
-#             temperature=0,
-#             api_key=OPENAI_API_KEY,
-#             max_tokens=1000
-#         )
-#         time.sleep(3.5)
-#         # Lista de termos que indicam não conformidade
-#         non_conformity_terms = [
-#             "não atende", "não cumpre", "não conforme", "não conformidade",
-#             "abaixo do esperado", "inferior ao limite", "acima do limite",
-#             "fora do padrão", "inadequado", "insatisfatório", "reprovado",
-#             "em desacordo", "divergente", "não alcançou", "não atingiu"
-#         ]
-        
-#         # Prepara o contexto
-#         content = [
-#             {
-#                 "type": "text",
-#                 "text": f"""
-#                 Analise rigorosamente a tabela e seu contexto para identificar não conformidades.
-                
-#                 Contexto:
-#                 {context if context else ''}
-                
-#                 Texto da Tabela:
-#                 {table_text}
-                
-#                 INSTRUÇÕES ESPECÍFICAS:
-#                 1. BUSCA DE NÃO CONFORMIDADES:
-#                    - Procure especificamente por termos como: {', '.join(non_conformity_terms)}
-#                    - Identifique valores numéricos fora dos limites estabelecidos
-#                    - Compare valores encontrados com valores de referência
-                
-#                 2. ANÁLISE DE PARÂMETROS:
-#                    - Verifique CADA parâmetro individualmente
-#                    - Compare com os requisitos/limites estabelecidos
-#                    - Indique explicitamente se está conforme ou não conforme
-                
-#                 3. CLASSIFICAÇÃO:
-#                    - Se QUALQUER parâmetro estiver não conforme, a tabela deve ser classificada como NÃO CONFORME
-#                    - Apenas classifique como CONFORME se TODOS os parâmetros atenderem aos requisitos
-                
-#                 4. DETALHAMENTO OBRIGATÓRIO:
-#                    - Liste cada parâmetro não conforme encontrado
-#                    - Indique o valor encontrado vs. valor esperado
-#                    - Calcule o percentual de desvio quando aplicável
-                
-#                 IMPORTANTE: Se houver QUALQUER indicação de não conformidade, mesmo que em apenas um parâmetro,
-#                 você DEVE classificar a tabela como NÃO CONFORME e detalhar o motivo.
-#                 """
-#             }
-#         ]
-        
-#         # Adiciona a imagem se disponível
-#         if table_image:
-#             try:
-#                 import base64
-#                 from io import BytesIO
-                
-#                 buffered = BytesIO()
-#                 table_image.save(buffered, format="PNG")
-#                 img_str = base64.b64encode(buffered.getvalue()).decode()
-                
-#                 content.append({
-#                     "type": "image",
-#                     "image_url": {
-#                         "url": f"data:image/png;base64,{img_str}",
-#                         "detail": "high"
-#                     }
-#                 })
-#             except Exception as e:
-#                 logger.warning(f"Erro ao processar imagem: {str(e)}")
-        
-#         messages = [
-#             {
-#                 "role": "system",
-#                 "content": """Você é um especialista rigoroso em análise de conformidade.
-#                 Sua função é identificar QUALQUER não conformidade, por menor que seja.
-#                 NUNCA classifique como conforme se houver QUALQUER indicação de não conformidade."""
-#             },
-#             {
-#                 "role": "user",
-#                 "content": content
-#             }
-#         ]
-        
-#         response = llm.invoke(messages)
-#         return response.content
-        
-#     except Exception as e:
-#         logger.error(f"Erro ao analisar tabela: {str(e)}")
-#         return "Não foi possível analisar esta tabela."
-
-
-
-# # def query_performance_parameters(question, tables_analysis, llm=None):
-# #     """
-# #     Responde a perguntas sobre parâmetros de desempenho baseado nas análises das tabelas.
-    
-# #     Args:
-# #         question (str): Pergunta do usuário
-# #         tables_analysis (list): Lista de dicionários com análises das tabelas
-# #         llm (ChatOpenAI, optional): Instância do modelo LLM
-    
-# #     Returns:
-# #         str: Resposta elaborada pelo modelo
-# #     """
-# #     if llm is None:
-# #         llm = ChatOpenAI(
-# #             model_name="gpt-4",
-# #             temperature=0,
-# #             api_key=OPENAI_API_KEY
-# #         )
-    
-# #     # Prepara o contexto com todas as análises relevantes
-# #     context = "\n\n".join([
-# #         f"""
-# #         Página {table['page_number']}, Tabela {table['table_number']}:
-        
-# #         Análise de Parâmetros:
-# #         {table['performance_analysis']}
-        
-# #         Conteúdo da Tabela:
-# #         {table['table_content']}
-# #         """
-# #         for table in tables_analysis
-# #     ])
-    
-# #     prompt = ChatPromptTemplate.from_template("""
-# #     Você é um especialista em análise de parâmetros de desempenho da ANTT.
-# #     Use as informações fornecidas para responder à pergunta do usuário.
-    
-# #     Contexto das Tabelas e Análises:
-# #     {context}
-    
-# #     Pergunta do Usuário:
-# #     {question}
-    
-# #     Por favor, forneça uma resposta detalhada que:
-# #     1. Identifique as tabelas relevantes para a pergunta
-# #     2. Explique os parâmetros de desempenho relacionados
-# #     3. Forneça valores específicos e análises quando aplicável
-# #     4. Mencione metas ou limites estabelecidos, se houver
-    
-# #     Resposta:
-# #     """)
-    
-# #     chain = prompt | llm | StrOutputParser()
-# #     return chain.invoke({
-# #         "context": context,
-# #         "question": question
-# #     })
-
-# def get_table_context(pdf, page_num, table):
-#     """
-#     Extrai o contexto textual ao redor da tabela com melhor tratamento de erros.
-#     """
-#     try:
-#         page = pdf.pages[page_num]
-#         page_text = page.extract_text()
-        
-#         # Verifica se temos coordenadas válidas da tabela
-#         if not hasattr(table, 'bbox') or not table.bbox:
-#             # Tenta extrair coordenadas da tabela de forma alternativa
-#             table_coords = {
-#                 'top': min(cell['top'] for row in table.cells for cell in row if cell),
-#                 'bottom': max(cell['bottom'] for row in table.cells for cell in row if cell),
-#                 'x0': min(cell['x0'] for row in table.cells for cell in row if cell),
-#                 'x1': max(cell['x1'] for row in table.cells for cell in row if cell)
-#             }
-#         else:
-#             table_coords = {
-#                 'top': table.bbox[1],
-#                 'bottom': table.bbox[3],
-#                 'x0': table.bbox[0],
-#                 'x1': table.bbox[2]
-#             }
-        
-#         # Extrai palavras da página
-#         words = page.extract_words()
-        
-#         # Separa texto antes e depois da tabela
-#         text_before = []
-#         text_after = []
-        
-#         for word in words:
-#             try:
-#                 if word['top'] < table_coords['top']:
-#                     text_before.append(word['text'])
-#                 elif word['top'] > table_coords['bottom']:
-#                     text_after.append(word['text'])
-#             except (KeyError, TypeError):
-#                 continue
-        
-#         # Limita o tamanho do contexto
-#         text_before = ' '.join(text_before[-100:])  # últimas 100 palavras
-#         text_after = ' '.join(text_after[:100])    # primeiras 100 palavras
-        
-#         return {
-#             'before': text_before.strip(),
-#             'after': text_after.strip(),
-#             'page_text': page_text  # Inclui todo o texto da página como fallback
-#         }
-        
-#     except Exception as e:
-#         logger.warning(f"Erro ao extrair contexto específico da tabela: {str(e)}")
-#         # Fallback: retorna todo o texto da página
-#         try:
-#             page_text = pdf.pages[page_num].extract_text()
-#             return {
-#                 'before': '',
-#                 'after': '',
-#                 'page_text': page_text
-#             }
-#         except:
-#             logger.error(f"Erro ao extrair texto da página: {str(e)}")
-#             return {
-#                 'before': '',
-#                 'after': '',
-#                 'page_text': ''
-#             }
-
-
-# def query_performance_parameters(question, tables_analysis, llm=None):
-#     """
-#     Responde a perguntas sobre parâmetros de desempenho com controle de tokens.
-#     """
-#     if llm is None:
-#         llm = ChatOpenAI(
-#             model_name="gpt-4",
-#             temperature=0,
-#             api_key=OPENAI_API_KEY,
-#             max_tokens=2000  # Limita tokens da resposta
-#         )
-#     time.sleep(3.5)
-#     # Filtra tabelas relevantes
-#     non_conforming_tables = []
-#     conforming_tables = []
-    
-#     for table in tables_analysis:
-#         if ("não atende" in table['performance_analysis'].lower() or 
-#             "não conforme" in table['performance_analysis'].lower()):
-#             non_conforming_tables.append(table)
-#         else:
-#             conforming_tables.append(table)
-    
-#     # Prepara contexto em chunks menores
-#     def prepare_table_summary(table):
-#         return f"""
-#         Página {table['page_number']}, Tabela {table['table_number']}:
-#         Análise: {table['performance_analysis'][:500]}  # Limita tamanho da análise
-#         """
-    
-#     context = "RESUMO DAS NÃO CONFORMIDADES:\n"
-#     if non_conforming_tables:
-#         for table in non_conforming_tables[:5]:  # Limita a 5 tabelas não conformes
-#             context += prepare_table_summary(table)
-    
-#     context += "\n\nRESUMO DAS CONFORMIDADES:\n"
-#     if conforming_tables:
-#         context += f"Total de {len(conforming_tables)} tabelas em conformidade.\n"
-#         for table in conforming_tables[:3]:  # Limita a 3 tabelas conformes
-#             context += prepare_table_summary(table)
-
-    
-#     context = context[:4000]  # Limita a 4000 caracteres
-    
-#     prompt = ChatPromptTemplate.from_template("""
-#     Você é um especialista em análise de parâmetros de desempenho da ANTT.
-#     Analise o contexto resumido e responda à pergunta do usuário.
-    
-#     Contexto:
-#     {context}
-    
-#     Pergunta:
-#     {question}
-    
-#     Forneça uma resposta objetiva focando em:
-#     1. Não conformidades encontradas (se houver)
-#     2. Localização das não conformidades
-#     3. Motivos principais das não conformidades
-#     4. Resumo dos parâmetros em conformidade
-    
-#     Limite sua resposta a 2000 caracteres.
-#     """)
-    
-#     try:
-#         chain = prompt | llm | StrOutputParser()
-#         response = chain.invoke({
-#             "context": context,
-#             "question": question
-#         })
-        
-#         return response, non_conforming_tables
-        
-#     except Exception as e:
-#         if "rate_limit_exceeded" in str(e):
-#             logger.warning("Limite de taxa atingido, aguardando...")
-#             time.sleep(5)  # Espera mais tempo em caso de erro de limite
-#             return query_performance_parameters(question, tables_analysis, llm)
-#         else:
-#             logger.error(f"Erro ao processar pergunta: {str(e)}")
-#             return "Erro ao processar pergunta. Por favor, tente novamente em alguns segundos.", []
-
-
-
-
-
-# # def main():
-# #     logger.info("Iniciando aplicação...")
-# #     st.set_page_config(page_title="Análise de Parâmetros de Desempenho ANTT", page_icon="📊", layout="wide")
-    
-# #     # Inicializa o estado da sessão para logs e métricas
-# #     if "log_output" not in st.session_state:
-# #         st.session_state.log_output = []
-# #     if "processing_metrics" not in st.session_state:
-# #         st.session_state.processing_metrics = {
-# #             "total_tables": 0,
-# #             "processed_tables": 0,
-# #             "current_page": 0,
-# #             "processing_time": 0,
-# #             "status": "Aguardando arquivo..."
-# #         }
-    
-# #     st.header("Análise de Parâmetros de Desempenho em Relatórios ANTT")
-# #     st.write("Esta ferramenta extrai e analisa parâmetros de desempenho de relatórios contratuais.")
-    
-# #     # Área de métricas
-# #     col1, col2, col3, col4 = st.columns(4)
-# #     with col1:
-# #         st.metric("Tabelas Encontradas", st.session_state.processing_metrics["total_tables"])
-# #     with col2:
-# #         st.metric("Tabelas Processadas", st.session_state.processing_metrics["processed_tables"])
-# #     with col3:
-# #         st.metric("Página Atual", st.session_state.processing_metrics["current_page"])
-# #     with col4:
-# #         st.metric("Tempo de Processamento", f"{st.session_state.processing_metrics['processing_time']:.2f}s")
-    
-# #     # Status atual
-# #     st.info(f"Status: {st.session_state.processing_metrics['status']}")
-    
-# #     # Área de logs
-# #     with st.expander("Logs de Processamento", expanded=True):
-# #         log_placeholder = st.empty()
-# #         log_text = "\n".join(st.session_state.log_output[-50:])  # Mantém os últimos 50 logs
-# #         log_placeholder.text_area("", log_text, height=200)
-    
-# #     uploaded_file = st.file_uploader("Carregue um relatório PDF 📝", type=["pdf"])
-    
-# #     if uploaded_file:
-# #         logger.info(f"Arquivo carregado: {uploaded_file.name}")
-# #         st.session_state.processing_metrics["status"] = "Processando arquivo..."
-        
-# #         with st.spinner('Processando relatório e analisando parâmetros...'):
-# #             try:
-# #                 start_time = time.time()
-# #                 with tempfile.NamedTemporaryFile(delete=False, suffix='.pdf') as tmp_file:
-# #                     tmp_file.write(uploaded_file.getvalue())
-# #                     tmp_file_path = tmp_file.name
-# #                     log_message = f"Arquivo temporário criado: {tmp_file_path}"
-# #                     logger.info(log_message)
-# #                     st.session_state.log_output.append(log_message)
-                
-# #                 # Barra de progresso
-# #                 progress_bar = st.progress(0)
-                
-# #                 def update_metrics(page, processed, total, status):
-# #                     st.session_state.processing_metrics.update({
-# #                         "current_page": page,
-# #                         "processed_tables": processed,
-# #                         "total_tables": total,
-# #                         "processing_time": time.time() - start_time,
-# #                         "status": status
-# #                     })
-# #                     if total > 0:
-# #                         progress_bar.progress(processed / total)
-                
-# #                 tables_analysis = extract_and_analyze_tables(tmp_file_path, update_metrics)
-                
-# #                 processing_time = time.time() - start_time
-# #                 st.session_state.processing_metrics["processing_time"] = processing_time
-# #                 st.session_state.processing_metrics["status"] = "Processamento concluído"
-                
-# #                 log_message = f"Processamento concluído em {processing_time:.2f} segundos"
-# #                 logger.info(log_message)
-# #                 st.session_state.log_output.append(log_message)
-                
-# #                 st.success(f"Relatório processado com sucesso! Encontradas {len(tables_analysis)} tabelas")
-                
-# #                 st.subheader("📊 Resumo de Não Conformidades")
-# #                 non_conformities = []
-# #                 for table in tables_analysis:
-# #                     if "não atende" in table['performance_analysis'].lower() or \
-# #                     "não conforme" in table['performance_analysis'].lower():
-# #                         non_conformities.append({
-# #                             'page': table['page_number'],
-# #                             'table': table['table_number'],
-# #                             'analysis': table['performance_analysis']
-# #                         })
-                
-# #                 if non_conformities:
-# #                     for nc in non_conformities:
-# #                         with st.expander(f"⚠️ Não Conformidade - Página {nc['page']}, Tabela {nc['table']}"):
-# #                             st.write(nc['analysis'])
-# #                 else:
-# #                     st.success("✅ Todos os parâmetros analisados estão em conformidade!")
-                
-# #                 # Interface de perguntas e respostas
-# #                 st.subheader("💬 Pergunte sobre o documento")
-# #                 question = st.text_input("Digite sua pergunta sobre os parâmetros de desempenho:")
-                
-# #                 if question:
-# #                     with st.spinner('Analisando sua pergunta...'):
-# #                         response, non_conforming_tables = query_performance_parameters(question, tables_analysis)
-# #                         st.write("Resposta:", response)
-                        
-# #                         # Mostra imagens das tabelas com não conformidades
-# #                         if non_conforming_tables:
-# #                             st.subheader("📊 Tabelas com Não Conformidades")
-# #                             for table in non_conforming_tables:
-# #                                 with st.expander(f"Tabela da Página {table['page_number']}"):
-# #                                     if table.get('table_image'):
-# #                                         st.image(table['table_image'], 
-# #                                             caption=f"Tabela {table['table_number']} - Página {table['page_number']}")
-# #                                     st.write("**Análise:**", table['performance_analysis'])
-                
-# #                 # Sugestões de perguntas
-# #                 st.write("Sugestões de perguntas:")
-# #                 example_questions = [
-# #                     "Quais parâmetros não atendem aos requisitos?",
-# #                     "Qual o percentual de conformidade para o parâmetro X?",
-# #                     "Quais são os valores limite para cada parâmetro?",
-# #                     "Onde estão as principais não conformidades?",
-# #                     "Compare os valores encontrados com os valores esperados"
-# #                 ]
-# #                 for q in example_questions:
-# #                     if st.button(q):
-# #                         with st.spinner('Analisando...'):
-# #                             response = query_performance_parameters(q, tables_analysis)
-# #                             st.write("Resposta:", response)
-
-                
-# #             except Exception as e:
-# #                 error_message = f"Erro ao processar o relatório: {str(e)}"
-# #                 logger.error(error_message)
-# #                 st.session_state.log_output.append(error_message)
-# #                 st.session_state.processing_metrics["status"] = "Erro no processamento"
-# #                 st.error(error_message)
-
-
-# def main():
-#     logger.info("Iniciando aplicação...")
-#     st.set_page_config(page_title="Análise de Parâmetros de Desempenho ANTT", page_icon="📊", layout="wide")
-    
-#     # Inicialização do estado da sessão (mantido como está)
-#     if "log_output" not in st.session_state:
-#         st.session_state.log_output = []
-#     if "processing_metrics" not in st.session_state:
-#         st.session_state.processing_metrics = {
-#             "total_tables": 0,
-#             "processed_tables": 0,
-#             "current_page": 0,
-#             "processing_time": 0,
-#             "status": "Aguardando arquivo..."
-#         }
-    
-#     # Interface principal (mantida como está até o upload do arquivo)
-#     st.header("Análise de Parâmetros de Desempenho em Relatórios ANTT")
-#     st.write("Esta ferramenta extrai e analisa parâmetros de desempenho de relatórios contratuais.")
-    
-#     # Métricas e logs (mantidos como estão)
-#     col1, col2, col3, col4 = st.columns(4)
-#     with col1:
-#         st.metric("Tabelas Encontradas", st.session_state.processing_metrics["total_tables"])
-#     with col2:
-#         st.metric("Tabelas Processadas", st.session_state.processing_metrics["processed_tables"])
-#     with col3:
-#         st.metric("Página Atual", st.session_state.processing_metrics["current_page"])
-#     with col4:
-#         st.metric("Tempo de Processamento", f"{st.session_state.processing_metrics['processing_time']:.2f}s")
-    
-#     st.info(f"Status: {st.session_state.processing_metrics['status']}")
-    
-#     with st.expander("Logs de Processamento", expanded=True):
-#         log_placeholder = st.empty()
-#         log_text = "\n".join(st.session_state.log_output[-50:])
-#         log_placeholder.text_area("", log_text, height=200)
-    
-#     uploaded_file = st.file_uploader("Carregue um relatório PDF 📝", type=["pdf"])
-    
-#     if uploaded_file:
-#         logger.info(f"Arquivo carregado: {uploaded_file.name}")
-#         st.session_state.processing_metrics["status"] = "Processando arquivo..."
-        
-#         with st.spinner('Processando relatório e analisando parâmetros...'):
-#             try:
-#                 # Processamento inicial do arquivo
-#                 start_time = time.time()
-#                 with tempfile.NamedTemporaryFile(delete=False, suffix='.pdf') as tmp_file:
-#                     tmp_file.write(uploaded_file.getvalue())
-#                     tmp_file_path = tmp_file.name
-#                     logger.info(f"Arquivo temporário criado: {tmp_file_path}")
-                
-#                 progress_bar = st.progress(0)
-                
-#                 def update_metrics(page, processed, total, status):
-#                     st.session_state.processing_metrics.update({
-#                         "current_page": page,
-#                         "processed_tables": processed,
-#                         "total_tables": total,
-#                         "processing_time": time.time() - start_time,
-#                         "status": status
-#                     })
-#                     if total > 0:
-#                         progress_bar.progress(processed / total)
-                
-#                 # Extração e análise das tabelas
-#                 tables_analysis = extract_and_analyze_tables(tmp_file_path, update_metrics)
-                
-#                 # Atualização das métricas finais
-#                 processing_time = time.time() - start_time
-#                 st.session_state.processing_metrics.update({
-#                     "processing_time": processing_time,
-#                     "status": "Processamento concluído"
-#                 })
-                
-#                 st.success(f"Relatório processado com sucesso! Encontradas {len(tables_analysis)} tabelas")
-                
-#                 # Seção de não conformidades
-#                 st.subheader("📊 Resumo de Não Conformidades")
-#                 non_conformities = []
-#                 for table in tables_analysis:
-#                     if ("não atende" in table['performance_analysis'].lower() or 
-#                         "não conforme" in table['performance_analysis'].lower()):
-#                         non_conformities.append({
-#                             'page': table['page_number'],
-#                             'table': table['table_number'],
-#                             'analysis': table['performance_analysis'],
-#                             'image': table.get('table_image')
-#                         })
-                
-#                 if non_conformities:
-#                     for nc in non_conformities:
-#                         with st.expander(f"⚠️ Não Conformidade - Página {nc['page']}, Tabela {nc['table']}"):
-#                             if nc.get('image'):
-#                                 st.image(nc['image'], 
-#                                     caption=f"Tabela {nc['table']} - Página {nc['page']}")
-#                             st.write(nc['analysis'])
-#                 else:
-#                     st.success("✅ Todos os parâmetros analisados estão em conformidade!")
-                
-#                 # Interface de perguntas
-#                 st.subheader("💬 Pergunte sobre o documento")
-                
-#                 def process_question(q):
-#                     with st.spinner('Analisando...'):
-#                         response, non_conforming_tables = query_performance_parameters(q, tables_analysis)
-#                         st.write("Resposta:", response)
-                        
-#                         if non_conforming_tables:
-#                             st.subheader("📊 Tabelas Relevantes")
-#                             for table in non_conforming_tables:
-#                                 with st.expander(f"Tabela da Página {table['page_number']}"):
-#                                     if table.get('table_image'):
-#                                         st.image(table['table_image'], 
-#                                             caption=f"Tabela {table['table_number']} - Página {table['page_number']}")
-#                                     st.write("**Análise:**", table['performance_analysis'])
-                
-#                 # Campo de pergunta livre
-#                 question = st.text_input("Digite sua pergunta sobre os parâmetros de desempenho:")
-#                 if question:
-#                     process_question(question)
-                
-#                 # Sugestões de perguntas
-#                 st.write("Sugestões de perguntas:")
-#                 example_questions = [
-#                     "Quais parâmetros não atendem aos requisitos?",
-#                     "Qual o percentual de conformidade para o parâmetro X?",
-#                     "Quais são os valores limite para cada parâmetro?",
-#                     "Onde estão as principais não conformidades?",
-#                     "Compare os valores encontrados com os valores esperados"
-#                 ]
-                
-#                 for q in example_questions:
-#                     if st.button(q):
-#                         process_question(q)
-                
-#             except Exception as e:
-#                 error_message = f"Erro ao processar o relatório: {str(e)}"
-#                 logger.error(error_message)
-#                 st.session_state.log_output.append(error_message)
-#                 st.session_state.processing_metrics["status"] = "Erro no processamento"
-#                 st.error(error_message)
-
-# if __name__ == "__main__":
-#     try:
-#         main()
-#     except Exception as e:
-#         st.error(f"Erro na inicialização: {str(e)}")
