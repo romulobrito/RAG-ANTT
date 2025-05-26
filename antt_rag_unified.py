@@ -1707,9 +1707,17 @@ def interface_usuario_unificada():
     with col1:
         st.subheader("💬 Consulta")
         
+        # Verificar se há um exemplo selecionado no session_state
+        valor_inicial = ""
+        if "pergunta_exemplo" in st.session_state:
+            valor_inicial = st.session_state.pergunta_exemplo
+            # Limpar o session_state após usar
+            del st.session_state.pergunta_exemplo
+        
         # Campo de pergunta
         pergunta = st.text_area(
             "Faça sua pergunta sobre regulamentações da ANTT:",
+            value=valor_inicial,
             height=100,
             placeholder="Ex: Quais são os parâmetros técnicos para pavimentos rodoviários?"
         )
@@ -1751,8 +1759,30 @@ def interface_usuario_unificada():
             st.error(f"Erro ao carregar vectorstore: {str(e)}")
             vectorstore = None
     
+    # Verificar se deve processar automaticamente um exemplo
+    processar_exemplo_automatico = False
+    pergunta_do_exemplo = None
+    
+    if "processar_automatico" in st.session_state:
+        processar_exemplo_automatico = st.session_state.processar_automatico
+        # Limpar o flag após usar
+        del st.session_state.processar_automatico
+        
+        # Se há processamento automático, usar a pergunta do session_state se disponível
+        if "pergunta_exemplo" in st.session_state:
+            pergunta_do_exemplo = st.session_state.pergunta_exemplo
+            # Limpar a pergunta do exemplo após usar no processamento automático
+            del st.session_state.pergunta_exemplo
+    
+    # Usar a pergunta do exemplo se disponível, senão usar a pergunta normal
+    pergunta_para_processar = pergunta_do_exemplo if pergunta_do_exemplo else pergunta
+    
     # Processamento da consulta
-    if consultar and pergunta and vectorstore:
+    if (consultar and pergunta and vectorstore) or (processar_exemplo_automatico and pergunta_para_processar and vectorstore):
+        # Mostrar indicação se é processamento automático
+        if processar_exemplo_automatico:
+            st.info(f"🚀 **Processamento Automático**: Executando exemplo selecionado: '{pergunta_para_processar}'")
+        
         with st.spinner("🔍 Processando consulta..."):
             try:
                 # Criar LLM manager
@@ -1764,9 +1794,9 @@ def interface_usuario_unificada():
                 filtro_ano = None if ano_filtro == "Todos" else ano_filtro
                 filtro_numero = numero_filtro if numero_filtro.strip() else None
                 
-                # Buscar documentos
+                # Buscar documentos usando a pergunta apropriada
                 documentos = pesquisar_documentos(
-                    pergunta, 
+                    pergunta_para_processar, 
                     vectorstore, 
                     k=num_documentos,
                     tipo_documento=filtro_tipo,
@@ -1777,7 +1807,7 @@ def interface_usuario_unificada():
                 
                 if documentos:
                     # Gerar resposta com template adaptativo
-                    resposta = gerar_resposta(pergunta, documentos, llm, selected_model)
+                    resposta = gerar_resposta(pergunta_para_processar, documentos, llm, selected_model)
                     
                     # Exibir resposta
                     st.subheader("📝 Resposta")
@@ -2041,6 +2071,15 @@ def interface_usuario_unificada():
     if exemplos:
         st.subheader("💡 Exemplos de Consultas")
         
+        # Opção para processamento automático
+        processar_automatico = st.checkbox(
+            "🚀 Processar automaticamente ao selecionar exemplo",
+            value=True,
+            help="Quando ativado, o exemplo será processado automaticamente após seleção"
+        )
+        
+        st.markdown("**Clique em um dos exemplos abaixo:**")
+        
         exemplos_consultas = [
             "Quais são os parâmetros técnicos para pavimentos rodoviários?",
             "Como funciona o processo de fiscalização da ANTT?",
@@ -2052,10 +2091,26 @@ def interface_usuario_unificada():
             "Normas sobre tempo de direção e descanso"
         ]
         
-        for exemplo in exemplos_consultas:
-            if st.button(f"📋 {exemplo}", key=f"exemplo_{exemplo[:20]}"):
-                st.session_state.pergunta_exemplo = exemplo
-                st.rerun()
+        # Organizar exemplos em colunas para melhor layout
+        cols = st.columns(2)
+        
+        for i, exemplo in enumerate(exemplos_consultas):
+            col = cols[i % 2]
+            with col:
+                if st.button(f"📋 {exemplo}", key=f"exemplo_{exemplo[:20]}", use_container_width=True):
+                    # Sempre salvar a pergunta no session_state
+                    st.session_state.pergunta_exemplo = exemplo
+                    
+                    if processar_automatico:
+                        # Marcar para processamento automático
+                        st.session_state.processar_automatico = True
+                        # Não limpar a pergunta_exemplo ainda, será usado no processamento
+                    else:
+                        # Se não é processamento automático, limpar após o rerun
+                        # para que apareça no campo de texto
+                        pass
+                    
+                    st.rerun()
     
     # Upload de PDF
     st.subheader("📄 Processar Novo Documento")
