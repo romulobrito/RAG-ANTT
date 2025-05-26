@@ -1157,6 +1157,134 @@ def interface_usuario_unificada():
                         for citacao in citacoes:
                             st.markdown(f"• {citacao}")
                     
+                    # Exibir trechos dos documentos citados
+                    st.markdown("---")
+                    st.markdown("### 📄 Trechos dos Documentos Citados")
+                    
+                    # Extrair citações de documentos da resposta
+                    documentos_citados = extrair_citacoes_da_resposta(resposta)
+                    
+                    # Exibir trechos relevantes para os documentos citados
+                    documentos_encontrados = False
+                    
+                    if documentos_citados:
+                        # Criar mapeamento de documentos para facilitar a busca
+                        docs_por_id = {}
+                        for doc in documentos:
+                            meta = doc.metadata
+                            tipo = meta.get('nome_tipo', 'Documento')
+                            numero = meta.get('numero', 'N/A')
+                            ano = meta.get('ano', 'N/A')
+                            doc_id = f"{tipo} {numero}/{ano}"
+                            
+                            # Normalizar o ID para comparação (tudo minúsculo, sem espaços extras)
+                            doc_id_norm = re.sub(r'\s+', ' ', doc_id.lower()).strip()
+                            
+                            # Criar versões alternativas do ID para melhorar correspondências
+                            alternativas = [
+                                doc_id_norm,
+                                f"{tipo.lower()} {numero}",
+                                f"{tipo.lower()} {numero.lstrip('0')}/{ano}",
+                                f"{tipo.lower()} {numero.lstrip('0')} de {ano}"
+                            ]
+                            
+                            for alt_id in alternativas:
+                                if alt_id not in docs_por_id:
+                                    docs_por_id[alt_id] = []
+                                docs_por_id[alt_id].append((doc, meta, doc_id))
+                        
+                        # Exibir documentos citados
+                        documentos_exibidos = set()  # Para evitar duplicações
+                        
+                        for doc_citado in documentos_citados:
+                            # Normalizar a citação
+                            doc_citado_norm = re.sub(r'\s+', ' ', doc_citado.lower()).strip()
+                            doc_encontrado = False
+                            
+                            # Tentar diferentes variações da citação para encontrar correspondência
+                            for doc_key, doc_list in docs_por_id.items():
+                                # Verificar se a citação corresponde a alguma parte da chave
+                                if (doc_citado_norm in doc_key or 
+                                    doc_key in doc_citado_norm or
+                                    any(term in doc_citado_norm for term in doc_key.split())):
+                                    
+                                    for doc, meta, doc_id in doc_list:
+                                        doc_display_id = f"{doc_id}_{meta.get('chunk', '')}"
+                                        
+                                        # Verificar se já exibimos este documento
+                                        if doc_display_id in documentos_exibidos:
+                                            continue
+                                        
+                                        # Marcar como encontrado
+                                        doc_encontrado = True
+                                        documentos_encontrados = True
+                                        documentos_exibidos.add(doc_display_id)
+                                        
+                                        with st.container(border=True):
+                                            # Adicionar uma indicação visual da cor
+                                            if "Instrução" in doc_id:
+                                                st.markdown("🔵 **Instrução Normativa**")
+                                            elif "Resolução" in doc_id:
+                                                st.markdown("🟠 **Resolução**")
+                                            elif "Voto" in doc_id:
+                                                st.markdown("🟣 **Voto**")
+                                            elif "Deliberação" in doc_id:
+                                                st.markdown("🟡 **Deliberação**")
+                                            else:
+                                                st.markdown("🟢 **Documento**")
+                                                
+                                            st.markdown(f"#### {doc_id}")
+                                            st.caption(f"Parte {meta.get('chunk', 'N/A')}/{meta.get('total_chunks', 'N/A')} • Fonte: `{meta.get('caminho', 'Não especificado')}`")
+                                            st.text_area(
+                                                "Trecho do documento:",
+                                                doc.page_content,
+                                                height=150,
+                                                key=f"citacao_{doc_display_id}",
+                                                disabled=True
+                                            )
+                            
+                            # Se não encontrou o documento, registrar isso
+                            if not doc_encontrado:
+                                logger.info(f"Documento citado não encontrado: {doc_citado}")
+                    
+                    # Se não encontramos citações explícitas ou os documentos citados
+                    if not documentos_citados or not documentos_encontrados:
+                        st.info("⚠️ Não foram encontradas citações de documentos específicos na resposta, ou os documentos citados não estão entre os recuperados. Exibindo os documentos mais relevantes:")
+                        
+                        # Mostrar os 3 documentos mais relevantes
+                        with st.container(border=True):
+                            for i, doc in enumerate(documentos[:3]):
+                                meta = doc.metadata
+                                tipo = meta.get('nome_tipo', 'Documento')
+                                numero = meta.get('numero', 'N/A')
+                                ano = meta.get('ano', 'N/A')
+                                doc_id = f"{tipo} {numero}/{ano}"
+                                
+                                # Adicionar indicação visual do tipo de documento
+                                if "Instrução" in tipo:
+                                    st.markdown("🔵 **Instrução Normativa**")
+                                elif "Resolução" in tipo:
+                                    st.markdown("🟠 **Resolução**")
+                                elif "Voto" in tipo:
+                                    st.markdown("🟣 **Voto**")
+                                elif "Deliberação" in tipo:
+                                    st.markdown("🟡 **Deliberação**")
+                                else:
+                                    st.markdown("🟢 **Documento**")
+                                
+                                st.markdown(f"**{doc_id}** - Parte {meta.get('chunk', 'N/A')}/{meta.get('total_chunks', 'N/A')}")
+                                st.caption(f"Fonte: `{meta.get('caminho', 'Não especificado')}`")
+                                st.text_area(
+                                    "Conteúdo do documento:",
+                                    doc.page_content,
+                                    height=130,
+                                    key=f"relevante_{i}",
+                                    disabled=True
+                                )
+                                
+                                if i < 2:  # Não adicionar separador após o último
+                                    st.divider()
+                    
                     # Informações sobre a busca
                     with st.expander("🔍 Detalhes da Busca"):
                         st.write(f"**Documentos encontrados:** {len(documentos)}")
@@ -1168,6 +1296,87 @@ def interface_usuario_unificada():
                         for i, doc in enumerate(documentos[:5]):
                             metadata = doc.metadata
                             st.write(f"**Doc {i+1}:** {metadata.get('nome_tipo', 'N/A')} {metadata.get('numero', 'N/A')}/{metadata.get('ano', 'N/A')}")
+                    
+                    # Seção para mostrar todas as fontes consultadas (FORA do expander anterior)
+                    with st.expander("📚 Todas as Fontes Consultadas"):
+                        # Agrupar documentos por tipo/número/ano
+                        documentos_agrupados = {}
+                        for doc in documentos:
+                            meta = doc.metadata
+                            tipo = meta.get('nome_tipo', 'Documento')
+                            numero = meta.get('numero', 'N/A')
+                            ano = meta.get('ano', 'N/A')
+                            
+                            doc_id = f"{tipo} {numero}/{ano}"
+                            if doc_id not in documentos_agrupados:
+                                documentos_agrupados[doc_id] = {
+                                    'tipo': tipo,
+                                    'numero': numero,
+                                    'ano': ano,
+                                    'caminho': meta.get('caminho', 'Não especificado'),
+                                    'trechos': []
+                                }
+                            
+                            documentos_agrupados[doc_id]['trechos'].append({
+                                'chunk': meta.get('chunk', 'N/A'),
+                                'total_chunks': meta.get('total_chunks', 'N/A'),
+                                'conteudo': doc.page_content
+                            })
+                        
+                        # Exibir documentos agrupados
+                        for i, (doc_id, info) in enumerate(documentos_agrupados.items()):
+                            # Criar um ícone baseado no tipo de documento
+                            icone = "📄"
+                            if "Resolução" in info['tipo']:
+                                icone = "📜"
+                            elif "Instrução" in info['tipo']:
+                                icone = "📝"
+                            elif "Deliberação" in info['tipo']:
+                                icone = "📋"
+                            elif "Voto" in info['tipo']:
+                                icone = "✅"
+                            
+                            # Destacar documentos mais relevantes
+                            destaque = " 🌟" if i < 3 else ""
+                            
+                            # Usar container em vez de expander aninhado
+                            st.markdown(f"### {icone} {doc_id}{destaque}")
+                            
+                            with st.container(border=True):
+                                # Mostrar metadados do documento
+                                col1, col2, col3 = st.columns(3)
+                                with col1:
+                                    st.markdown(f"**Tipo:** {info['tipo']}")
+                                with col2:
+                                    st.markdown(f"**Número:** {info['numero']}")
+                                with col3:
+                                    st.markdown(f"**Ano:** {info['ano']}")
+                                
+                                st.markdown(f"**Caminho:** `{info['caminho']}`")
+                                
+                                # Exibir trechos em tabs se houver múltiplos
+                                if len(info['trechos']) > 1:
+                                    trechos_tabs = st.tabs([f"Trecho {t['chunk']}/{t['total_chunks']}" for t in info['trechos']])
+                                    for j, tab in enumerate(trechos_tabs):
+                                        with tab:
+                                            trecho = info['trechos'][j]
+                                            st.text_area(
+                                                f"Conteúdo do trecho {trecho['chunk']}:",
+                                                trecho['conteudo'],
+                                                height=200,
+                                                key=f"fonte_{doc_id}_{j}",
+                                                disabled=True
+                                            )
+                                else:
+                                    # Se há apenas um trecho, exibir diretamente
+                                    trecho = info['trechos'][0]
+                                    st.text_area(
+                                        f"Conteúdo:",
+                                        trecho['conteudo'],
+                                        height=200,
+                                        key=f"fonte_unico_{doc_id}",
+                                        disabled=True
+                                    )
                 
                 else:
                     st.warning("Nenhum documento relevante encontrado. Tente reformular sua pergunta.")
