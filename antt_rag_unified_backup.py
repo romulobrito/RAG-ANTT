@@ -33,8 +33,6 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 import multiprocessing
 import json
 import re
-from pathlib import Path
-from types import SimpleNamespace
 
 # Importar configurações e gerenciador de LLM
 from config import (
@@ -51,7 +49,7 @@ from config import (
     logger
 )
 
-from llm_providers import LLMManager, get_available_providers, create_llm_manager, get_available_embedding_providers
+from llm_providers import LLMManager, get_available_providers, create_llm_manager
 
 # Inicializa o logger globalmente
 logger = setup_logging()
@@ -915,83 +913,6 @@ def carregar_vectorstore():
         logger.error(f"Erro ao carregar vectorstore: {e}")
         raise
 
-
-def carregar_vectorstore_com_provider(embedding_provider="free"):
-    """Carrega o vectorstore ANTT com suporte a diferentes provedores de embeddings."""
-    logger.info(f"Carregando vectorstore de {DB_FAISS_PATH}...")
-    logger.info(f"Provedor de embeddings: {embedding_provider}")
-    
-    # Tentar carregar embeddings com o provedor especificado
-    try:
-        if embedding_provider == "openai":
-            logger.info("Tentando usar OpenAI para embeddings...")
-            llm_manager = create_llm_manager("openai", embedding_provider="openai")
-            embeddings = llm_manager.get_embeddings()
-            
-            # Teste rápido para verificar se a API está funcionando
-            test_embedding = embeddings.embed_query("teste")
-            logger.info("✅ OpenAI embeddings funcionando corretamente")
-            
-        elif embedding_provider == "free":
-            logger.info("Usando embeddings gratuitos/limitados...")
-            try:
-                # Primeiro tentar OpenAI com configuração limitada
-                llm_manager = create_llm_manager("deepseek", embedding_provider="free")
-                embeddings = llm_manager.get_embeddings()
-                logger.info("✅ Embeddings gratuitos configurados")
-                
-            except Exception as e:
-                logger.warning(f"Embeddings gratuitos falharam: {e}")
-                logger.info("🔄 Tentando fallback para OpenAI básico...")
-                
-                # Fallback: usar OpenAI embeddings básicos sem verificação de cota
-                from langchain_openai import OpenAIEmbeddings
-                embeddings = OpenAIEmbeddings(
-                    openai_api_key=get_openai_api_key(),
-                    model="text-embedding-ada-002",
-                    max_retries=0,  # Não tentar novamente
-                    timeout=5       # Timeout muito baixo
-                )
-                logger.info("⚠️ Usando embeddings OpenAI em modo emergência")
-                
-        else:
-            logger.warning(f"Provedor '{embedding_provider}' não reconhecido, usando 'free'")
-            return carregar_vectorstore_com_provider("free")
-            
-    except Exception as e:
-        error_msg = str(e).lower()
-        
-        # Verificar se é erro de cota excedida
-        if any(keyword in error_msg for keyword in ["insufficient_quota", "429", "quota", "exceeded"]):
-            logger.warning(f"🚨 Cota excedida: {e}")
-            
-            if embedding_provider != "free":
-                logger.info("🔄 Tentando com embeddings gratuitos...")
-                return carregar_vectorstore_com_provider("free")
-            else:
-                logger.error("❌ Todos os provedores de embeddings falharam")
-                raise Exception("❌ Sistema temporariamente indisponível devido a limitações da API. Tente novamente em alguns minutos.")
-        else:
-            logger.error(f"❌ Erro não relacionado à cota: {e}")
-            raise Exception(f"Erro ao configurar embeddings: {str(e)}")
-    
-    # Tentar carregar o vectorstore
-    try:
-        vectorstore = FAISS.load_local(DB_FAISS_PATH, embeddings, allow_dangerous_deserialization=True)
-        logger.info("✅ Vectorstore carregado com sucesso")
-        
-        return vectorstore
-        
-    except Exception as e:
-        logger.error(f"❌ Erro ao carregar vectorstore: {e}")
-        
-        # Verificar se o erro é relacionado ao vectorstore não existir
-        if "No such file or directory" in str(e) or "does not exist" in str(e):
-            raise Exception("❌ Base de conhecimento não encontrada. Execute o processo de indexação primeiro.")
-        else:
-            raise Exception(f"❌ Erro ao carregar base de conhecimento: {str(e)}")
-
-
 def criar_filtro_metadados(tipo_documento=None, ano=None, numero=None):
     """Cria um filtro para busca por metadados."""
     filtro = {}
@@ -1076,7 +997,7 @@ def reranking_documentos(query, documentos):
     
     return docs_ordenados
 
-def pesquisar_documentos(query, vectorstore, k=12, tipo_documento=None, ano=None, numero=None, embedding_provider="free"):
+def pesquisar_documentos(query, vectorstore, k=12, tipo_documento=None, ano=None, numero=None):
     """Pesquisa documentos com base em uma query, podendo filtrar por metadados."""
     resultados = []
     resultados_finais = []
@@ -1124,26 +1045,7 @@ def pesquisar_documentos(query, vectorstore, k=12, tipo_documento=None, ano=None
             
             logger.info(f"Após busca por keywords: {len(resultados)} resultados")
     except Exception as e:
-        error_msg = str(e).lower()
-        
-        # Verificar se é erro de cota excedida
-        if any(keyword in error_msg for keyword in ["insufficient_quota", "429", "quota", "exceeded"]):
-            logger.warning(f"🚨 Erro de cota detectado durante busca: {e}")
-            
-            # Tentar recarregar vectorstore com embeddings gratuitos
-            if embedding_provider != "free":
-                logger.info("🔄 Recarregando vectorstore com embeddings gratuitos...")
-                try:
-                    vectorstore_free = carregar_vectorstore_com_provider("free")
-                    return pesquisar_documentos(query, vectorstore_free, k, tipo_documento, ano, numero, "free")
-                except Exception as reload_error:
-                    logger.error(f"❌ Falha ao recarregar vectorstore: {reload_error}")
-            
-            logger.warning("⚠️ Tentando busca sem embeddings (busca por texto)...")
-            # Fallback: busca simples por texto sem embeddings
-            return busca_fallback_sem_embeddings(query, k, tipo_documento, ano, numero)
-        else:
-            logger.error(f"Erro na busca híbrida: {str(e)}")
+        logger.error(f"Erro na busca híbrida: {str(e)}")
     
     if len(resultados) < 2:
         logger.info("Resultados insuficientes. Tentando busca direta...")
@@ -1151,12 +1053,7 @@ def pesquisar_documentos(query, vectorstore, k=12, tipo_documento=None, ano=None
             resultados = vectorstore.similarity_search(query_original, k=k, filter=filtro)
             logger.info(f"Busca direta: {len(resultados)} resultados")
         except Exception as e:
-            error_msg = str(e).lower()
-            if any(keyword in error_msg for keyword in ["insufficient_quota", "429", "quota", "exceeded"]):
-                logger.warning(f"🚨 Erro de cota na busca direta: {e}")
-                return busca_fallback_sem_embeddings(query, k, tipo_documento, ano, numero)
-            else:
-                logger.error(f"Erro na busca direta: {str(e)}")
+            logger.error(f"Erro na busca direta: {str(e)}")
     
     if len(resultados) < 2:
         logger.info("Resultados ainda insuficientes. Tentando busca com termos amplos...")
@@ -1165,161 +1062,13 @@ def pesquisar_documentos(query, vectorstore, k=12, tipo_documento=None, ano=None
             resultados = vectorstore.similarity_search(termos_gerais, k=k)
             logger.info(f"Busca com termos amplos: {len(resultados)} resultados")
         except Exception as e:
-            error_msg = str(e).lower()
-            if any(keyword in error_msg for keyword in ["insufficient_quota", "429", "quota", "exceeded"]):
-                logger.warning(f"🚨 Erro de cota na busca ampla: {e}")
-                return busca_fallback_sem_embeddings(query, k, tipo_documento, ano, numero)
-            else:
-                logger.error(f"Erro na busca com termos amplos: {str(e)}")
+            logger.error(f"Erro na busca com termos amplos: {str(e)}")
     
     if resultados:
         resultados_finais = reranking_documentos(query_original, resultados)
         logger.info(f"Após reranking: {len(resultados_finais)} documentos retornados")
     
-    return resultados_finais
-
-def busca_fallback_sem_embeddings(query, k=12, tipo_documento=None, ano=None, numero=None):
-    """Busca de fallback que não usa embeddings - busca por texto simples."""
-    logger.info("🔍 Executando busca de emergência sem embeddings...")
-    
-    try:
-        # Implementar busca básica por palavras-chave nos metadados e conteúdo
-        # Esta é uma implementação simplificada que pode ser expandida
-        
-        # Tentar carregar dados do relatório de documentos se disponível
-        relatorio_path = "relatorio_documentos.json"
-        if os.path.exists(relatorio_path):
-            logger.info("📄 Carregando dados do relatório de documentos...")
-            
-            with open(relatorio_path, 'r', encoding='utf-8') as f:
-                dados_documentos = json.load(f)
-            
-            # Extrair palavras-chave da query
-            keywords = extrair_keywords(query.lower())
-            logger.info(f"🔍 Palavras-chave extraídas: {keywords}")
-            
-            # Buscar documentos que contenham as palavras-chave
-            documentos_encontrados = []
-            
-            # O arquivo JSON é uma lista direta de documentos
-            for doc_info in dados_documentos:
-                score = 0
-                
-                # Buscar nas informações do documento
-                texto_busca = f"{doc_info.get('titulo', '')} {doc_info.get('tipo', '')} {doc_info.get('ementa', '')}".lower()
-                
-                # Calcular score baseado nas palavras-chave encontradas
-                for keyword in keywords:
-                    if keyword in texto_busca:
-                        score += 1
-                
-                # Aplicar filtros se especificados
-                if tipo_documento and tipo_documento.lower() not in doc_info.get('tipo', '').lower():
-                    continue
-                
-                if ano and str(ano) not in str(doc_info.get('ano', '')):
-                    continue
-                
-                if numero and str(numero) not in str(doc_info.get('numero', '')):
-                    continue
-                
-                if score > 0:
-                    documentos_encontrados.append((doc_info, score))
-            
-            # Ordenar por score e retornar os melhores
-            documentos_encontrados.sort(key=lambda x: x[1], reverse=True)
-            
-            # Converter para formato compatível (simulando Document objects)
-            resultados = []
-            for doc_info, score in documentos_encontrados[:k]:
-                # Criar um objeto simples que simula um Document
-                doc_simulado = SimpleNamespace()
-                doc_simulado.page_content = f"""
-DOCUMENTO: {doc_info.get('titulo', 'Título não disponível')}
-
-EMENTA: {doc_info.get('ementa', 'Ementa não disponível')}
-
-TIPO: {doc_info.get('tipo', 'N/A')}
-NÚMERO: {doc_info.get('numero', 'N/A')}
-ANO: {doc_info.get('ano', 'N/A')}
-ÓRGÃO: {doc_info.get('orgao', 'N/A')}
-
-OBSERVAÇÃO: Este documento foi encontrado através de busca de emergência sem embeddings. 
-Para informações mais detalhadas, consulte o documento completo.
-"""
-                doc_simulado.metadata = {
-                    'nome_tipo': doc_info.get('tipo', 'Documento'),
-                    'numero': doc_info.get('numero', 'N/A'),
-                    'ano': doc_info.get('ano', 'N/A'),
-                    'caminho': doc_info.get('arquivo_md', 'N/A'),
-                    'chunk': 1,
-                    'total_chunks': 1,
-                    'score_emergencia': score,
-                    'modo_emergencia': True
-                }
-                resultados.append(doc_simulado)
-            
-            logger.info(f"✅ Busca de emergência encontrou {len(resultados)} documentos")
-            return resultados
-        
-        else:
-            logger.warning("⚠️ Arquivo de relatório não encontrado para busca de emergência")
-            
-            # Fallback ainda mais básico: criar uma resposta explicativa
-            doc_explicativo = SimpleNamespace()
-            doc_explicativo.page_content = f"""
-            SISTEMA EM MODO DE EMERGÊNCIA
-            
-            Devido a limitações temporárias da API de embeddings, o sistema está operando em modo de emergência.
-            
-            Sua consulta: "{query}"
-            
-            Para obter respostas completas, tente:
-            1. Aguardar alguns minutos e tentar novamente
-            2. Usar termos mais específicos na busca
-            3. Verificar se há documentos específicos que você gostaria de consultar
-            
-            O sistema tentará responder com base nas informações disponíveis, mas a qualidade pode ser limitada.
-            """
-            
-            doc_explicativo.metadata = {
-                'nome_tipo': 'Sistema',
-                'numero': 'EMERGENCIA',
-                'ano': '2025',
-                'caminho': 'sistema_emergencia',
-                'chunk': 1,
-                'total_chunks': 1,
-                'modo_emergencia': True
-            }
-            
-            return [doc_explicativo]
-        
-    except Exception as e:
-        logger.error(f"❌ Erro na busca de fallback: {e}")
-        
-        # Último recurso: documento explicativo de erro
-        doc_erro = SimpleNamespace()
-        doc_erro.page_content = f"""
-        ERRO NO SISTEMA DE BUSCA
-        
-        O sistema encontrou dificuldades técnicas temporárias.
-        
-        Erro: {str(e)}
-        
-        Por favor, tente novamente em alguns minutos ou entre em contato com o suporte técnico.
-        """
-        
-        doc_erro.metadata = {
-            'nome_tipo': 'Sistema',
-            'numero': 'ERRO',
-            'ano': '2025',
-            'caminho': 'sistema_erro',
-            'chunk': 1,
-            'total_chunks': 1,
-            'modo_emergencia': True
-        }
-        
-        return [doc_erro]
+    return resultados_finais 
 
 def gerar_resposta(pergunta, documentos, llm, modelo_usado="gpt-4"):
     """Gera uma resposta baseada nos documentos recuperados usando templates adaptativos."""
@@ -1632,37 +1381,6 @@ def interface_usuario_unificada():
             help="Controla a criatividade das respostas"
         )
         
-        # Seleção do provedor de embeddings
-        st.markdown("**🔤 Provedor de Embeddings**")
-        embedding_providers = {
-            "free": "🆓 Gratuito/Limitado (Padrão)",
-            "openai": "💰 OpenAI (Pago - Alta Qualidade)"
-        }
-        
-        selected_embedding_provider = st.selectbox(
-            "Escolha o provedor de embeddings:",
-            options=list(embedding_providers.keys()),
-            format_func=lambda x: embedding_providers[x],
-            index=0,  # Padrão é "free"
-            help="Embeddings gratuitos usam configuração otimizada para evitar limites de cota"
-        )
-        
-        # Mostrar status do provedor de embeddings selecionado
-        if selected_embedding_provider == "openai":
-            try:
-                if get_openai_api_key():
-                    st.success("✅ OpenAI disponível para embeddings")
-                else:
-                    st.error("❌ Chave OpenAI não encontrada")
-            except:
-                st.warning("⚠️ Verificação de chave OpenAI falhou")
-        else:
-            st.info("ℹ️ Usando embeddings gratuitos/limitados")
-        
-        st.divider()
-        
-
-        
         max_tokens = st.number_input(
             "Máximo de tokens:",
             min_value=100,
@@ -1731,11 +1449,7 @@ def interface_usuario_unificada():
         
         # Carregar vectorstore e mostrar estatísticas
         try:
-            vectorstore = carregar_vectorstore_com_provider(selected_embedding_provider)
-            
-            # Mostrar aviso se usando embeddings gratuitos
-            if selected_embedding_provider == "free":
-                st.info("ℹ️ **Modo Gratuito Ativo**: Sistema configurado para evitar limites de cota da OpenAI. Qualidade de busca pode ser ligeiramente reduzida, mas o sistema é mais estável.")
+            vectorstore = carregar_vectorstore()
             
             # Estatísticas básicas
             st.markdown("""
@@ -1771,8 +1485,7 @@ def interface_usuario_unificada():
                     k=num_documentos,
                     tipo_documento=filtro_tipo,
                     ano=filtro_ano,
-                    numero=filtro_numero,
-                    embedding_provider=selected_embedding_provider
+                    numero=filtro_numero
                 )
                 
                 if documentos:
