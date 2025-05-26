@@ -9,11 +9,26 @@ Este sistema permite a consulta inteligente aos documentos regulatórios e norma
 ## Características
 
 - Busca semântica em documentos normativos
+- **Suporte a múltiplos provedores de LLM**: OpenAI e DeepSeek
+- **DeepSeek-R1 gratuito** via OpenRouter
 - Interface de usuário intuitiva com Streamlit
 - Processamento inteligente de consultas
 - Exibição estruturada de informações técnicas
 - Citação precisa das fontes documentais
 - Visualização dos trechos relevantes dos documentos
+- Filtros por tipo de documento, ano e número
+
+## Provedores de LLM Suportados
+
+### OpenAI
+- **Modelos**: GPT-4o, GPT-4, GPT-3.5-turbo
+- **Custo**: Pago por uso
+- **Qualidade**: Excelente
+
+### DeepSeek (via OpenRouter)
+- **Modelos**: DeepSeek-R1 (gratuito), DeepSeek-Chat
+- **Custo**: DeepSeek-R1 é completamente gratuito
+- **Qualidade**: Competitivo com GPT-4
 
 ## Instalação
 
@@ -35,45 +50,58 @@ venv\Scripts\activate     # Windows
 pip install -r requirements.txt
 ```
 
-4. Configure sua chave de API da OpenAI no arquivo `.env`:
-```
-OPENAI_API_KEY=sua-chave-aqui
-```
+4. Configure as chaves de API no arquivo `.env`:
+```bash
+# Para usar DeepSeek (recomendado - gratuito)
+OPENROUTER_API_KEY=sua-chave-openrouter-aqui
+OPENAI_API_KEY=sua-chave-openai-aqui  # Necessária para embeddings
 
-## Configuração
-
-As configurações do sistema estão centralizadas no arquivo `config.py`. Este arquivo gerencia variáveis de ambiente, caminhos de armazenamento, parâmetros de processamento e outras configurações.
-
-Para configurar o sistema:
-
-1. Crie um arquivo `.env` na raiz do projeto com sua chave da API OpenAI:
-```
-OPENAI_API_KEY=sua-chave-aqui
+# Ou apenas OpenAI
+OPENAI_API_KEY=sua-chave-openai-aqui
 ```
 
-2. Ajuste os parâmetros no arquivo `config.py` conforme necessário:
-```python
-# Tamanho dos chunks para processamento de documentos
-CHUNK_SIZE = 500
-CHUNK_OVERLAP = 150
+## Configuração de APIs
 
-# Modelo LLM padrão
-DEFAULT_LLM_MODEL = "gpt-4o"
+### Opção 1: DeepSeek (Recomendado - Gratuito)
 
-# Diretório do vectorstore
-DB_FAISS_PATH = "vectorstore/db_faiss"
+1. Crie uma conta gratuita em [OpenRouter](https://openrouter.ai)
+2. Obtenha sua chave de API
+3. Configure no arquivo `.env`:
+```bash
+OPENROUTER_API_KEY=sua-chave-openrouter-aqui
+OPENAI_API_KEY=sua-chave-openai-aqui  # Para embeddings
 ```
+
+### Opção 2: OpenAI
+
+1. Crie uma conta em [OpenAI Platform](https://platform.openai.com)
+2. Obtenha sua chave de API
+3. Configure no arquivo `.env`:
+```bash
+OPENAI_API_KEY=sua-chave-openai-aqui
+```
+
+**📖 Para instruções detalhadas, consulte [CONFIGURACAO_APIS.md](CONFIGURACAO_APIS.md)**
 
 ## Uso
 
-### Interface de usuário
+### Interface Principal (com suporte a múltiplos LLMs)
 
-Execute a interface Streamlit:
+Execute a nova interface com suporte ao DeepSeek:
+```bash
+streamlit run antt_rag_deepseek.py
+```
+
+### Interface Original (apenas OpenAI)
+
+Execute a interface original:
 ```bash
 streamlit run chat-RAG.py
 ```
 
 A interface permite:
+- **Escolher o provedor de LLM** (OpenAI ou DeepSeek)
+- **Selecionar o modelo específico**
 - Fazer perguntas em linguagem natural sobre documentos da ANTT
 - Filtrar por tipo de documento, ano e número
 - Visualizar os trechos relevantes dos documentos citados
@@ -95,18 +123,33 @@ python antt_crawler.py --diretorio dados_antt
 
 ## Estrutura de Arquivos
 
-- `chat-RAG.py`: Interface principal do sistema RAG
+- `antt_rag_deepseek.py`: Interface principal com suporte a múltiplos LLMs
+- `chat-RAG.py`: Interface original (apenas OpenAI)
 - `config.py`: Configurações centralizadas do sistema
+- `llm_providers.py`: Gerenciador de provedores de LLM
 - `antt_crawler.py`: Rastreador de documentos da ANTT
 - `reconstruir_vectorstore.py`: Script para reconstruir o vectorstore
 - `vectorstore/`: Diretório contendo o banco de vetores FAISS
 - `dados_antt/`: Diretório contendo os documentos normativas da ANTT
+- `CONFIGURACAO_APIS.md`: Guia detalhado de configuração de APIs
+
+## Custos Estimados
+
+### DeepSeek via OpenRouter (Recomendado)
+- **DeepSeek-R1**: Gratuito
+- **Embeddings OpenAI**: ~$0.0001 por 1K tokens
+- **Custo total**: Praticamente gratuito
+
+### OpenAI
+- **GPT-4o**: ~$0.005 por 1K tokens
+- **Embeddings**: ~$0.0001 por 1K tokens
+- **Custo total**: Moderado
 
 ## Segurança
 
-- **IMPORTANTE**: Nunca compartilhe ou commite o arquivo `.env` contendo sua chave da API OpenAI.
+- **IMPORTANTE**: Nunca compartilhe ou commite o arquivo `.env` contendo suas chaves de API.
 - Caso precise compartilhar o código, certifique-se de que o arquivo `.env` está listado no `.gitignore`.
-- Em ambientes de produção, use variáveis de ambiente para configurar a chave da API em vez de arquivos locais.
+- Em ambientes de produção, use variáveis de ambiente para configurar as chaves de API em vez de arquivos locais.
 
 ## Contribuições
 

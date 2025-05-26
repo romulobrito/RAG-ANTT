@@ -13,3 +13,4 @@ pdfplumber
 openpyxl
 img2table
 python-dotenv==1.0.0
+openai>=1.0.0
