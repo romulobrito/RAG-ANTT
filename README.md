@@ -164,27 +164,27 @@ graph TB
 
 ```mermaid
 sequenceDiagram
-    participant U as Usuário
+    participant U as Usuario
     participant UI as Interface
     participant C as Config
-    participant LLM as LLM Manager
+    participant LLM as LLM_Manager
     participant V as Vectorstore
     
-    U->>UI: Acessa aplicação
-    UI->>C: Carrega configurações
+    U->>UI: Acessa aplicacao
+    UI->>C: Carrega configuracoes
     C->>LLM: Inicializa provedores
     LLM->>V: Carrega vectorstore
     V-->>UI: Sistema pronto
-    UI-->>U: Interface disponível
+    UI-->>U: Interface disponivel
 ```
 
 ### 2. **Processamento de Consulta**
 
 ```mermaid
 sequenceDiagram
-    participant U as Usuário
+    participant U as Usuario
     participant UI as Interface
-    participant S as Sistema RAG
+    participant S as Sistema_RAG
     participant V as Vectorstore
     participant LLM as LLM
     participant F as Fallback
@@ -203,7 +203,7 @@ sequenceDiagram
         LLM-->>S: Resposta gerada
     end
     
-    S-->>UI: Resposta + citações
+    S-->>UI: Resposta + citacoes
     UI-->>U: Exibe resultado
 ```
 
@@ -211,10 +211,10 @@ sequenceDiagram
 
 ```mermaid
 sequenceDiagram
-    participant U as Usuário
+    participant U as Usuario
     participant UI as Interface
     participant P as Processador
-    participant OCR as OCR Engine
+    participant OCR as OCR_Engine
     participant E as Embeddings
     participant V as Vectorstore
     
@@ -225,7 +225,7 @@ sequenceDiagram
     P->>E: Gera embeddings
     E-->>P: Vetores criados
     P->>V: Atualiza vectorstore
-    V-->>UI: Processamento concluído
+    V-->>UI: Processamento concluido
     UI-->>U: Documento indexado
 ```
 
