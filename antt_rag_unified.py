@@ -1496,7 +1496,7 @@ Para informações mais detalhadas, consulte o documento completo.
 def gerar_resposta(pergunta, documentos, llm, modelo_usado="gpt-4"):
     """Gera uma resposta baseada nos documentos recuperados usando templates adaptativos."""
     if not documentos:
-        return "Não encontrei documentos relevantes para esta pergunta. Por favor, reformule sua consulta ou forneça mais detalhes."
+        return "Não encontrei documentos relevantes para esta pergunta. Por favor, reformule sua consulta ou forneça mais detalhes.", modelo_usado
     
     contextos = []
     documentos_info = {}
@@ -1584,7 +1584,18 @@ Conteúdo:
             "question": pergunta
         })
         
-        conteudo_resposta = resposta.content
+        logger.info(f"🔍 DEBUG: Resposta recebida do LLM")
+        logger.info(f"🔍 DEBUG: Tipo da resposta: {type(resposta)}")
+        logger.info(f"🔍 DEBUG: Resposta tem 'content'? {hasattr(resposta, 'content')}")
+        
+        if hasattr(resposta, 'content'):
+            conteudo_resposta = resposta.content
+            logger.info(f"🔍 DEBUG: Tamanho do conteúdo: {len(conteudo_resposta)} caracteres")
+            logger.info(f"🔍 DEBUG: Primeiros 200 chars: {conteudo_resposta[:200]}")
+        else:
+            logger.error(f"🔍 DEBUG: Resposta sem content: {resposta}")
+            conteudo_resposta = str(resposta)
+        
         if any(frase in conteudo_resposta.lower() for frase in 
               ["não encontrei informações", "não há informações", "não foi possível encontrar", 
                "não foram encontradas", "não disponível nos documentos"]):
@@ -1612,10 +1623,45 @@ Conteúdo:
             else:
                 logger.info("Mantida resposta original")
         
-        return conteudo_resposta
+        logger.info(f"🔍 DEBUG: Retornando resposta final com {len(conteudo_resposta)} caracteres")
+        return conteudo_resposta, modelo_usado
         
     except Exception as e:
+        error_msg = str(e).lower()
         logger.error(f"Erro ao gerar resposta: {str(e)}")
+        
+        # Verificar se é erro de cota OpenAI e tentar fallback para DeepSeek
+        if any(keyword in error_msg for keyword in ["insufficient_quota", "429", "quota", "exceeded"]) and "openai" in modelo_usado.lower():
+            logger.warning(f"🚨 OpenAI com cota excedida durante geração de resposta. Tentando DeepSeek...")
+            
+            try:
+                # Criar LLM DeepSeek para fallback
+                from llm_providers import create_llm_manager
+                deepseek_manager = create_llm_manager("deepseek")
+                deepseek_llm = deepseek_manager.get_llm(temperature=0.1, max_tokens=2000)
+                
+                logger.info("✅ DeepSeek configurado com sucesso para fallback")
+                
+                # Tentar com DeepSeek usando template apropriado
+                template_deepseek = selecionar_template_adaptativo('resposta', 'deepseek')
+                prompt_deepseek = PromptTemplate(
+                    template=template_deepseek,
+                    input_variables=["context", "question"]
+                )
+                
+                chain_deepseek = prompt_deepseek | deepseek_llm
+                resposta_deepseek = chain_deepseek.invoke({
+                    "context": contexto_completo,
+                    "question": pergunta
+                })
+                
+                logger.info("✅ Resposta gerada com DeepSeek (fallback)")
+                return f"🔄 **Resposta gerada com DeepSeek (OpenAI indisponível por limite de cota)**\n\n{resposta_deepseek.content}", "deepseek"
+                
+            except Exception as e_deepseek:
+                logger.error(f"❌ Fallback DeepSeek também falhou: {str(e_deepseek)}")
+                # Continuar para o fallback original abaixo
+        
         try:
             # Fallback com template de extração agressiva adaptativo
             template_fallback = selecionar_template_adaptativo('extracao', modelo_usado)
@@ -1630,10 +1676,47 @@ Conteúdo:
                 "question": pergunta
             })
             
-            return resposta_fallback.content
+            return resposta_fallback.content, modelo_usado
         except Exception as e2:
+            error_msg2 = str(e2).lower()
             logger.error(f"Erro no fallback: {str(e2)}")
-            return f"Não foi possível gerar uma resposta devido a um erro interno. Tente reformular sua consulta de forma mais específica."
+            
+            # Se ainda é erro de cota e não tentamos DeepSeek ainda
+            if any(keyword in error_msg2 for keyword in ["insufficient_quota", "429", "quota", "exceeded"]):
+                try:
+                    # Último recurso: DeepSeek com template simples
+                    from llm_providers import create_llm_manager
+                    deepseek_manager = create_llm_manager("deepseek")
+                    deepseek_llm = deepseek_manager.get_llm(temperature=0.1, max_tokens=1500)
+                    
+                    # Template muito simples para emergência
+                    template_emergencia = """
+                    Baseado nos documentos abaixo, responda de forma direta e objetiva: {question}
+                    
+                    Documentos:
+                    {context}
+                    
+                    Resposta:
+                    """
+                    
+                    prompt_emergencia = PromptTemplate(
+                        template=template_emergencia,
+                        input_variables=["context", "question"]
+                    )
+                    
+                    chain_emergencia = prompt_emergencia | deepseek_llm
+                    resposta_emergencia = chain_emergencia.invoke({
+                        "context": contexto_completo[:8000],  # Reduzir contexto
+                        "question": pergunta
+                    })
+                    
+                    logger.info("✅ Resposta de emergência gerada com DeepSeek")
+                    return f"⚠️ **Resposta de emergência (OpenAI indisponível)**\n\n{resposta_emergencia.content}", "deepseek"
+                    
+                except Exception as e3:
+                    logger.error(f"❌ Resposta de emergência falhou: {str(e3)}")
+            
+            return f"❌ Não foi possível gerar uma resposta devido a limitações temporárias da API. Tente novamente em alguns minutos ou use o modo de embeddings locais.", modelo_usado
 
 def extrair_citacoes_da_resposta(resposta):
     """Extrai as citações de documentos da resposta gerada."""
@@ -1753,15 +1836,21 @@ def interface_usuario_unificada():
         st.subheader("🤖 Provedor de IA")
         providers = get_available_providers()
         provider_names = {
-            "openai": "OpenAI (GPT-4)",
-            "deepseek": "DeepSeek (via OpenRouter)"
+            "openai": "⚠️ OpenAI (GPT-4) - Limitado por Cota",
+            "deepseek": "✅ DeepSeek (Recomendado)"
         }
+        
+        # Tornar DeepSeek padrão
+        default_index = 0
+        if "deepseek" in providers:
+            default_index = list(providers.keys()).index("deepseek")
         
         selected_provider = st.selectbox(
             "Escolha o provedor:",
             options=list(providers.keys()),
             format_func=lambda x: provider_names.get(x, x),
-            index=0 if "deepseek" not in providers else list(providers.keys()).index("deepseek")
+            index=default_index,
+            help="DeepSeek é recomendado por não ter limitações de cota"
         )
         
         # Seleção do modelo
@@ -1774,6 +1863,12 @@ def interface_usuario_unificada():
             )
         else:
             selected_model = "gpt-4"
+        
+        # Informação sobre fallback automático
+        if selected_provider == "openai":
+            st.warning("⚠️ **Fallback Automático Ativo**: Se OpenAI exceder cota, DeepSeek será usado automaticamente")
+        elif selected_provider == "deepseek":
+            st.success("✅ **Provedor Confiável**: DeepSeek não possui limitações de cota")
         
         # Status das APIs
         st.subheader("🔑 Status das APIs")
@@ -2056,15 +2151,30 @@ def interface_usuario_unificada():
                     
                     if documentos:
                         # Gerar resposta com template adaptativo
-                        resposta = gerar_resposta(pergunta_para_processar, documentos, llm, provider_usado)
+                        logger.info(f"🔍 DEBUG: Gerando resposta com {len(documentos)} documentos")
+                        resposta, modelo_usado_final = gerar_resposta(pergunta_para_processar, documentos, llm, provider_usado)
+                        
+                        logger.info(f"🔍 DEBUG: Resposta gerada - Tamanho: {len(resposta) if resposta else 0} caracteres")
+                        logger.info(f"🔍 DEBUG: Modelo usado final: {modelo_usado_final}")
+                        logger.info(f"🔍 DEBUG: Primeiros 100 chars da resposta: {resposta[:100] if resposta else 'VAZIA'}")
                         
                         # Exibir resposta
                         st.subheader("📝 Resposta")
-                        st.markdown(resposta)
+                        if resposta and resposta.strip():
+                            st.markdown(resposta)
+                            logger.info("🔍 DEBUG: Resposta exibida com sucesso no Streamlit")
+                        else:
+                            st.error("❌ Resposta vazia ou inválida gerada pelo modelo")
+                            logger.error("🔍 DEBUG: Resposta vazia detectada na interface!")
                         
                         # Mostrar qual provedor foi usado
-                        if provider_usado != selected_provider:
-                            st.info(f"ℹ️ Resposta gerada usando {provider_names.get(provider_usado, provider_usado)} (fallback)")
+                        if modelo_usado_final != provider_usado:
+                            if modelo_usado_final == "deepseek" and provider_usado == "openai":
+                                st.info(f"🔄 **Fallback Automático Ativado**: OpenAI estava indisponível (limite de cota temporário), DeepSeek foi usado com sucesso")
+                            else:
+                                st.info(f"ℹ️ Resposta gerada usando {provider_names.get(modelo_usado_final, modelo_usado_final)} (fallback)")
+                        else:
+                            st.success(f"✅ Resposta gerada com {provider_names.get(modelo_usado_final, modelo_usado_final)}")
                         
                         # Extrair e exibir citações
                         citacoes = extrair_citacoes_da_resposta(resposta)
@@ -2209,14 +2319,21 @@ def interface_usuario_unificada():
                         # Informações sobre a busca
                         with st.expander("🔍 Detalhes da Busca"):
                             st.write(f"**Documentos encontrados:** {len(documentos)}")
-                            st.write(f"**Provedor usado:** {provider_names.get(selected_provider, selected_provider)}")
+                            
+                            # Mostrar provedor que foi realmente usado
+                            if modelo_usado_final != provider_usado:
+                                st.write(f"**Provedor selecionado:** {provider_names.get(selected_provider, selected_provider)}")
+                                st.write(f"**Provedor usado (fallback):** {provider_names.get(modelo_usado_final, modelo_usado_final)}")
+                            else:
+                                st.write(f"**Provedor usado:** {provider_names.get(modelo_usado_final, modelo_usado_final)}")
+                                
                             st.write(f"**Modelo:** {selected_model}")
                             st.write(f"**Temperatura:** {temperatura}")
                             
                             # Mostrar informações sobre template adaptativo
-                            if "gpt-4" in selected_model.lower():
-                                template_info = "🧠 **Template GPT-4:** Estruturado e detalhado"
-                            elif "deepseek" in selected_model.lower():
+                            if "gpt-4" in selected_model.lower() or modelo_usado_final == "openai":
+                                template_info = "🧠 **Template GPT-4/OpenAI:** Estruturado e detalhado"
+                            elif "deepseek" in selected_model.lower() or modelo_usado_final == "deepseek":
                                 template_info = "⚡ **Template DeepSeek:** Direto e conciso"
                             else:
                                 template_info = "📝 **Template Padrão:** Balanceado"

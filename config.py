@@ -29,7 +29,6 @@ def get_openai_api_key():
     Obtém a chave da API OpenAI de fontes seguras na seguinte ordem:
     1. Variável de ambiente OPENAI_API_KEY
     2. Arquivo .env (carregado via python-dotenv)
-    3. Valor padrão (somente para desenvolvimento)
     
     Em produção, sempre use variáveis de ambiente ou .env
     """
@@ -37,10 +36,8 @@ def get_openai_api_key():
     api_key = os.environ.get("OPENAI_API_KEY", "")
     
     if not api_key:
-        # Valor padrão apenas para desenvolvimento (não usar em produção)
-        default_key = 'sk-proj-SJzLGfezVCxJLft228F2T3BlbkFJ2lSCkYReBn53ZYbMfmKh'
-        logger.warning("ATENÇÃO: Usando chave de API padrão. Em produção, configure a variável de ambiente OPENAI_API_KEY.")
-        return default_key
+        logger.warning("ATENÇÃO: Chave da API OpenAI não encontrada. Configure a variável de ambiente OPENAI_API_KEY.")
+        return ""  # Retorna string vazia em vez de chave padrão
         
     return api_key
 
@@ -77,8 +74,8 @@ LLM_PROVIDERS = {
         "name": "DeepSeek (via OpenRouter)",
         "base_url": "https://openrouter.ai/api/v1",
         "models": {
-            "deepseek-r1": "deepseek/deepseek-r1:free",
-            "deepseek-chat": "deepseek/deepseek-chat"
+            "deepseek-chat": "deepseek/deepseek-chat",
+            "deepseek-r1": "deepseek/deepseek-r1:free"
         },
         "embedding_model": "text-embedding-ada-002",  # Ainda usa OpenAI para embeddings
         "get_api_key": get_openrouter_api_key,
@@ -96,7 +93,7 @@ CHUNK_OVERLAP = 150
 
 # Configurações padrão (pode ser alterado via interface)
 DEFAULT_LLM_PROVIDER = "deepseek"  # Mudando para DeepSeek como padrão
-DEFAULT_LLM_MODEL = "deepseek-r1"
+DEFAULT_LLM_MODEL = "deepseek-chat"  # Usar deepseek-chat que funciona
 DEFAULT_EMBEDDING_MODEL = "text-embedding-ada-002"
 
 # Configurações do Streamlit
