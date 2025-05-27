@@ -39,6 +39,7 @@ from types import SimpleNamespace
 # Importar configurações e gerenciador de LLM
 from config import (
     get_openai_api_key,
+    get_openrouter_api_key,
     DB_FAISS_PATH,
     CHUNK_SIZE,
     CHUNK_OVERLAP,
@@ -475,7 +476,7 @@ def selecionar_template_adaptativo(template_base, modelo_usado):
         str: Template otimizado para o modelo
     """
     # Detectar tipo de modelo
-    is_gpt4 = any(gpt in modelo_usado.lower() for gpt in ['gpt-4', 'gpt4'])
+    is_gpt4 = any(gpt in modelo_usado.lower() for gpt in ['gpt-4', 'gpt4', 'openai'])
     is_deepseek = any(ds in modelo_usado.lower() for ds in ['deepseek', 'deep-seek'])
     
     # Mapear templates
@@ -916,48 +917,86 @@ def carregar_vectorstore():
         raise
 
 
-def carregar_vectorstore_com_provider(embedding_provider="free"):
+def carregar_vectorstore_com_provider(embedding_provider="local"):
     """Carrega o vectorstore ANTT com suporte a diferentes provedores de embeddings."""
-    logger.info(f"Carregando vectorstore de {DB_FAISS_PATH}...")
-    logger.info(f"Provedor de embeddings: {embedding_provider}")
+    logger.info(f"Carregando vectorstore com provedor de embeddings: {embedding_provider}")
+    
+    # Definir caminhos dos vectorstores
+    if embedding_provider == "openai":
+        vectorstore_path = DB_FAISS_PATH  # vectorstore/ (OpenAI)
+        logger.info(f"🔍 Usando vectorstore OpenAI: {vectorstore_path}")
+    elif embedding_provider in ["local", "free"]:
+        vectorstore_path = "vectorstore_local"  # vectorstore_local/ (Local)
+        logger.info(f"🔍 Usando vectorstore local: {vectorstore_path}")
+    else:
+        logger.warning(f"Provedor '{embedding_provider}' não reconhecido, usando local")
+        vectorstore_path = "vectorstore_local"
+        embedding_provider = "local"
     
     # Tentar carregar embeddings com o provedor especificado
+    embeddings = None
+    
     try:
         if embedding_provider == "openai":
-            logger.info("Tentando usar OpenAI para embeddings...")
-            llm_manager = create_llm_manager("openai", embedding_provider="openai")
-            embeddings = llm_manager.get_embeddings()
+            logger.info("🔧 Configurando embeddings OpenAI...")
             
-            # Teste rápido para verificar se a API está funcionando
-            test_embedding = embeddings.embed_query("teste")
-            logger.info("✅ OpenAI embeddings funcionando corretamente")
-            
-        elif embedding_provider == "free":
-            logger.info("Usando embeddings gratuitos/limitados...")
             try:
-                # Primeiro tentar OpenAI com configuração limitada
-                llm_manager = create_llm_manager("deepseek", embedding_provider="free")
-                embeddings = llm_manager.get_embeddings()
-                logger.info("✅ Embeddings gratuitos configurados")
-                
-            except Exception as e:
-                logger.warning(f"Embeddings gratuitos falharam: {e}")
-                logger.info("🔄 Tentando fallback para OpenAI básico...")
-                
-                # Fallback: usar OpenAI embeddings básicos sem verificação de cota
                 from langchain_openai import OpenAIEmbeddings
                 embeddings = OpenAIEmbeddings(
                     openai_api_key=get_openai_api_key(),
                     model="text-embedding-ada-002",
-                    max_retries=0,  # Não tentar novamente
-                    timeout=5       # Timeout muito baixo
+                    max_retries=1,  # Reduzir tentativas
+                    timeout=10,     # Timeout mais baixo
+                    request_timeout=10
                 )
-                logger.info("⚠️ Usando embeddings OpenAI em modo emergência")
                 
-        else:
-            logger.warning(f"Provedor '{embedding_provider}' não reconhecido, usando 'free'")
-            return carregar_vectorstore_com_provider("free")
+                # Teste muito simples para verificar se funciona
+                test_embedding = embeddings.embed_query("teste")
+                logger.info("✅ OpenAI embeddings funcionando corretamente")
+                
+            except Exception as e:
+                error_msg = str(e).lower()
+                if any(keyword in error_msg for keyword in ["insufficient_quota", "429", "quota", "exceeded"]):
+                    logger.warning(f"🚨 OpenAI com problema de cota: {e}")
+                    logger.info("🔄 Tentando fallback para embeddings locais...")
+                    return carregar_vectorstore_com_provider("local")
+                else:
+                    logger.error(f"❌ Erro OpenAI não relacionado à cota: {e}")
+                    raise e
+                    
+        elif embedding_provider in ["local", "free"]:
+            logger.info("🔧 Configurando embeddings locais (100% GRATUITO)...")
             
+            try:
+                # Usar o LLMManager para criar embeddings locais
+                llm_manager = create_llm_manager("deepseek", embedding_provider="local")
+                embeddings = llm_manager.get_embeddings()
+                logger.info("✅ Embeddings locais configurados com sucesso")
+                
+            except Exception as e:
+                error_msg = str(e).lower()
+                logger.warning(f"⚠️ Embeddings locais falharam: {e}")
+                
+                # Se for modo "free", tentar fallback para OpenAI
+                if embedding_provider == "free":
+                    logger.info("🔄 Tentando fallback para OpenAI...")
+                    try:
+                        from langchain_openai import OpenAIEmbeddings
+                        embeddings = OpenAIEmbeddings(
+                            openai_api_key=get_openai_api_key(),
+                            model="text-embedding-ada-002",
+                            max_retries=0,  # Sem retry
+                            timeout=5       # Timeout muito baixo
+                        )
+                        vectorstore_path = DB_FAISS_PATH  # Mudar para vectorstore OpenAI
+                        logger.info("⚠️ Usando embeddings OpenAI em modo de emergência")
+                        
+                    except Exception as e2:
+                        logger.error(f"❌ Fallback OpenAI também falhou: {e2}")
+                        raise Exception("❌ Não foi possível configurar embeddings. Instale sentence-transformers ou configure chave OpenAI.")
+                else:
+                    raise Exception(f"❌ Falha ao configurar embeddings locais: {str(e)}")
+                
     except Exception as e:
         error_msg = str(e).lower()
         
@@ -965,20 +1004,61 @@ def carregar_vectorstore_com_provider(embedding_provider="free"):
         if any(keyword in error_msg for keyword in ["insufficient_quota", "429", "quota", "exceeded"]):
             logger.warning(f"🚨 Cota excedida: {e}")
             
-            if embedding_provider != "free":
-                logger.info("🔄 Tentando com embeddings gratuitos...")
-                return carregar_vectorstore_com_provider("free")
+            if embedding_provider != "local":
+                logger.info("🔄 Tentando com embeddings locais...")
+                return carregar_vectorstore_com_provider("local")
             else:
                 logger.error("❌ Todos os provedores de embeddings falharam")
-                raise Exception("❌ Sistema temporariamente indisponível devido a limitações da API. Tente novamente em alguns minutos.")
+                raise Exception("❌ Sistema temporariamente indisponível devido a limitações da API.")
         else:
             logger.error(f"❌ Erro não relacionado à cota: {e}")
             raise Exception(f"Erro ao configurar embeddings: {str(e)}")
     
     # Tentar carregar o vectorstore
     try:
-        vectorstore = FAISS.load_local(DB_FAISS_PATH, embeddings, allow_dangerous_deserialization=True)
+        # Verificar se o vectorstore existe
+        if not os.path.exists(vectorstore_path):
+            logger.warning(f"⚠️ Vectorstore não encontrado em {vectorstore_path}")
+            
+            # Se for local e não existir, tentar criar automaticamente
+            if embedding_provider in ["local", "free"] and "local" in vectorstore_path:
+                logger.info("🚀 Criando vectorstore local automaticamente...")
+                
+                # Verificar se temos os dados necessários
+                if os.path.exists("relatorio_documentos.json"):
+                    try:
+                        # Criar vectorstore local
+                        sucesso = criar_vectorstore_local(embeddings)
+                        
+                        if sucesso:
+                            logger.info("✅ Vectorstore local criado com sucesso!")
+                        else:
+                            logger.error("❌ Falha ao criar vectorstore local")
+                            raise Exception("Falha na criação automática do vectorstore local")
+                            
+                    except Exception as e:
+                        logger.error(f"❌ Erro ao criar vectorstore local: {e}")
+                        
+                        # Fallback para OpenAI se disponível
+                        if embedding_provider == "free":
+                            logger.info("🔄 Tentando fallback para vectorstore OpenAI...")
+                            return carregar_vectorstore_com_provider("openai")
+                        else:
+                            raise Exception(f"Erro ao criar vectorstore local: {str(e)}")
+                else:
+                    logger.error("❌ Arquivo relatorio_documentos.json não encontrado")
+                    raise Exception("❌ Dados necessários para criar vectorstore não encontrados")
+            else:
+                raise Exception(f"❌ Vectorstore não encontrado em {vectorstore_path}")
+        
+        # Carregar o vectorstore
+        logger.info(f"📚 Carregando vectorstore de {vectorstore_path}...")
+        vectorstore = FAISS.load_local(vectorstore_path, embeddings, allow_dangerous_deserialization=True)
         logger.info("✅ Vectorstore carregado com sucesso")
+        
+        # Adicionar informação sobre qual vectorstore está sendo usado
+        vectorstore._embedding_provider = embedding_provider
+        vectorstore._vectorstore_path = vectorstore_path
         
         return vectorstore
         
@@ -991,6 +1071,98 @@ def carregar_vectorstore_com_provider(embedding_provider="free"):
         else:
             raise Exception(f"❌ Erro ao carregar base de conhecimento: {str(e)}")
 
+def criar_vectorstore_local(embeddings):
+    """Cria vectorstore local usando embeddings locais"""
+    try:
+        import json
+        from langchain.text_splitter import RecursiveCharacterTextSplitter
+        from langchain_core.documents import Document
+        
+        logger.info("🚀 Iniciando criação do vectorstore local...")
+        
+        # Carregar dados do relatório
+        with open("relatorio_documentos.json", 'r', encoding='utf-8') as f:
+            dados_documentos = json.load(f)
+        
+        logger.info(f"📄 Carregados {len(dados_documentos)} documentos do relatório")
+        
+        # Criar documentos para o vectorstore
+        documentos = []
+        
+        for doc_info in dados_documentos:
+            # Ler o arquivo markdown se existir
+            arquivo_md = doc_info.get('arquivo_md', '')
+            if arquivo_md and os.path.exists(arquivo_md):
+                try:
+                    with open(arquivo_md, 'r', encoding='utf-8') as f:
+                        conteudo = f.read()
+                    
+                    # Criar documento com metadados
+                    doc = Document(
+                        page_content=conteudo,
+                        metadata={
+                            'tipo_documento': doc_info.get('tipo', ''),
+                            'nome_tipo': doc_info.get('tipo', ''),
+                            'numero': doc_info.get('numero', ''),
+                            'ano': doc_info.get('ano', ''),
+                            'caminho': arquivo_md,
+                            'titulo': doc_info.get('titulo', ''),
+                            'ementa': doc_info.get('ementa', ''),
+                            'orgao': doc_info.get('orgao', '')
+                        }
+                    )
+                    documentos.append(doc)
+                    
+                except Exception as e:
+                    logger.warning(f"⚠️ Erro ao ler {arquivo_md}: {e}")
+        
+        logger.info(f"📚 Preparados {len(documentos)} documentos para indexação")
+        
+        # Dividir documentos em chunks
+        text_splitter = RecursiveCharacterTextSplitter(
+            chunk_size=500,
+            chunk_overlap=200,
+            length_function=len,
+        )
+        
+        logger.info("✂️ Dividindo documentos em chunks...")
+        splits = text_splitter.split_documents(documentos)
+        
+        # Adicionar informações de chunk aos metadados de forma mais eficiente
+        # Primeiro, agrupar chunks por documento
+        chunks_por_documento = {}
+        for split in splits:
+            doc_path = split.metadata.get('caminho', 'unknown')
+            if doc_path not in chunks_por_documento:
+                chunks_por_documento[doc_path] = []
+            chunks_por_documento[doc_path].append(split)
+        
+        # Agora atualizar metadados com informações de chunk
+        for doc_path, chunks in chunks_por_documento.items():
+            total_chunks = len(chunks)
+            for i, split in enumerate(chunks):
+                split.metadata.update({
+                    'chunk': i + 1,
+                    'total_chunks': total_chunks
+                })
+        
+        logger.info(f"📝 Criados {len(splits)} chunks com metadados atualizados")
+        
+        # Criar vectorstore
+        logger.info("🔍 Criando vectorstore com embeddings locais...")
+        vectorstore = FAISS.from_documents(documents=splits, embedding=embeddings)
+        
+        # Salvar vectorstore
+        vectorstore_path = "vectorstore_local"
+        os.makedirs(vectorstore_path, exist_ok=True)
+        vectorstore.save_local(vectorstore_path)
+        
+        logger.info(f"✅ Vectorstore local salvo em {vectorstore_path}")
+        return True
+        
+    except Exception as e:
+        logger.error(f"❌ Erro ao criar vectorstore local: {e}")
+        return False
 
 def criar_filtro_metadados(tipo_documento=None, ano=None, numero=None):
     """Cria um filtro para busca por metadados."""
@@ -1634,30 +1806,49 @@ def interface_usuario_unificada():
         
         # Seleção do provedor de embeddings
         st.markdown("**🔤 Provedor de Embeddings**")
-        embedding_providers = {
-            "free": "🆓 Gratuito/Limitado (Padrão)",
-            "openai": "💰 OpenAI (Pago - Alta Qualidade)"
-        }
+        embedding_providers = get_available_embedding_providers()
+        
+        # Criar lista de opções com descrições claras
+        embedding_options = list(embedding_providers.keys())
+        embedding_labels = [embedding_providers[key]["name"] for key in embedding_options]
         
         selected_embedding_provider = st.selectbox(
             "Escolha o provedor de embeddings:",
-            options=list(embedding_providers.keys()),
-            format_func=lambda x: embedding_providers[x],
-            index=0,  # Padrão é "free"
-            help="Embeddings gratuitos usam configuração otimizada para evitar limites de cota"
+            options=embedding_options,
+            format_func=lambda x: embedding_providers[x]["name"],
+            index=0,  # Padrão é local (realmente gratuito)
+            help="⚠️ IMPORTANTE: Local é 100% gratuito, OpenAI consome créditos pagos"
         )
         
-        # Mostrar status do provedor de embeddings selecionado
-        if selected_embedding_provider == "openai":
+        # Mostrar descrição detalhada da opção selecionada
+        selected_info = embedding_providers[selected_embedding_provider]
+        
+        if selected_embedding_provider == "local":
+            st.success(f"✅ **{selected_info['name']}**")
+            st.info("🎉 **100% GRATUITO** - Usa sentence-transformers offline")
+        elif selected_embedding_provider == "openai":
+            st.warning(f"💰 **{selected_info['name']}**")
+            st.warning("⚠️ **CONSOME CRÉDITOS** - Cada busca usa tokens pagos da OpenAI")
+        elif selected_embedding_provider == "free":
+            st.info(f"⚡ **{selected_info['name']}**")
+            st.info("🔄 Tenta local primeiro (gratuito), fallback para OpenAI se necessário")
+        
+        # Mostrar status da dependência
+        if selected_embedding_provider == "local":
+            try:
+                import sentence_transformers
+                st.success("🔑 sentence-transformers instalado - Pronto para uso gratuito!")
+            except ImportError:
+                st.error("❌ sentence-transformers não encontrado - Execute: pip install sentence-transformers")
+        elif selected_embedding_provider == "openai":
             try:
                 if get_openai_api_key():
-                    st.success("✅ OpenAI disponível para embeddings")
+                    st.success("🔑 Chave OpenAI configurada")
+                    st.warning("💸 Lembre-se: cada consulta consome créditos!")
                 else:
                     st.error("❌ Chave OpenAI não encontrada")
             except:
                 st.warning("⚠️ Verificação de chave OpenAI falhou")
-        else:
-            st.info("ℹ️ Usando embeddings gratuitos/limitados")
         
         st.divider()
         
@@ -1701,384 +1892,446 @@ def interface_usuario_unificada():
             help="Filtrar por número específico"
         )
     
-    # Área principal
-    col1, col2 = st.columns([2, 1])
+    # Carregar vectorstore primeiro (fora dos containers)
+    try:
+        vectorstore = carregar_vectorstore_com_provider(selected_embedding_provider)
+        vectorstore_status = "✅ Sistema Pronto"
+        vectorstore_loaded = True
+    except Exception as e:
+        logger.error(f"Erro ao carregar vectorstore: {str(e)}")
+        vectorstore = None
+        vectorstore_status = "❌ Sistema Indisponível"
+        vectorstore_loaded = False
+
+    # Layout principal em duas colunas
+    col_main, col_info = st.columns([2, 1])
     
-    with col1:
-        st.subheader("💬 Consulta")
-        
+    with col_main:
         # Verificar se há um exemplo selecionado no session_state
         valor_inicial = ""
         if "pergunta_exemplo" in st.session_state:
             valor_inicial = st.session_state.pergunta_exemplo
-            # Limpar o session_state após usar
-            del st.session_state.pergunta_exemplo
-        
-        # Campo de pergunta
+            
+        # Campo de pergunta principal
         pergunta = st.text_area(
-            "Faça sua pergunta sobre regulamentações da ANTT:",
+            "💬 Digite sua pergunta sobre documentos da ANTT:",
             value=valor_inicial,
             height=100,
-            placeholder="Ex: Quais são os parâmetros técnicos para pavimentos rodoviários?"
+            help="Digite sua consulta sobre regulamentações, normas ou procedimentos da ANTT"
         )
         
         # Botões de ação
-        col_btn1, col_btn2, col_btn3 = st.columns(3)
+        btn_col1, btn_col2, btn_col3, btn_col4 = st.columns([2, 2, 2, 2])
         
-        with col_btn1:
+        with btn_col1:
             consultar = st.button("🔍 Consultar", type="primary", use_container_width=True)
         
-        with col_btn2:
+        with btn_col2:
             limpar = st.button("🗑️ Limpar", use_container_width=True)
         
-        with col_btn3:
+        with btn_col3:
             exemplos = st.button("💡 Exemplos", use_container_width=True)
-    
-    with col2:
+        
+        with btn_col4:
+            if vectorstore_loaded:
+                st.success(vectorstore_status)
+            else:
+                st.error(vectorstore_status)
+
+    with col_info:
         st.subheader("📊 Informações")
         
-        # Carregar vectorstore e mostrar estatísticas
-        try:
-            vectorstore = carregar_vectorstore_com_provider(selected_embedding_provider)
+        # Mostrar aviso se usando embeddings gratuitos
+        if selected_embedding_provider == "local":
+            st.success("🎉 **Modo 100% Gratuito Ativo**: Sistema usando embeddings locais offline - sem custos!")
+        elif selected_embedding_provider == "free":
+            st.info("⚡ **Modo Automático**: Sistema tentará usar embeddings locais primeiro, com fallback para OpenAI se necessário")
+        elif selected_embedding_provider == "openai":
+            st.warning("💰 **Modo Pago Ativo**: Sistema usando embeddings OpenAI - consome créditos a cada consulta")
+        
+        # Estatísticas básicas
+        if vectorstore_loaded:
+            # Verificar qual vectorstore foi carregado
+            vectorstore_info = "📚 Base de Conhecimento Carregada"
+            if hasattr(vectorstore, '_embedding_provider'):
+                provider = vectorstore._embedding_provider
+                path = getattr(vectorstore, '_vectorstore_path', 'N/A')
+                
+                if provider == "local":
+                    vectorstore_info = "🆓 **Vectorstore Local** (Gratuito)"
+                    st.success("✅ Usando base de conhecimento com embeddings locais")
+                elif provider == "openai":
+                    vectorstore_info = "💰 **Vectorstore OpenAI** (Pago)"
+                    st.warning("⚠️ Usando base de conhecimento com embeddings pagos")
+                else:
+                    vectorstore_info = f"📚 **Vectorstore {provider.title()}**"
             
-            # Mostrar aviso se usando embeddings gratuitos
-            if selected_embedding_provider == "free":
-                st.info("ℹ️ **Modo Gratuito Ativo**: Sistema configurado para evitar limites de cota da OpenAI. Qualidade de busca pode ser ligeiramente reduzida, mas o sistema é mais estável.")
-            
-            # Estatísticas básicas
-            st.markdown("""
+            st.markdown(f"""
             <div class="metric-card">
-                <h4>📚 Base de Conhecimento</h4>
-                <p>✅ Vectorstore carregado</p>
+                <h4>{vectorstore_info}</h4>
+                <p>✅ Sistema operacional</p>
                 <p>🔍 Busca semântica ativa</p>
                 <p>🤖 IA: """ + provider_names.get(selected_provider, selected_provider) + """</p>
+                <p>🔤 Embeddings: """ + embedding_providers.get(selected_embedding_provider, {}).get("name", selected_embedding_provider) + """</p>
             </div>
             """, unsafe_allow_html=True)
-            
-        except Exception as e:
-            st.error(f"Erro ao carregar vectorstore: {str(e)}")
-            vectorstore = None
+        else:
+            st.error("❌ Erro ao carregar base de conhecimento")
     
     # Verificar se deve processar automaticamente um exemplo
     processar_exemplo_automatico = False
-    pergunta_do_exemplo = None
-    
-    if "processar_automatico" in st.session_state:
-        processar_exemplo_automatico = st.session_state.processar_automatico
+    if "processar_automatico" in st.session_state and st.session_state.processar_automatico:
+        processar_exemplo_automatico = True
         # Limpar o flag após usar
         del st.session_state.processar_automatico
-        
-        # Se há processamento automático, usar a pergunta do session_state se disponível
-        if "pergunta_exemplo" in st.session_state:
-            pergunta_do_exemplo = st.session_state.pergunta_exemplo
-            # Limpar a pergunta do exemplo após usar no processamento automático
-            del st.session_state.pergunta_exemplo
-    
-    # Usar a pergunta do exemplo se disponível, senão usar a pergunta normal
-    pergunta_para_processar = pergunta_do_exemplo if pergunta_do_exemplo else pergunta
-    
+
     # Processamento da consulta
-    if (consultar and pergunta and vectorstore) or (processar_exemplo_automatico and pergunta_para_processar and vectorstore):
-        # Mostrar indicação se é processamento automático
-        if processar_exemplo_automatico:
-            st.info(f"🚀 **Processamento Automático**: Executando exemplo selecionado: '{pergunta_para_processar}'")
+    if (consultar and pergunta and vectorstore_loaded) or (processar_exemplo_automatico and vectorstore_loaded):
+        # Para processamento automático, usar a pergunta do session_state se disponível
+        pergunta_para_processar = pergunta
+        if processar_exemplo_automatico and "pergunta_exemplo" in st.session_state:
+            pergunta_para_processar = st.session_state.pergunta_exemplo
         
-        with st.spinner("🔍 Processando consulta..."):
-            try:
-                # Criar LLM manager
-                llm_manager = create_llm_manager(selected_provider, selected_model)
-                llm = llm_manager.get_llm(temperature=temperatura, max_tokens=max_tokens)
-                
-                # Aplicar filtros
-                filtro_tipo = None if tipo_documento == "Todos" else tipo_documento
-                filtro_ano = None if ano_filtro == "Todos" else ano_filtro
-                filtro_numero = numero_filtro if numero_filtro.strip() else None
-                
-                # Buscar documentos usando a pergunta apropriada
-                documentos = pesquisar_documentos(
-                    pergunta_para_processar, 
-                    vectorstore, 
-                    k=num_documentos,
-                    tipo_documento=filtro_tipo,
-                    ano=filtro_ano,
-                    numero=filtro_numero,
-                    embedding_provider=selected_embedding_provider
-                )
-                
-                if documentos:
-                    # Gerar resposta com template adaptativo
-                    resposta = gerar_resposta(pergunta_para_processar, documentos, llm, selected_model)
+        # Verificar se temos uma pergunta válida
+        if not pergunta_para_processar or pergunta_para_processar.strip() == "":
+            st.error("❌ Nenhuma pergunta fornecida para processamento")
+        else:
+            # Mostrar indicação se é processamento automático
+            if processar_exemplo_automatico:
+                st.info(f"🚀 **Processamento Automático**: Executando exemplo selecionado")
+                st.markdown(f"**Pergunta:** {pergunta_para_processar}")
+            
+            # Limpar a pergunta do exemplo após usar
+            if "pergunta_exemplo" in st.session_state:
+                del st.session_state.pergunta_exemplo
+            
+            with st.spinner("🔍 Processando consulta..."):
+                try:
+                    # Tentar criar LLM manager com o provedor selecionado
+                    llm_manager = None
+                    llm = None
+                    provider_usado = selected_provider
                     
-                    # Exibir resposta
-                    st.subheader("📝 Resposta")
-                    st.markdown(resposta)
+                    try:
+                        llm_manager = create_llm_manager(selected_provider, selected_model)
+                        llm = llm_manager.get_llm(temperature=temperatura, max_tokens=max_tokens)
+                        st.info(f"✅ Usando {provider_names.get(selected_provider, selected_provider)}")
+                    except Exception as e:
+                        error_msg = str(e).lower()
+                        if any(keyword in error_msg for keyword in ["insufficient_quota", "429", "quota", "exceeded"]):
+                            st.warning(f"⚠️ {provider_names.get(selected_provider, selected_provider)} com problema de cota. Tentando DeepSeek...")
+                            
+                            # Fallback para DeepSeek
+                            try:
+                                llm_manager = create_llm_manager("deepseek")
+                                llm = llm_manager.get_llm(temperature=temperatura, max_tokens=max_tokens)
+                                provider_usado = "deepseek"
+                                st.success("✅ Usando DeepSeek como alternativa")
+                            except Exception as e2:
+                                st.error(f"❌ Erro ao usar DeepSeek: {str(e2)}")
+                                raise e2
+                        else:
+                            st.error(f"❌ Erro ao configurar {provider_names.get(selected_provider, selected_provider)}: {str(e)}")
+                            raise e
                     
-                    # Extrair e exibir citações
-                    citacoes = extrair_citacoes_da_resposta(resposta)
-                    if citacoes:
-                        st.markdown("""
-                        <div class="citation-box">
-                            <h4>📚 Documentos Citados</h4>
-                        </div>
-                        """, unsafe_allow_html=True)
+                    if llm is None:
+                        st.error("❌ Não foi possível configurar nenhum provedor de IA")
+                        return
+                    
+                    # Aplicar filtros
+                    filtro_tipo = None if tipo_documento == "Todos" else tipo_documento
+                    filtro_ano = None if ano_filtro == "Todos" else ano_filtro
+                    filtro_numero = numero_filtro if numero_filtro.strip() else None
+                    
+                    # Buscar documentos
+                    documentos = pesquisar_documentos(
+                        pergunta_para_processar, 
+                        vectorstore, 
+                        k=num_documentos,
+                        tipo_documento=filtro_tipo,
+                        ano=filtro_ano,
+                        numero=filtro_numero,
+                        embedding_provider=selected_embedding_provider
+                    )
+                    
+                    if documentos:
+                        # Gerar resposta com template adaptativo
+                        resposta = gerar_resposta(pergunta_para_processar, documentos, llm, provider_usado)
                         
-                        for citacao in citacoes:
-                            st.markdown(f"• {citacao}")
-                    
-                    # Exibir trechos dos documentos citados
-                    st.markdown("---")
-                    st.markdown("### 📄 Trechos dos Documentos Citados")
-                    
-                    # Extrair citações de documentos da resposta
-                    documentos_citados = extrair_citacoes_da_resposta(resposta)
-                    
-                    # Exibir trechos relevantes para os documentos citados
-                    documentos_encontrados = False
-                    
-                    if documentos_citados:
-                        # Criar mapeamento de documentos para facilitar a busca
-                        docs_por_id = {}
-                        for doc in documentos:
-                            meta = doc.metadata
-                            tipo = meta.get('nome_tipo', 'Documento')
-                            numero = meta.get('numero', 'N/A')
-                            ano = meta.get('ano', 'N/A')
-                            doc_id = f"{tipo} {numero}/{ano}"
-                            
-                            # Normalizar o ID para comparação (tudo minúsculo, sem espaços extras)
-                            doc_id_norm = re.sub(r'\s+', ' ', doc_id.lower()).strip()
-                            
-                            # Criar versões alternativas do ID para melhorar correspondências
-                            alternativas = [
-                                doc_id_norm,
-                                f"{tipo.lower()} {numero}",
-                                f"{tipo.lower()} {numero.lstrip('0')}/{ano}",
-                                f"{tipo.lower()} {numero.lstrip('0')} de {ano}"
-                            ]
-                            
-                            for alt_id in alternativas:
-                                if alt_id not in docs_por_id:
-                                    docs_por_id[alt_id] = []
-                                docs_por_id[alt_id].append((doc, meta, doc_id))
+                        # Exibir resposta
+                        st.subheader("📝 Resposta")
+                        st.markdown(resposta)
                         
-                        # Exibir documentos citados
-                        documentos_exibidos = set()  # Para evitar duplicações
+                        # Mostrar qual provedor foi usado
+                        if provider_usado != selected_provider:
+                            st.info(f"ℹ️ Resposta gerada usando {provider_names.get(provider_usado, provider_usado)} (fallback)")
                         
-                        for doc_citado in documentos_citados:
-                            # Normalizar a citação
-                            doc_citado_norm = re.sub(r'\s+', ' ', doc_citado.lower()).strip()
-                            doc_encontrado = False
+                        # Extrair e exibir citações
+                        citacoes = extrair_citacoes_da_resposta(resposta)
+                        if citacoes:
+                            st.markdown("""
+                            <div class="citation-box">
+                                <h4>📚 Documentos Citados</h4>
+                            </div>
+                            """, unsafe_allow_html=True)
                             
-                            # Tentar diferentes variações da citação para encontrar correspondência
-                            for doc_key, doc_list in docs_por_id.items():
-                                # Verificar se a citação corresponde a alguma parte da chave
-                                if (doc_citado_norm in doc_key or 
-                                    doc_key in doc_citado_norm or
-                                    any(term in doc_citado_norm for term in doc_key.split())):
-                                    
-                                    for doc, meta, doc_id in doc_list:
-                                        doc_display_id = f"{doc_id}_{meta.get('chunk', '')}"
-                                        
-                                        # Verificar se já exibimos este documento
-                                        if doc_display_id in documentos_exibidos:
-                                            continue
-                                        
-                                        # Marcar como encontrado
-                                        doc_encontrado = True
-                                        documentos_encontrados = True
-                                        documentos_exibidos.add(doc_display_id)
-                                        
-                                        with st.container(border=True):
-                                            # Adicionar uma indicação visual da cor
-                                            if "Instrução" in doc_id:
-                                                st.markdown("🔵 **Instrução Normativa**")
-                                            elif "Resolução" in doc_id:
-                                                st.markdown("🟠 **Resolução**")
-                                            elif "Voto" in doc_id:
-                                                st.markdown("🟣 **Voto**")
-                                            elif "Deliberação" in doc_id:
-                                                st.markdown("🟡 **Deliberação**")
-                                            else:
-                                                st.markdown("🟢 **Documento**")
-                                                
-                                            st.markdown(f"#### {doc_id}")
-                                            st.caption(f"Parte {meta.get('chunk', 'N/A')}/{meta.get('total_chunks', 'N/A')} • Fonte: `{meta.get('caminho', 'Não especificado')}`")
-                                            st.text_area(
-                                                "Trecho do documento:",
-                                                doc.page_content,
-                                                height=150,
-                                                key=f"citacao_{doc_display_id}",
-                                                disabled=True
-                                            )
-                            
-                            # Se não encontrou o documento, registrar isso
-                            if not doc_encontrado:
-                                logger.info(f"Documento citado não encontrado: {doc_citado}")
-                    
-                    # Se não encontramos citações explícitas ou os documentos citados
-                    if not documentos_citados or not documentos_encontrados:
-                        st.info("⚠️ Não foram encontradas citações de documentos específicos na resposta, ou os documentos citados não estão entre os recuperados. Exibindo os documentos mais relevantes:")
+                            for citacao in citacoes:
+                                st.markdown(f"• {citacao}")
                         
-                        # Mostrar os 3 documentos mais relevantes
-                        with st.container(border=True):
-                            for i, doc in enumerate(documentos[:3]):
+                        # Exibir trechos dos documentos citados
+                        st.markdown("---")
+                        st.markdown("### 📄 Trechos dos Documentos Citados")
+                        
+                        # Extrair citações de documentos da resposta
+                        documentos_citados = extrair_citacoes_da_resposta(resposta)
+                        
+                        # Exibir trechos relevantes para os documentos citados
+                        documentos_encontrados = False
+                        
+                        if documentos_citados:
+                            # Criar mapeamento de documentos para facilitar a busca
+                            docs_por_id = {}
+                            for doc in documentos:
                                 meta = doc.metadata
                                 tipo = meta.get('nome_tipo', 'Documento')
                                 numero = meta.get('numero', 'N/A')
                                 ano = meta.get('ano', 'N/A')
                                 doc_id = f"{tipo} {numero}/{ano}"
                                 
-                                # Adicionar indicação visual do tipo de documento
-                                if "Instrução" in tipo:
-                                    st.markdown("🔵 **Instrução Normativa**")
-                                elif "Resolução" in tipo:
-                                    st.markdown("🟠 **Resolução**")
-                                elif "Voto" in tipo:
-                                    st.markdown("🟣 **Voto**")
-                                elif "Deliberação" in tipo:
-                                    st.markdown("🟡 **Deliberação**")
-                                else:
-                                    st.markdown("🟢 **Documento**")
+                                # Normalizar o ID para comparação (tudo minúsculo, sem espaços extras)
+                                doc_id_norm = re.sub(r'\s+', ' ', doc_id.lower()).strip()
                                 
-                                st.markdown(f"**{doc_id}** - Parte {meta.get('chunk', 'N/A')}/{meta.get('total_chunks', 'N/A')}")
-                                st.caption(f"Fonte: `{meta.get('caminho', 'Não especificado')}`")
-                                st.text_area(
-                                    "Conteúdo do documento:",
-                                    doc.page_content,
-                                    height=130,
-                                    key=f"relevante_{i}",
-                                    disabled=True
-                                )
+                                # Criar versões alternativas do ID para melhorar correspondências
+                                alternativas = [
+                                    doc_id_norm,
+                                    f"{tipo.lower()} {numero}",
+                                    f"{tipo.lower()} {numero.lstrip('0')}/{ano}",
+                                    f"{tipo.lower()} {numero.lstrip('0')} de {ano}"
+                                ]
                                 
-                                if i < 2:  # Não adicionar separador após o último
-                                    st.divider()
-                    
-                    # Informações sobre a busca
-                    with st.expander("🔍 Detalhes da Busca"):
-                        st.write(f"**Documentos encontrados:** {len(documentos)}")
-                        st.write(f"**Provedor usado:** {provider_names.get(selected_provider, selected_provider)}")
-                        st.write(f"**Modelo:** {selected_model}")
-                        st.write(f"**Temperatura:** {temperatura}")
+                                for alt_id in alternativas:
+                                    if alt_id not in docs_por_id:
+                                        docs_por_id[alt_id] = []
+                                    docs_por_id[alt_id].append((doc, meta, doc_id))
+                            
+                            # Exibir documentos citados
+                            documentos_exibidos = set()  # Para evitar duplicações
+                            
+                            for doc_citado in documentos_citados:
+                                # Normalizar a citação
+                                doc_citado_norm = re.sub(r'\s+', ' ', doc_citado.lower()).strip()
+                                doc_encontrado = False
+                                
+                                # Tentar diferentes variações da citação para encontrar correspondência
+                                for doc_key, doc_list in docs_por_id.items():
+                                    # Verificar se a citação corresponde a alguma parte da chave
+                                    if (doc_citado_norm in doc_key or 
+                                        doc_key in doc_citado_norm or
+                                        any(term in doc_citado_norm for term in doc_key.split())):
+                                        
+                                        for doc, meta, doc_id in doc_list:
+                                            doc_display_id = f"{doc_id}_{meta.get('chunk', '')}"
+                                            
+                                            # Verificar se já exibimos este documento
+                                            if doc_display_id in documentos_exibidos:
+                                                continue
+                                            
+                                            # Marcar como encontrado
+                                            doc_encontrado = True
+                                            documentos_encontrados = True
+                                            documentos_exibidos.add(doc_display_id)
+                                            
+                                            with st.container(border=True):
+                                                # Adicionar uma indicação visual da cor
+                                                if "Instrução" in doc_id:
+                                                    st.markdown("🔵 **Instrução Normativa**")
+                                                elif "Resolução" in doc_id:
+                                                    st.markdown("🟠 **Resolução**")
+                                                elif "Voto" in doc_id:
+                                                    st.markdown("🟣 **Voto**")
+                                                elif "Deliberação" in doc_id:
+                                                    st.markdown("🟡 **Deliberação**")
+                                                else:
+                                                    st.markdown("🟢 **Documento**")
+                                                    
+                                                st.markdown(f"#### {doc_id}")
+                                                st.caption(f"Parte {meta.get('chunk', 'N/A')}/{meta.get('total_chunks', 'N/A')} • Fonte: `{meta.get('caminho', 'Não especificado')}`")
+                                                st.text_area(
+                                                    "Trecho do documento:",
+                                                    doc.page_content,
+                                                    height=150,
+                                                    key=f"citacao_{doc_display_id}",
+                                                    disabled=True
+                                                )
+                                
+                                # Se não encontrou o documento, registrar isso
+                                if not doc_encontrado:
+                                    logger.info(f"Documento citado não encontrado: {doc_citado}")
                         
-                        # Mostrar informações sobre template adaptativo
-                        if "gpt-4" in selected_model.lower():
-                            template_info = "🧠 **Template GPT-4:** Estruturado e detalhado"
-                        elif "deepseek" in selected_model.lower():
-                            template_info = "⚡ **Template DeepSeek:** Direto e conciso"
-                        else:
-                            template_info = "📝 **Template Padrão:** Balanceado"
-                        
-                        st.markdown(template_info)
-                        
-                        # Mostrar documentos encontrados
-                        for i, doc in enumerate(documentos[:5]):
-                            metadata = doc.metadata
-                            st.write(f"**Doc {i+1}:** {metadata.get('nome_tipo', 'N/A')} {metadata.get('numero', 'N/A')}/{metadata.get('ano', 'N/A')}")
-                    
-                    # Seção para mostrar todas as fontes consultadas (FORA do expander anterior)
-                    with st.expander("📚 Todas as Fontes Consultadas"):
-                        # Agrupar documentos por tipo/número/ano
-                        documentos_agrupados = {}
-                        for doc in documentos:
-                            meta = doc.metadata
-                            tipo = meta.get('nome_tipo', 'Documento')
-                            numero = meta.get('numero', 'N/A')
-                            ano = meta.get('ano', 'N/A')
+                        # Se não encontramos citações explícitas ou os documentos citados
+                        if not documentos_citados or not documentos_encontrados:
+                            st.info("⚠️ Não foram encontradas citações de documentos específicos na resposta, ou os documentos citados não estão entre os recuperados. Exibindo os documentos mais relevantes:")
                             
-                            doc_id = f"{tipo} {numero}/{ano}"
-                            if doc_id not in documentos_agrupados:
-                                documentos_agrupados[doc_id] = {
-                                    'tipo': tipo,
-                                    'numero': numero,
-                                    'ano': ano,
-                                    'caminho': meta.get('caminho', 'Não especificado'),
-                                    'trechos': []
-                                }
-                            
-                            documentos_agrupados[doc_id]['trechos'].append({
-                                'chunk': meta.get('chunk', 'N/A'),
-                                'total_chunks': meta.get('total_chunks', 'N/A'),
-                                'conteudo': doc.page_content
-                            })
-                        
-                        # Exibir documentos agrupados
-                        for i, (doc_id, info) in enumerate(documentos_agrupados.items()):
-                            # Criar um ícone baseado no tipo de documento
-                            icone = "📄"
-                            if "Resolução" in info['tipo']:
-                                icone = "📜"
-                            elif "Instrução" in info['tipo']:
-                                icone = "📝"
-                            elif "Deliberação" in info['tipo']:
-                                icone = "📋"
-                            elif "Voto" in info['tipo']:
-                                icone = "✅"
-                            
-                            # Destacar documentos mais relevantes
-                            destaque = " 🌟" if i < 3 else ""
-                            
-                            # Usar container em vez de expander aninhado
-                            st.markdown(f"### {icone} {doc_id}{destaque}")
-                            
+                            # Mostrar os 3 documentos mais relevantes
                             with st.container(border=True):
-                                # Mostrar metadados do documento
-                                col1, col2, col3 = st.columns(3)
-                                with col1:
-                                    st.markdown(f"**Tipo:** {info['tipo']}")
-                                with col2:
-                                    st.markdown(f"**Número:** {info['numero']}")
-                                with col3:
-                                    st.markdown(f"**Ano:** {info['ano']}")
-                                
-                                st.markdown(f"**Caminho:** `{info['caminho']}`")
-                                
-                                # Exibir trechos em tabs se houver múltiplos
-                                if len(info['trechos']) > 1:
-                                    trechos_tabs = st.tabs([f"Trecho {t['chunk']}/{t['total_chunks']}" for t in info['trechos']])
-                                    for j, tab in enumerate(trechos_tabs):
-                                        with tab:
-                                            trecho = info['trechos'][j]
-                                            st.text_area(
-                                                f"Conteúdo do trecho {trecho['chunk']}:",
-                                                trecho['conteudo'],
-                                                height=200,
-                                                key=f"fonte_{doc_id}_{j}",
-                                                disabled=True
-                                            )
-                                else:
-                                    # Se há apenas um trecho, exibir diretamente
-                                    trecho = info['trechos'][0]
+                                for i, doc in enumerate(documentos[:3]):
+                                    meta = doc.metadata
+                                    tipo = meta.get('nome_tipo', 'Documento')
+                                    numero = meta.get('numero', 'N/A')
+                                    ano = meta.get('ano', 'N/A')
+                                    doc_id = f"{tipo} {numero}/{ano}"
+                                    
+                                    # Adicionar indicação visual do tipo de documento
+                                    if "Instrução" in tipo:
+                                        st.markdown("🔵 **Instrução Normativa**")
+                                    elif "Resolução" in tipo:
+                                        st.markdown("🟠 **Resolução**")
+                                    elif "Voto" in tipo:
+                                        st.markdown("🟣 **Voto**")
+                                    elif "Deliberação" in tipo:
+                                        st.markdown("🟡 **Deliberação**")
+                                    else:
+                                        st.markdown("🟢 **Documento**")
+                                    
+                                    st.markdown(f"**{doc_id}** - Parte {meta.get('chunk', 'N/A')}/{meta.get('total_chunks', 'N/A')}")
+                                    st.caption(f"Fonte: `{meta.get('caminho', 'Não especificado')}`")
                                     st.text_area(
-                                        f"Conteúdo:",
-                                        trecho['conteudo'],
-                                        height=200,
-                                        key=f"fonte_unico_{doc_id}",
+                                        "Conteúdo do documento:",
+                                        doc.page_content,
+                                        height=130,
+                                        key=f"relevante_{i}",
                                         disabled=True
                                     )
-                
-                else:
-                    st.warning("Nenhum documento relevante encontrado. Tente reformular sua pergunta.")
+                                    
+                                    if i < 2:  # Não adicionar separador após o último
+                                        st.divider()
+                        
+                        # Informações sobre a busca
+                        with st.expander("🔍 Detalhes da Busca"):
+                            st.write(f"**Documentos encontrados:** {len(documentos)}")
+                            st.write(f"**Provedor usado:** {provider_names.get(selected_provider, selected_provider)}")
+                            st.write(f"**Modelo:** {selected_model}")
+                            st.write(f"**Temperatura:** {temperatura}")
+                            
+                            # Mostrar informações sobre template adaptativo
+                            if "gpt-4" in selected_model.lower():
+                                template_info = "🧠 **Template GPT-4:** Estruturado e detalhado"
+                            elif "deepseek" in selected_model.lower():
+                                template_info = "⚡ **Template DeepSeek:** Direto e conciso"
+                            else:
+                                template_info = "📝 **Template Padrão:** Balanceado"
+                            
+                            st.markdown(template_info)
+                            
+                            # Mostrar documentos encontrados
+                            for i, doc in enumerate(documentos[:5]):
+                                metadata = doc.metadata
+                                st.write(f"**Doc {i+1}:** {metadata.get('nome_tipo', 'N/A')} {metadata.get('numero', 'N/A')}/{metadata.get('ano', 'N/A')}")
+                        
+                        # Seção para mostrar todas as fontes consultadas (FORA do expander anterior)
+                        with st.expander("📚 Todas as Fontes Consultadas"):
+                            # Agrupar documentos por tipo/número/ano
+                            documentos_agrupados = {}
+                            for doc in documentos:
+                                meta = doc.metadata
+                                tipo = meta.get('nome_tipo', 'Documento')
+                                numero = meta.get('numero', 'N/A')
+                                ano = meta.get('ano', 'N/A')
+                                
+                                doc_id = f"{tipo} {numero}/{ano}"
+                                if doc_id not in documentos_agrupados:
+                                    documentos_agrupados[doc_id] = {
+                                        'tipo': tipo,
+                                        'numero': numero,
+                                        'ano': ano,
+                                        'caminho': meta.get('caminho', 'Não especificado'),
+                                        'trechos': []
+                                    }
+                                
+                                documentos_agrupados[doc_id]['trechos'].append({
+                                    'chunk': meta.get('chunk', 'N/A'),
+                                    'total_chunks': meta.get('total_chunks', 'N/A'),
+                                    'conteudo': doc.page_content
+                                })
+                            
+                            # Exibir documentos agrupados
+                            for i, (doc_id, info) in enumerate(documentos_agrupados.items()):
+                                # Criar um ícone baseado no tipo de documento
+                                icone = "📄"
+                                if "Resolução" in info['tipo']:
+                                    icone = "📜"
+                                elif "Instrução" in info['tipo']:
+                                    icone = "📝"
+                                elif "Deliberação" in info['tipo']:
+                                    icone = "📋"
+                                elif "Voto" in info['tipo']:
+                                    icone = "✅"
+                                
+                                # Destacar documentos mais relevantes
+                                destaque = " 🌟" if i < 3 else ""
+                                
+                                # Usar container em vez de expander aninhado
+                                st.markdown(f"### {icone} {doc_id}{destaque}")
+                                
+                                with st.container(border=True):
+                                    # Mostrar metadados do documento
+                                    col1, col2, col3 = st.columns(3)
+                                    with col1:
+                                        st.markdown(f"**Tipo:** {info['tipo']}")
+                                    with col2:
+                                        st.markdown(f"**Número:** {info['numero']}")
+                                    with col3:
+                                        st.markdown(f"**Ano:** {info['ano']}")
+                                    
+                                    st.markdown(f"**Caminho:** `{info['caminho']}`")
+                                    
+                                    # Exibir trechos em tabs se houver múltiplos
+                                    if len(info['trechos']) > 1:
+                                        trechos_tabs = st.tabs([f"Trecho {t['chunk']}/{t['total_chunks']}" for t in info['trechos']])
+                                        for j, tab in enumerate(trechos_tabs):
+                                            with tab:
+                                                trecho = info['trechos'][j]
+                                                st.text_area(
+                                                    f"Conteúdo do trecho {trecho['chunk']}:",
+                                                    trecho['conteudo'],
+                                                    height=200,
+                                                    key=f"fonte_{doc_id}_{j}",
+                                                    disabled=True
+                                                )
+                                    else:
+                                        # Se há apenas um trecho, exibir diretamente
+                                        trecho = info['trechos'][0]
+                                        st.text_area(
+                                            f"Conteúdo:",
+                                            trecho['conteudo'],
+                                            height=200,
+                                            key=f"fonte_unico_{doc_id}",
+                                            disabled=True
+                                        )
                     
-            except Exception as e:
-                st.error(f"Erro ao processar consulta: {str(e)}")
-                logger.error(f"Erro na consulta: {str(e)}")
-    
+                    else:
+                        st.warning("Nenhum documento relevante encontrado. Tente reformular sua pergunta.")
+                        
+                except Exception as e:
+                    st.error(f"Erro ao processar consulta: {str(e)}")
+                    logger.error(f"Erro na consulta: {str(e)}")
+        
     # Limpar campos
     if limpar:
+        # Limpar session_state
+        for key in list(st.session_state.keys()):
+            if key.startswith(('pergunta_exemplo', 'processar_automatico')):
+                del st.session_state[key]
         st.rerun()
+    
+    # Separador visual
+    st.markdown("---")
     
     # Mostrar exemplos
     if exemplos:
         st.subheader("💡 Exemplos de Consultas")
         
-        # Opção para processamento automático
-        processar_automatico = st.checkbox(
-            "🚀 Processar automaticamente ao selecionar exemplo",
-            value=True,
-            help="Quando ativado, o exemplo será processado automaticamente após seleção"
-        )
-        
-        st.markdown("**Clique em um dos exemplos abaixo:**")
+        st.markdown("**Clique diretamente em um dos exemplos abaixo:**")
         
         exemplos_consultas = [
             "Quais são os parâmetros técnicos para pavimentos rodoviários?",
@@ -2091,47 +2344,74 @@ def interface_usuario_unificada():
             "Normas sobre tempo de direção e descanso"
         ]
         
-        # Organizar exemplos em colunas para melhor layout
-        cols = st.columns(2)
+        # Opção para processamento automático
+        processar_automatico_exemplos = st.checkbox(
+            "🚀 Processar automaticamente ao selecionar exemplo",
+            value=True,
+            help="Quando ativado, o exemplo será processado automaticamente após seleção",
+            key="processar_auto_exemplos"
+        )
+        
+        # Organizar exemplos em duas colunas
+        col_ex1, col_ex2 = st.columns(2)
         
         for i, exemplo in enumerate(exemplos_consultas):
-            col = cols[i % 2]
+            # Alternar entre as colunas
+            col = col_ex1 if i % 2 == 0 else col_ex2
+            
             with col:
-                if st.button(f"📋 {exemplo}", key=f"exemplo_{exemplo[:20]}", use_container_width=True):
-                    # Sempre salvar a pergunta no session_state
+                # Criar um botão para cada exemplo
+                if st.button(
+                    f"📋 {exemplo[:60]}{'...' if len(exemplo) > 60 else ''}", 
+                    key=f"btn_exemplo_{i}",
+                    use_container_width=True,
+                    help=exemplo  # Tooltip com o texto completo
+                ):
+                    # Salvar o exemplo selecionado
                     st.session_state.pergunta_exemplo = exemplo
                     
-                    if processar_automatico:
+                    if processar_automatico_exemplos and vectorstore_loaded:
                         # Marcar para processamento automático
                         st.session_state.processar_automatico = True
-                        # Não limpar a pergunta_exemplo ainda, será usado no processamento
+                        st.success(f"✅ Processando: {exemplo[:50]}...")
+                        # Forçar rerun para processar imediatamente
+                        st.rerun()
                     else:
-                        # Se não é processamento automático, limpar após o rerun
-                        # para que apareça no campo de texto
-                        pass
-                    
-                    st.rerun()
+                        st.success(f"✅ Exemplo selecionado: {exemplo[:50]}...")
+                        st.info("👆 Role para cima e clique em 'Consultar' para processar")
+        
+        # Botão para limpar seleção
+        if st.button("🔄 Limpar Seleção de Exemplo", use_container_width=True):
+            if "pergunta_exemplo" in st.session_state:
+                del st.session_state.pergunta_exemplo
+            if "processar_automatico" in st.session_state:
+                del st.session_state.processar_automatico
+            st.success("✅ Seleção limpa")
     
     # Upload de PDF
     st.subheader("📄 Processar Novo Documento")
     
-    uploaded_file = st.file_uploader(
-        "Envie um PDF para adicionar à base de conhecimento:",
-        type=['pdf'],
-        help="O documento será processado e adicionado ao vectorstore"
-    )
+    upload_col1, upload_col2 = st.columns([3, 1])
     
-    if uploaded_file:
-        if st.button("🔄 Processar PDF"):
-            try:
-                vectorstore_novo, tabelas = process_pdf(uploaded_file)
-                if vectorstore_novo:
-                    st.success(f"PDF processado com sucesso! {len(tabelas)} tabelas analisadas.")
-                    st.rerun()
-                else:
-                    st.warning("Nenhuma tabela relevante encontrada no PDF.")
-            except Exception as e:
-                st.error(f"Erro ao processar PDF: {str(e)}")
+    with upload_col1:
+        uploaded_file = st.file_uploader(
+            "Envie um PDF para adicionar à base de conhecimento:",
+            type=['pdf'],
+            help="O documento será processado e adicionado ao vectorstore"
+        )
+    
+    with upload_col2:
+        if uploaded_file:
+            if st.button("🔄 Processar PDF", use_container_width=True):
+                try:
+                    vectorstore_novo, tabelas = process_pdf(uploaded_file)
+                    if vectorstore_novo:
+                        st.success(f"PDF processado com sucesso! {len(tabelas)} tabelas analisadas.")
+                        st.rerun()
+                    else:
+                        st.warning("Nenhuma tabela relevante encontrada no PDF.")
+                except Exception as e:
+                    st.error(f"Erro ao processar PDF: {str(e)}")
 
 def main():
     """Função principal do sistema."""

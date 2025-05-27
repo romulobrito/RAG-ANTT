@@ -1,6 +1,6 @@
 """
 Módulo para gerenciar diferentes provedores de LLM.
-Suporta OpenAI e DeepSeek via OpenRouter.
+Suporta OpenAI e embeddings locais gratuitos.
 """
 
 from langchain_openai import ChatOpenAI, OpenAIEmbeddings
@@ -8,10 +8,114 @@ from langchain_community.embeddings import OpenAIEmbeddings as CommunityOpenAIEm
 from config import LLM_PROVIDERS, logger
 import os
 
+class LocalEmbeddings:
+    """Classe para embeddings locais usando sentence-transformers - 100% GRATUITO"""
+    
+    def __init__(self, model_name="all-MiniLM-L6-v2"):
+        self.model_name = model_name
+        self.model = None
+        logger.info(f"🔄 Carregando modelo local de embeddings: {model_name}")
+        
+        try:
+            self._load_model()
+            logger.info("✅ Modelo de embeddings local carregado com sucesso")
+        except Exception as e:
+            logger.error(f"❌ Erro ao carregar modelo de embeddings: {e}")
+            raise
+    
+    def _load_model(self):
+        """Carrega o modelo sentence-transformers"""
+        try:
+            # Importar apenas quando necessário
+            from sentence_transformers import SentenceTransformer
+            
+            # Carregar modelo
+            self.model = SentenceTransformer(self.model_name)
+            
+            # Configurar para usar CPU se CUDA não estiver disponível
+            import torch
+            if not torch.cuda.is_available():
+                self.model = self.model.to('cpu')
+            
+        except ImportError:
+            raise ImportError(
+                "sentence-transformers não está instalado. "
+                "Execute: pip install sentence-transformers"
+            )
+    
+    def embed_query(self, text):
+        """
+        Gera embedding para uma única query
+        
+        Args:
+            text (str): Texto para gerar embedding
+            
+        Returns:
+            List[float]: Lista de embeddings
+        """
+        if self.model is None:
+            self._load_model()
+        
+        try:
+            # Gerar embedding
+            embedding = self.model.encode([text])
+            return embedding[0].tolist()
+        except Exception as e:
+            logger.error(f"Erro ao gerar embedding para query: {e}")
+            raise
+    
+    def embed_documents(self, texts):
+        """
+        Gera embeddings para múltiplos documentos
+        
+        Args:
+            texts (List[str]): Lista de textos para gerar embeddings
+            
+        Returns:
+            List[List[float]]: Lista de embeddings
+        """
+        if self.model is None:
+            self._load_model()
+        
+        try:
+            logger.info(f"🔄 Processando {len(texts)} documentos com embeddings locais...")
+            
+            # Processar em lotes para eficiência
+            batch_size = 32
+            all_embeddings = []
+            
+            for i in range(0, len(texts), batch_size):
+                batch = texts[i:i + batch_size]
+                batch_embeddings = self.model.encode(batch, show_progress_bar=True)
+                all_embeddings.extend([emb.tolist() for emb in batch_embeddings])
+                
+                # Log do progresso
+                processed = min(i + batch_size, len(texts))
+                logger.info(f"📊 Processados {processed}/{len(texts)} documentos")
+            
+            logger.info("✅ Todos os documentos processados com embeddings locais")
+            return all_embeddings
+            
+        except Exception as e:
+            logger.error(f"Erro ao gerar embeddings para documentos: {e}")
+            raise
+    
+    def __call__(self, text):
+        """
+        Torna a classe callable para compatibilidade com FAISS
+        
+        Args:
+            text (str): Texto para gerar embedding
+            
+        Returns:
+            List[float]: Lista de embeddings
+        """
+        return self.embed_query(text)
+
 class LLMManager:
     """Gerenciador unificado para diferentes provedores de LLM"""
     
-    def __init__(self, provider="deepseek", model=None, embedding_provider="openai"):
+    def __init__(self, provider="deepseek", model=None, embedding_provider="local"):
         """
         Inicializa o gerenciador de LLM
         
@@ -103,13 +207,28 @@ class LLMManager:
                 timeout=10      # Timeout menor
             )
             
-        elif self.embedding_provider == "free":
-            # Usar embeddings gratuitos via OpenRouter (se disponível)
+        elif self.embedding_provider == "local":
+            # Usar embeddings locais REALMENTE GRATUITOS
+            logger.info("🆓 Inicializando embeddings locais (100% GRATUITO)")
+            
             try:
-                openrouter_key = LLM_PROVIDERS["deepseek"]["get_api_key"]()
-                if openrouter_key:
-                    logger.info("Tentando usar embeddings gratuitos via OpenRouter...")
-                    # Por enquanto, ainda usa OpenAI mas com configurações mais tolerantes
+                return LocalEmbeddings(model_name="all-MiniLM-L6-v2")
+            except Exception as e:
+                logger.error(f"Erro ao inicializar embeddings locais: {e}")
+                raise ValueError(f"Falha ao configurar embeddings locais: {str(e)}")
+            
+        elif self.embedding_provider == "free":
+            # Tentar embeddings locais primeiro, fallback para OpenAI
+            try:
+                logger.info("🔄 Tentando embeddings locais gratuitos...")
+                return LocalEmbeddings(model_name="all-MiniLM-L6-v2")
+                
+            except Exception as e:
+                logger.warning(f"⚠️ Embeddings locais falharam: {e}")
+                
+                # Fallback para OpenAI com configuração muito conservadora
+                logger.info("🔄 Tentando fallback para OpenAI...")
+                try:
                     openai_key = LLM_PROVIDERS["openai"]["get_api_key"]()
                     if openai_key:
                         return OpenAIEmbeddings(
@@ -120,17 +239,10 @@ class LLMManager:
                         )
                     else:
                         raise ValueError("Nenhuma chave de API disponível para embeddings")
-                else:
-                    raise ValueError("Chave OpenRouter não disponível")
-            except Exception as e:
-                logger.warning(f"Embeddings gratuitos falharam: {e}")
-                raise ValueError("Embeddings gratuitos não disponíveis no momento")
+                except Exception as e2:
+                    logger.error(f"❌ Fallback OpenAI também falhou: {e2}")
+                    raise ValueError("❌ Não foi possível configurar embeddings. Instale sentence-transformers ou configure chave OpenAI.")
                 
-        elif self.embedding_provider == "local":
-            # Placeholder para embeddings locais (futuro)
-            logger.warning("Embeddings locais ainda não implementados, usando OpenAI como fallback")
-            return self.get_embeddings_fallback()
-            
         else:
             raise ValueError(f"Provedor de embeddings '{self.embedding_provider}' não suportado")
     
@@ -192,25 +304,34 @@ def get_available_embedding_providers():
     Returns:
         dict: Dicionário com provedores de embeddings
     """
-    return {
+    # Verificar se sentence-transformers está disponível
+    local_available = True
+    try:
+        import sentence_transformers
+    except ImportError:
+        local_available = False
+    
+    providers = {
+        "local": {
+            "name": "🆓 Local (100% Gratuito)",
+            "description": "Embeddings locais com sentence-transformers - totalmente offline e gratuito",
+            "status": "available" if local_available else "needs_install"
+        },
         "openai": {
-            "name": "OpenAI (Pago)",
+            "name": "💰 OpenAI (Pago - Alta Qualidade)",
             "description": "Embeddings de alta qualidade da OpenAI",
             "status": "available" if LLM_PROVIDERS["openai"]["get_api_key"]() else "no_key"
         },
         "free": {
-            "name": "Gratuito (Limitado)",
-            "description": "Embeddings com configuração otimizada para uso limitado",
+            "name": "⚡ Automático (Local Primeiro)",
+            "description": "Tenta embeddings locais primeiro, fallback para OpenAI se necessário",
             "status": "available"
-        },
-        "local": {
-            "name": "Local (Em desenvolvimento)",
-            "description": "Embeddings locais - em desenvolvimento",
-            "status": "development"
         }
     }
+    
+    return providers
 
-def create_llm_manager(provider="deepseek", model=None, embedding_provider="free"):
+def create_llm_manager(provider="deepseek", model=None, embedding_provider="local"):
     """
     Função de conveniência para criar um LLMManager
     
