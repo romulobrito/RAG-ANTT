@@ -282,13 +282,13 @@ class RAGClient:
 ### Solução de Erros
 
 1. **Logs de Erro**
-   ```bash
+```bash
    # Verifique os logs
    tail -f rag_antt.log
    ```
 
 2. **Reinicialização**
-   ```bash
+```bash
    # Pare o processo
    pkill -f streamlit
    
