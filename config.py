@@ -88,8 +88,8 @@ LLM_PROVIDERS = {
 
 # Constantes e configurações do sistema
 DB_FAISS_PATH = "vectorstore/db_faiss"
-CHUNK_SIZE = 500
-CHUNK_OVERLAP = 150
+CHUNK_SIZE = 1500
+CHUNK_OVERLAP = 200
 
 # Configurações padrão (pode ser alterado via interface)
 DEFAULT_LLM_PROVIDER = "deepseek"  # Mudando para DeepSeek como padrão

@@ -9,9 +9,11 @@ from config import LLM_PROVIDERS, logger
 import os
 
 class LocalEmbeddings:
-    """Classe para embeddings locais usando sentence-transformers - 100% GRATUITO"""
+    """Classe para embeddings locais usando sentence-transformers - 100% GRATUITO.
+    Modelo padrao: paraphrase-multilingual-MiniLM-L12-v2 (50+ idiomas, 384 dims).
+    """
     
-    def __init__(self, model_name="all-MiniLM-L6-v2"):
+    def __init__(self, model_name="paraphrase-multilingual-MiniLM-L12-v2"):
         self.model_name = model_name
         self.model = None
         logger.info(f"🔄 Carregando modelo local de embeddings: {model_name}")
@@ -24,23 +26,54 @@ class LocalEmbeddings:
             raise
     
     def _load_model(self):
-        """Carrega o modelo sentence-transformers"""
+        """Carrega o modelo sentence-transformers com tentativas e modo offline."""
         try:
-            # Importar apenas quando necessário
             from sentence_transformers import SentenceTransformer
-            
-            # Carregar modelo
-            self.model = SentenceTransformer(self.model_name)
-            
-            # Configurar para usar CPU se CUDA não estiver disponível
             import torch
-            if not torch.cuda.is_available():
-                self.model = self.model.to('cpu')
+            import os
+            import time
             
+            # Definir pasta de cache local
+            cache_dir = os.path.expanduser("~/.cache/sentence_transformers")
+            os.makedirs(cache_dir, exist_ok=True)
+            
+            # 1) Tentar carregar somente de arquivos locais (sem rede)
+            try:
+                self.model = SentenceTransformer(self.model_name, device="cpu", cache_folder=cache_dir, local_files_only=True)
+                logger.info("📦 Modelo carregado do cache local (offline)")
+                return
+            except Exception as e_local_only:
+                logger.warning(f"⚠️ Modelo nao encontrado no cache local: {e_local_only}")
+            
+            # 2) Tentar baixar com algumas tentativas graduais (tratar 429)
+            retries = 3
+            backoff = 2
+            last_err = None
+            for attempt in range(1, retries + 1):
+                try:
+                    self.model = SentenceTransformer(self.model_name, device="cpu", cache_folder=cache_dir)
+                    logger.info("⬇️ Download do modelo concluido e carregado com sucesso")
+                    return
+                except Exception as e_dl:
+                    last_err = e_dl
+                    msg = str(e_dl).lower()
+                    if "429" in msg or "rate" in msg or "too many" in msg:
+                        logger.warning(f"HTTP 429/Rate limit ao baixar modelo (tentativa {attempt}/{retries}). Aguardando {backoff}s...")
+                        time.sleep(backoff)
+                        backoff *= 2
+                        continue
+                    if "meta tensor" in msg:
+                        logger.warning("Erro de 'meta tensor' ao mover modelo; tentando recarregar em CPU pura")
+                        time.sleep(1)
+                        continue
+                    # Outros erros: nao insistir
+                    break
+            
+            # Se chegou aqui, falhou
+            raise RuntimeError(f"Falha ao carregar modelo local '{self.model_name}': {last_err}")
         except ImportError:
             raise ImportError(
-                "sentence-transformers não está instalado. "
-                "Execute: pip install sentence-transformers"
+                "sentence-transformers nao esta instalado. Execute: pip install sentence-transformers"
             )
     
     def embed_query(self, text):
@@ -57,7 +90,6 @@ class LocalEmbeddings:
             self._load_model()
         
         try:
-            # Gerar embedding
             embedding = self.model.encode([text])
             return embedding[0].tolist()
         except Exception as e:
@@ -79,23 +111,16 @@ class LocalEmbeddings:
         
         try:
             logger.info(f"🔄 Processando {len(texts)} documentos com embeddings locais...")
-            
-            # Processar em lotes para eficiência
             batch_size = 32
             all_embeddings = []
-            
             for i in range(0, len(texts), batch_size):
                 batch = texts[i:i + batch_size]
-                batch_embeddings = self.model.encode(batch, show_progress_bar=True)
+                batch_embeddings = self.model.encode(batch, show_progress_bar=False)
                 all_embeddings.extend([emb.tolist() for emb in batch_embeddings])
-                
-                # Log do progresso
                 processed = min(i + batch_size, len(texts))
                 logger.info(f"📊 Processados {processed}/{len(texts)} documentos")
-            
             logger.info("✅ Todos os documentos processados com embeddings locais")
             return all_embeddings
-            
         except Exception as e:
             logger.error(f"Erro ao gerar embeddings para documentos: {e}")
             raise
@@ -212,7 +237,7 @@ class LLMManager:
             logger.info("🆓 Inicializando embeddings locais (100% GRATUITO)")
             
             try:
-                return LocalEmbeddings(model_name="all-MiniLM-L6-v2")
+                return LocalEmbeddings(model_name="paraphrase-multilingual-MiniLM-L12-v2")
             except Exception as e:
                 logger.error(f"Erro ao inicializar embeddings locais: {e}")
                 raise ValueError(f"Falha ao configurar embeddings locais: {str(e)}")
@@ -221,7 +246,7 @@ class LLMManager:
             # Tentar embeddings locais primeiro, fallback para OpenAI
             try:
                 logger.info("🔄 Tentando embeddings locais gratuitos...")
-                return LocalEmbeddings(model_name="all-MiniLM-L6-v2")
+                return LocalEmbeddings(model_name="paraphrase-multilingual-MiniLM-L12-v2")
                 
             except Exception as e:
                 logger.warning(f"⚠️ Embeddings locais falharam: {e}")

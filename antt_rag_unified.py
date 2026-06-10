@@ -167,7 +167,7 @@ INSTRUÇÕES DE EXTRAÇÃO:
 4. ORGANIZE as informações de forma lógica e estruturada, usando:
    - Listas para sequências ou itens relacionados
    - Seções com subtítulos para diferentes aspectos da resposta
-5. NUNCA diga que não encontrou informações se houver QUALQUER conteúdo útil
+5. Se houver conteudo parcialmente relevante, extraia o que for possivel e indique as lacunas restantes. Se NENHUMA informacao relevante existir nos documentos, informe claramente que nao ha dados disponiveis
 6. Se os documentos apresentarem informações contraditórias ou ambíguas, EXPLIQUE as diferentes interpretações
 7. Para cada informação, CITE A FONTE EXATA de onde a extraiu
 8. Ao final, SEMPRE adicione uma seção "TRECHOS DOS DOCUMENTOS CITADOS" estruturada assim:
@@ -209,11 +209,12 @@ Extrair TODAS as informações relevantes para: "{question}"
 - Resolva contradições aparentes
 - Construa narrativa coerente
 
-## CRITÉRIOS DE QUALIDADE
-- Precisão factual absoluta
+## CRITERIOS DE QUALIDADE
+- Precisao factual absoluta
 - Completude informacional
-- Clareza na apresentação
+- Clareza na apresentacao
 - Rastreabilidade das fontes
+- Se algum dado solicitado NAO constar nos documentos, indique a lacuna explicitamente
 
 ## BASE DOCUMENTAL
 {context}
@@ -222,25 +223,25 @@ Extrair TODAS as informações relevantes para: "{question}"
 """
 
 TEMPLATE_EXTRACAO_AGRESSIVA_DEEPSEEK = """
-MISSÃO: Extrair TODAS as informações sobre "{question}" dos documentos.
+MISSAO: Extrair TODAS as informacoes sobre "{question}" dos documentos.
 
-MÉTODO:
-• Leia cada documento completamente
-• Extraia TODOS os detalhes relevantes
-• Conecte informações de diferentes fontes
-• Organize por importância
-• Cite sempre a fonte exata
+METODO:
+- Leia cada documento completamente
+- Extraia TODOS os detalhes relevantes
+- Conecte informacoes de diferentes fontes
+- Organize por importancia
+- Cite sempre a fonte exata: [DOCUMENTO] [NUMERO]/[ANO]
 
 REGRAS:
-- Não ignore nenhuma informação útil
-- Se há contradições, explique ambas
+- Nao ignore nenhuma informacao util
+- Se ha contradicoes, explique ambas
 - Use formato claro e direto
-- Sempre cite: [DOCUMENTO] [NÚMERO]/[ANO]
+- Se o contexto NAO contiver a informacao solicitada, declare a lacuna. NAO invente dados.
 
 DOCUMENTOS:
 {context}
 
-EXTRAÇÃO COMPLETA:
+EXTRACAO COMPLETA:
 """
 
 TEMPLATE_PARAMETROS_TECNICOS_BASE = """
@@ -325,31 +326,38 @@ Para cada parâmetro, documente:
 """
 
 TEMPLATE_PARAMETROS_TECNICOS_DEEPSEEK = """
-ANÁLISE TÉCNICA: "{question}"
+ANALISE TECNICA: "{question}"
 
-OBJETIVO: Identificar todos os parâmetros técnicos nos documentos.
+OBJETIVO: Identificar todos os parametros tecnicos nos documentos.
+
+REGRA DE FUNDAMENTACAO:
+- Preencha SOMENTE campos para os quais exista evidencia textual explicita nos documentos.
+- Se o contexto NAO contiver um parametro solicitado, declare a lacuna em vez de inventar valores.
+- NAO fabrique numeros, unidades ou limites que nao estejam nos trechos fornecidos.
 
 ESTRUTURA DA RESPOSTA:
-1. **PARÂMETROS IDENTIFICADOS**
-   - Nome do parâmetro
+1. **PARAMETROS IDENTIFICADOS**
+   - Nome do parametro
    - Valor/limite
    - Unidade
-   - Fonte: [DOC] [NUM]/[ANO]
+   - Fonte: [DOC] [NUM]/[ANO], Art./Anexo
 
-2. **METODOLOGIAS DE VERIFICAÇÃO**
+2. **METODOLOGIAS DE VERIFICACAO**
    - Como medir
-   - Equipamentos necessários
-   - Frequência
+   - Equipamentos necessarios
+   - Frequencia
 
-3. **CRITÉRIOS DE CONFORMIDADE**
-   - Limites aceitáveis
-   - Condições especiais
-   - Exceções
+3. **CRITERIOS DE CONFORMIDADE**
+   - Limites aceitaveis
+   - Condicoes especiais
+   - Excecoes
 
-DOCUMENTOS TÉCNICOS:
+4. **LACUNAS** (se houver parametros solicitados nao encontrados nos documentos)
+
+DOCUMENTOS TECNICOS:
 {context}
 
-ANÁLISE:
+ANALISE:
 """
 
 TEMPLATE_ANALISE_NORMATIVA_BASE = """
@@ -393,75 +401,36 @@ Sua análise jurídica em português:
 
 # Templates adaptativos para análise normativa
 TEMPLATE_ANALISE_NORMATIVA_GPT4 = """
-Você é um jurista especializado em direito regulatório da ANTT.
+Voce e um jurista especializado em direito regulatorio da ANTT.
 
-## ANÁLISE NORMATIVA REQUERIDA
-Aspectos jurídico-regulatórios de: "{question}"
+Objetivo: produzir uma resposta abrangente e bem fundamentada sobre: "{question}"
 
-## METODOLOGIA JURÍDICA
-### 1. MAPEAMENTO NORMATIVO
-- Identifique hierarquia das normas (leis, decretos, resoluções)
-- Mapeie relações entre diferentes instrumentos
-- Identifique normas vigentes vs. revogadas
+Diretrizes (sem formato fixo):
+- Cubra identificacao da norma, objetivo/escopo, dispositivos pertinentes, condicoes/excecoes, procedimentos e prazos, sancoes, relacoes com outras normas e implicacoes praticas.
+- Seja completo, preciso e rastreavel.
+- Cite sempre no formato [TIPO NUMERO/ANO, Art. X, paragrafo Y, inciso Z].
+- Ao final, inclua uma secao com trechos textuais exatos usados.
+- Se houver lacunas nos documentos, indique explicitamente.
 
-### 2. ANÁLISE ESTRUTURAL
-Para cada normativa relevante:
-- **Identificação completa** (tipo, número, data, ementa)
-- **Competência e fundamentação legal**
-- **Objeto e finalidade**
-- **Estrutura normativa** (capítulos, seções, artigos)
-- **Dispositivos aplicáveis** à consulta
-- **Prazos e procedimentos**
-- **Sanções e penalidades**
-- **Vigência e aplicabilidade**
-
-### 3. ANÁLISE DE IMPACTO
-- Obrigações para diferentes atores
-- Direitos e garantias estabelecidos
-- Procedimentos administrativos
-- Recursos e defesas disponíveis
-
-### 4. CONTEXTUALIZAÇÃO JURÍDICA
-- Evolução normativa
-- Jurisprudência administrativa
-- Interfaces com outras regulamentações
-
-## CORPUS NORMATIVO
+Base documental:
 {context}
 
-## PARECER JURÍDICO ESTRUTURADO
+Resposta completa:
 """
 
 TEMPLATE_ANALISE_NORMATIVA_DEEPSEEK = """
-ANÁLISE JURÍDICA: "{question}"
+Analise juridica sobre: "{question}"
 
-FOCO: Identificar normas, obrigações e procedimentos.
+Requisitos (sem impor estrutura fixa):
+- Traga todos os pontos relevantes (identificacao, escopo, dispositivos, prazos, procedimentos, sancoes, relacoes normativas, efeitos praticos).
+- Responda de forma direta e completa, com citacoes precisas no formato [TIPO NUMERO/ANO, Art. X, paragrafo Y, inciso Z].
+- Inclua ao final trechos textuais exatos usados.
+- Se faltar informacao nos documentos, declare a lacuna.
 
-ESTRUTURA:
-1. **NORMAS IDENTIFICADAS**
-   - [TIPO] [NÚMERO]/[ANO]
-   - Objetivo principal
-   - Artigos relevantes
-
-2. **OBRIGAÇÕES E DIREITOS**
-   - Para quem se aplica
-   - O que é obrigatório
-   - Prazos importantes
-
-3. **PROCEDIMENTOS**
-   - Como cumprir
-   - Documentos necessários
-   - Onde protocolar
-
-4. **PENALIDADES**
-   - Infrações
-   - Multas/sanções
-   - Como recorrer
-
-DOCUMENTOS NORMATIVOS:
+Documentos:
 {context}
 
-ANÁLISE:
+Analise:
 """
 
 def selecionar_template_adaptativo(template_base, modelo_usado):
@@ -939,71 +908,64 @@ def carregar_vectorstore_com_provider(embedding_provider="local"):
     try:
         if embedding_provider == "openai":
             logger.info("🔧 Configurando embeddings OpenAI...")
-            
             try:
                 from langchain_openai import OpenAIEmbeddings
                 embeddings = OpenAIEmbeddings(
                     openai_api_key=get_openai_api_key(),
                     model="text-embedding-ada-002",
-                    max_retries=1,  # Reduzir tentativas
-                    timeout=10,     # Timeout mais baixo
+                    max_retries=1,
+                    timeout=10,
                     request_timeout=10
                 )
-                
-                # Teste muito simples para verificar se funciona
-                test_embedding = embeddings.embed_query("teste")
+                # Teste simples
+                _ = embeddings.embed_query("teste")
                 logger.info("✅ OpenAI embeddings funcionando corretamente")
-                
             except Exception as e:
                 error_msg = str(e).lower()
                 if any(keyword in error_msg for keyword in ["insufficient_quota", "429", "quota", "exceeded"]):
                     logger.warning(f"🚨 OpenAI com problema de cota: {e}")
-                    logger.info("🔄 Tentando fallback para embeddings locais...")
-                    return carregar_vectorstore_com_provider("local")
+                    logger.info("🔄 Tentando fallback para embeddings locais (free)...")
+                    return carregar_vectorstore_com_provider("free")
                 else:
                     logger.error(f"❌ Erro OpenAI não relacionado à cota: {e}")
                     raise e
-                    
         elif embedding_provider in ["local", "free"]:
             logger.info("🔧 Configurando embeddings locais (100% GRATUITO)...")
-            
             try:
                 # Usar o LLMManager para criar embeddings locais
                 llm_manager = create_llm_manager("deepseek", embedding_provider="local")
                 embeddings = llm_manager.get_embeddings()
+                # Teste simples
+                try:
+                    _ = embeddings.embed_query("teste-local")
+                except Exception:
+                    pass
                 logger.info("✅ Embeddings locais configurados com sucesso")
-                
             except Exception as e:
                 error_msg = str(e).lower()
                 logger.warning(f"⚠️ Embeddings locais falharam: {e}")
-                
-                # Se for modo "free", tentar fallback para OpenAI
-                if embedding_provider == "free":
-                    logger.info("🔄 Tentando fallback para OpenAI...")
-                    try:
-                        from langchain_openai import OpenAIEmbeddings
-                        embeddings = OpenAIEmbeddings(
-                            openai_api_key=get_openai_api_key(),
-                            model="text-embedding-ada-002",
-                            max_retries=0,  # Sem retry
-                            timeout=5       # Timeout muito baixo
-                        )
-                        vectorstore_path = DB_FAISS_PATH  # Mudar para vectorstore OpenAI
-                        logger.info("⚠️ Usando embeddings OpenAI em modo de emergência")
-                        
-                    except Exception as e2:
-                        logger.error(f"❌ Fallback OpenAI também falhou: {e2}")
-                        raise Exception("❌ Não foi possível configurar embeddings. Instale sentence-transformers ou configure chave OpenAI.")
-                else:
-                    raise Exception(f"❌ Falha ao configurar embeddings locais: {str(e)}")
-                
+                if embedding_provider == "local":
+                    # Fallback automatico para modo 'free'
+                    logger.info("🔄 Fallback automatico: tentando provider 'free' (local -> OpenAI)")
+                    return carregar_vectorstore_com_provider("free")
+                # Modo 'free' tambem falhou local: tentar OpenAI se houver chave
+                try:
+                    from langchain_openai import OpenAIEmbeddings
+                    embeddings = OpenAIEmbeddings(
+                        openai_api_key=get_openai_api_key(),
+                        model="text-embedding-ada-002",
+                        max_retries=0,
+                        timeout=5
+                    )
+                    vectorstore_path = DB_FAISS_PATH
+                    logger.info("⚠️ Usando embeddings OpenAI em modo de emergência (fallback do 'free')")
+                except Exception as e2:
+                    logger.error(f"❌ Fallback OpenAI também falhou: {e2}")
+                    raise Exception("❌ Não foi possível configurar embeddings. Instale sentence-transformers ou configure chave OpenAI.")
     except Exception as e:
         error_msg = str(e).lower()
-        
-        # Verificar se é erro de cota excedida
         if any(keyword in error_msg for keyword in ["insufficient_quota", "429", "quota", "exceeded"]):
             logger.warning(f"🚨 Cota excedida: {e}")
-            
             if embedding_provider != "local":
                 logger.info("🔄 Tentando com embeddings locais...")
                 return carregar_vectorstore_com_provider("local")
@@ -1012,34 +974,30 @@ def carregar_vectorstore_com_provider(embedding_provider="local"):
                 raise Exception("❌ Sistema temporariamente indisponível devido a limitações da API.")
         else:
             logger.error(f"❌ Erro não relacionado à cota: {e}")
-            raise Exception(f"Erro ao configurar embeddings: {str(e)}")
+            # Tentar rota final: se estava no local, tente OpenAI; se estava no openai, tente local
+            try:
+                alt = "openai" if embedding_provider in ["local", "free"] else "local"
+                logger.info(f"🔄 Tentando provedor alternativo: {alt}")
+                return carregar_vectorstore_com_provider(alt)
+            except Exception:
+                raise Exception(f"Erro ao configurar embeddings: {str(e)}")
     
     # Tentar carregar o vectorstore
     try:
-        # Verificar se o vectorstore existe
         if not os.path.exists(vectorstore_path):
             logger.warning(f"⚠️ Vectorstore não encontrado em {vectorstore_path}")
-            
-            # Se for local e não existir, tentar criar automaticamente
             if embedding_provider in ["local", "free"] and "local" in vectorstore_path:
                 logger.info("🚀 Criando vectorstore local automaticamente...")
-                
-                # Verificar se temos os dados necessários
                 if os.path.exists("relatorio_documentos.json"):
                     try:
-                        # Criar vectorstore local
                         sucesso = criar_vectorstore_local(embeddings)
-                        
                         if sucesso:
                             logger.info("✅ Vectorstore local criado com sucesso!")
                         else:
                             logger.error("❌ Falha ao criar vectorstore local")
                             raise Exception("Falha na criação automática do vectorstore local")
-                            
                     except Exception as e:
                         logger.error(f"❌ Erro ao criar vectorstore local: {e}")
-                        
-                        # Fallback para OpenAI se disponível
                         if embedding_provider == "free":
                             logger.info("🔄 Tentando fallback para vectorstore OpenAI...")
                             return carregar_vectorstore_com_provider("openai")
@@ -1050,26 +1008,24 @@ def carregar_vectorstore_com_provider(embedding_provider="local"):
                     raise Exception("❌ Dados necessários para criar vectorstore não encontrados")
             else:
                 raise Exception(f"❌ Vectorstore não encontrado em {vectorstore_path}")
-        
-        # Carregar o vectorstore
         logger.info(f"📚 Carregando vectorstore de {vectorstore_path}...")
         vectorstore = FAISS.load_local(vectorstore_path, embeddings, allow_dangerous_deserialization=True)
         logger.info("✅ Vectorstore carregado com sucesso")
-        
-        # Adicionar informação sobre qual vectorstore está sendo usado
         vectorstore._embedding_provider = embedding_provider
         vectorstore._vectorstore_path = vectorstore_path
-        
         return vectorstore
-        
     except Exception as e:
         logger.error(f"❌ Erro ao carregar vectorstore: {e}")
-        
-        # Verificar se o erro é relacionado ao vectorstore não existir
         if "No such file or directory" in str(e) or "does not exist" in str(e):
             raise Exception("❌ Base de conhecimento não encontrada. Execute o processo de indexação primeiro.")
         else:
-            raise Exception(f"❌ Erro ao carregar base de conhecimento: {str(e)}")
+            # Tentar provedor alternativo uma ultima vez
+            try:
+                alt = "openai" if embedding_provider in ["local", "free"] else "local"
+                logger.info(f"🔄 Tentando carregar vectorstore com provedor alternativo: {alt}")
+                return carregar_vectorstore_com_provider(alt)
+            except Exception:
+                raise Exception(f"❌ Erro ao carregar base de conhecimento: {str(e)}")
 
 def criar_vectorstore_local(embeddings):
     """Cria vectorstore local usando embeddings locais"""
@@ -1118,35 +1074,28 @@ def criar_vectorstore_local(embeddings):
         
         logger.info(f"📚 Preparados {len(documentos)} documentos para indexação")
         
-        # Dividir documentos em chunks
-        text_splitter = RecursiveCharacterTextSplitter(
-            chunk_size=500,
-            chunk_overlap=200,
-            length_function=len,
-        )
-        
-        logger.info("✂️ Dividindo documentos em chunks...")
-        splits = text_splitter.split_documents(documentos)
-        
-        # Adicionar informações de chunk aos metadados de forma mais eficiente
-        # Primeiro, agrupar chunks por documento
-        chunks_por_documento = {}
-        for split in splits:
-            doc_path = split.metadata.get('caminho', 'unknown')
-            if doc_path not in chunks_por_documento:
-                chunks_por_documento[doc_path] = []
-            chunks_por_documento[doc_path].append(split)
-        
-        # Agora atualizar metadados com informações de chunk
-        for doc_path, chunks in chunks_por_documento.items():
-            total_chunks = len(chunks)
-            for i, split in enumerate(chunks):
-                split.metadata.update({
-                    'chunk': i + 1,
-                    'total_chunks': total_chunks
-                })
-        
-        logger.info(f"📝 Criados {len(splits)} chunks com metadados atualizados")
+        # Dividir documentos em chunks por fronteiras estruturais (artigos/secoes)
+        logger.info("Dividindo documentos em chunks por estrutura (artigos/secoes)...")
+        splits = []
+
+        for doc in documentos:
+            texto = doc.page_content
+            meta_base = doc.metadata.copy()
+
+            chunks_texto = _dividir_por_estrutura(
+                texto,
+                chunk_max=CHUNK_SIZE,
+                chunk_overlap=CHUNK_OVERLAP,
+            )
+
+            total = len(chunks_texto)
+            for idx, chunk_txt in enumerate(chunks_texto):
+                meta = meta_base.copy()
+                meta["chunk"] = idx + 1
+                meta["total_chunks"] = total
+                splits.append(Document(page_content=chunk_txt, metadata=meta))
+
+        logger.info(f"Criados {len(splits)} chunks estruturais")
         
         # Criar vectorstore
         logger.info("🔍 Criando vectorstore com embeddings locais...")
@@ -1196,8 +1145,15 @@ def extrair_keywords(query):
         "você", "vocês", "vos"
     ])
     
-    keywords = [w.lower() for w in query.split() 
-                if w.lower() not in stop_words and len(w) > 3]
+    palavras = query.split()
+    keywords = []
+    for w in palavras:
+        wl = w.lower().strip(".,;:!?()")
+        if not wl or wl in stop_words:
+            continue
+        if len(wl) <= 1:
+            continue
+        keywords.append(wl)
     return keywords
 
 def simplificar_query(query):
@@ -1210,42 +1166,284 @@ def simplificar_query(query):
     
     return query
 
+# ---------------------------------------------------------------------------
+# Mapeamento de tipos de documentos regulatorios para siglas de arquivo
+# ---------------------------------------------------------------------------
+_TIPO_DOCUMENTO_MAP = {
+    "resolucao": "RES",
+    "res": "RES",
+    "instrucao normativa": "INM",
+    "in": "INM",
+    "inm": "INM",
+    "deliberacao": "DLB",
+    "dlb": "DLB",
+    "portaria": "POR",
+    "por": "POR",
+    "voto": "VTO",
+    "vto": "VTO",
+    "incidente": "INC",
+    "inc": "INC",
+    "lei": "LEI",
+    "decreto": "DEC",
+    "dec": "DEC",
+}
+
+
+def _dividir_por_estrutura(texto, chunk_max=1500, chunk_overlap=200):
+    """
+    Divide texto de documento regulatorio por fronteiras estruturais
+    (artigos, secoes, capitulos), preservando contexto.
+
+    Usa fronteiras de artigo/secao como pontos de corte primarios.
+    Se um bloco individual exceder *chunk_max*, faz subdivisao com
+    RecursiveCharacterTextSplitter.
+
+    Args:
+        texto (str): Conteudo completo do documento markdown.
+        chunk_max (int): Tamanho maximo de cada chunk em caracteres.
+        chunk_overlap (int): Sobreposicao em caracteres para subdivisoes internas.
+
+    Returns:
+        List[str]: Lista de chunks textuais.
+    """
+    padrao_fronteira = re.compile(
+        r"(?=\n\s*(?:"
+        r"Art\.\s*\d"
+        r"|CAPITULO\s"
+        r"|CAP[IiIi]TULO\s"
+        r"|SE[CcCc][AaAa]O\s"
+        r"|T[IiIi]TULO\s"
+        r"|ANEXO\s"
+        r"|##\s"
+        r"|###\s"
+        r"))",
+        re.IGNORECASE,
+    )
+
+    blocos = padrao_fronteira.split(texto)
+    blocos = [b.strip() for b in blocos if b.strip()]
+
+    if len(blocos) <= 1:
+        blocos = [texto]
+
+    fallback_splitter = RecursiveCharacterTextSplitter(
+        chunk_size=chunk_max,
+        chunk_overlap=chunk_overlap,
+        length_function=len,
+        separators=["\n\n", "\n", ". ", " "],
+    )
+
+    resultado = []
+    for bloco in blocos:
+        if len(bloco) <= chunk_max:
+            resultado.append(bloco)
+        else:
+            sub_chunks = fallback_splitter.split_text(bloco)
+            resultado.extend(sub_chunks)
+
+    return resultado
+
+
+def _detectar_referencia_documento(query):
+    """
+    Detecta referencias a documentos regulatorios na query do usuario.
+
+    Exemplos detectados:
+        "Resolucao 6053/2024"  -> [{"tipo": "RES", "numero": "6053", "ano": "2024"}]
+        "IN 34/2024"           -> [{"tipo": "INM", "numero": "34", "ano": "2024"}]
+        "RES 6053 de 2024"     -> [{"tipo": "RES", "numero": "6053", "ano": "2024"}]
+
+    Args:
+        query (str): Texto da pergunta do usuario.
+
+    Returns:
+        List[dict]: Lista de dicts com chaves tipo, numero, ano.
+    """
+    resultados = []
+
+    tipos_regex = (
+        r"(?:instrucao\s+normativa|instruc[aã]o\s+normativa|"
+        r"resolu[cç][aã]o|delibera[cç][aã]o|portaria|decreto|lei|voto|"
+        r"INM|RES|DLB|POR|DEC|INC|VTO|IN)"
+    )
+
+    padrao = re.compile(
+        rf"({tipos_regex})\s*(?:n[o.]\s*)?(\d[\d.]*)\s*(?:/|,?\s*de\s+)(\d{{4}})",
+        re.IGNORECASE,
+    )
+
+    for match in padrao.finditer(query):
+        tipo_raw = re.sub(r"\s+", " ", match.group(1).strip().lower())
+        tipo_raw = (
+            tipo_raw
+            .replace("ç", "c")
+            .replace("ã", "a")
+            .replace("á", "a")
+            .replace("é", "e")
+            .replace("í", "i")
+            .replace("ó", "o")
+            .replace("ú", "u")
+        )
+        numero_raw = match.group(2).replace(".", "")
+        ano = match.group(3)
+
+        sigla = _TIPO_DOCUMENTO_MAP.get(tipo_raw)
+        if sigla is None:
+            logger.debug(f"Tipo de documento nao mapeado: '{tipo_raw}'")
+            continue
+
+        resultados.append({
+            "tipo": sigla,
+            "numero": numero_raw,
+            "ano": ano,
+        })
+
+    logger.info(f"Referencias detectadas na query: {resultados}")
+    return resultados
+
+
+def _resolver_caminho_documento(tipo, numero, ano):
+    """
+    Resolve tipo/numero/ano para o(s) caminho(s) fisico(s) do arquivo .md.
+
+    Args:
+        tipo (str): Sigla do documento (ex: "RES").
+        numero (str): Numero sem zeros (ex: "6053").
+        ano (str): Ano (ex: "2024").
+
+    Returns:
+        Tuple[List[str], str]: (caminhos_candidatos, nome_tipo_amigavel)
+    """
+    nomes = {
+        "RES": "Resolucao",
+        "INM": "Instrucao Normativa",
+        "DLB": "Deliberacao",
+        "POR": "Portaria",
+        "VTO": "Voto",
+        "INC": "Incidente",
+        "LEI": "Lei",
+        "DEC": "Decreto",
+    }
+    nome_tipo = nomes.get(tipo, tipo)
+
+    numero_padded = numero.zfill(8)
+    nome_arquivo = f"{tipo}-{numero_padded}-{ano}.md"
+
+    base_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "dados_antt")
+
+    candidatos = [
+        os.path.join(base_dir, tipo, ano, nome_arquivo),
+        os.path.join(base_dir, tipo, "dados_antt", tipo, ano, nome_arquivo),
+    ]
+
+    return candidatos, nome_tipo
+
+
+def _carregar_documento_markdown(caminho, tipo, nome_tipo, numero, ano):
+    """
+    Carrega um documento markdown e retorna uma lista de Document chunks
+    divididos por estrutura (artigo/secao).
+
+    Args:
+        caminho (str): Caminho completo do arquivo .md.
+        tipo (str): Sigla (ex: "RES").
+        nome_tipo (str): Nome por extenso (ex: "Resolucao").
+        numero (str): Numero do documento.
+        ano (str): Ano.
+
+    Returns:
+        List[Document]: Lista de chunks como Document objects.
+    """
+    try:
+        with open(caminho, "r", encoding="utf-8") as f:
+            conteudo = f.read()
+    except Exception as exc:
+        logger.warning(f"Falha ao ler documento {caminho}: {exc}")
+        return []
+
+    if not conteudo.strip():
+        return []
+
+    chunks = _dividir_por_estrutura(conteudo)
+
+    documentos = []
+    for idx, texto_chunk in enumerate(chunks):
+        doc = Document(
+            page_content=texto_chunk,
+            metadata={
+                "tipo_documento": tipo,
+                "nome_tipo": nome_tipo,
+                "numero": numero.zfill(8),
+                "ano": ano,
+                "caminho": caminho,
+                "chunk": idx + 1,
+                "total_chunks": len(chunks),
+                "prioritario": True,
+            },
+        )
+        documentos.append(doc)
+
+    return documentos
+
+
 def reranking_documentos(query, documentos):
-    """Reordena os documentos com base na relevância para a consulta."""
+    """Reordena os documentos com base na relevancia para a consulta."""
     if not documentos:
         return []
     
     keywords = set(extrair_keywords(query))
-    
+    # Detectar e priorizar caminhos explicitamente citados na pergunta
+    caminhos_prioritarios = set()
+    try:
+        for ref in _detectar_referencia_documento(query):
+            candidatos, _ = _resolver_caminho_documento(ref["tipo"], ref["numero"], ref["ano"])
+            for c in candidatos:
+                if os.path.exists(c):
+                    caminhos_prioritarios.add(c)
+    except Exception:
+        pass
+
+    # Pre-compilar padroes de artigo/secao para boost estrutural
+    _padrao_artigo = re.compile(r"\bArt\.\s*\d+", re.IGNORECASE)
+
     def calcular_score_documento(doc):
-        score = 0
+        score = 0.0
         conteudo = doc.page_content.lower()
         metadados = doc.metadata
-        
+
+        # Score por keywords encontradas no conteudo
+        hits = 0
         for keyword in keywords:
             if keyword in conteudo:
-                score += 1
+                hits += 1
+                score += 1.0
             elif any(keyword in palavra for palavra in conteudo.split()):
+                hits += 0.5
                 score += 0.5
-        
-        palavras_total = len(conteudo.split())
-        if palavras_total > 0:
-            score += (score / palavras_total) * 5
-        
+
+        # Densidade de keywords (proporcao de hits sobre total de keywords)
+        if keywords:
+            score += (hits / len(keywords)) * 3.0
+
         if metadados.get("relevancia_tecnica") == "Alta":
-            score += 2
-        
+            score += 2.0
         if metadados.get("contem_tabelas") == "Sim":
-            score += 1
-        
-        if metadados.get("chunk") == 1:
-            score += 0.5
-        
+            score += 1.0
+
+        # Boost por conteudo estruturado (artigos regulatorios)
+        artigos_encontrados = _padrao_artigo.findall(doc.page_content)
+        if artigos_encontrados:
+            score += min(len(artigos_encontrados) * 0.3, 2.0)
+
+        # Boost forte para documentos priorizados (referencia explicita na query)
+        caminho = metadados.get("caminho", "")
+        if caminho in caminhos_prioritarios or metadados.get("prioritario"):
+            score += 10.0
+
         return score
     
     docs_com_score = [(doc, calcular_score_documento(doc)) for doc in documentos]
     docs_ordenados = [doc for doc, score in sorted(docs_com_score, key=lambda x: x[1], reverse=True)]
-    
     return docs_ordenados
 
 def pesquisar_documentos(query, vectorstore, k=12, tipo_documento=None, ano=None, numero=None, embedding_provider="free"):
@@ -1253,18 +1451,38 @@ def pesquisar_documentos(query, vectorstore, k=12, tipo_documento=None, ano=None
     resultados = []
     resultados_finais = []
     query_original = query
-    
+
     logger.info(f"\n===== NOVA CONSULTA =====")
     logger.info(f"Pesquisando: '{query}'")
     if tipo_documento or ano or numero:
-        logger.info(f"Filtros: Tipo={tipo_documento}, Ano={ano}, Número={numero}")
-    
+        logger.info(f"Filtros: Tipo={tipo_documento}, Ano={ano}, Numero={numero}")
+
     filtro = criar_filtro_metadados(tipo_documento, ano, numero)
-    
+
+    # 1) Priorizar documentos explicitamente citados na pergunta (ex.: INM 18/2023)
+    try:
+        refs = _detectar_referencia_documento(query)
+        caminhos_prioritarios = set()
+        for ref in refs:
+            candidatos, nome_tipo = _resolver_caminho_documento(ref["tipo"], ref["numero"], ref["ano"])
+            for caminho in candidatos:
+                if os.path.exists(caminho):
+                    docs_carregados = _carregar_documento_markdown(caminho, ref["tipo"], nome_tipo, ref["numero"], ref["ano"])
+                    if docs_carregados:
+                        resultados.extend(docs_carregados)
+                        caminhos_prioritarios.add(caminho)
+                        logger.info(f"Documento priorizado carregado: {caminho} ({len(docs_carregados)} chunks)")
+        # Guardar informacao para boosting no reranking
+        if caminhos_prioritarios:
+            # Anexar como atributo para uso interno no reranking
+            for doc in resultados:
+                doc.metadata["prioritario"] = doc.metadata.get("caminho", "") in caminhos_prioritarios
+    except Exception as e:
+        logger.warning(f"Deteccao de referencia de documento falhou: {e}")
+
     try:
         keywords = extrair_keywords(query)
-        
-        logger.info(f"Executando busca semântica com MMR...")
+        logger.info(f"Executando busca semantica com MMR...")
         docs_semantic = vectorstore.max_marginal_relevance_search(
             query,
             k=k,
@@ -1272,10 +1490,8 @@ def pesquisar_documentos(query, vectorstore, k=12, tipo_documento=None, ano=None
             lambda_mult=0.7,
             filter=filtro
         )
-        
         resultados.extend(docs_semantic)
-        logger.info(f"Busca semântica: {len(docs_semantic)} resultados")
-        
+        logger.info(f"Busca semantica: {len(docs_semantic)} resultados")
         if keywords and len(keywords) > 1:
             keyword_query = " ".join(keywords)
             logger.info(f"Executando busca adicional por keywords: '{keyword_query}'")
@@ -1284,39 +1500,30 @@ def pesquisar_documentos(query, vectorstore, k=12, tipo_documento=None, ano=None
                 k=max(3, k//2),
                 filter=filtro
             )
-            
             docs_ids = set(doc.metadata.get('caminho', '') + str(doc.metadata.get('chunk', '')) 
                            for doc in resultados)
-            
             for doc in docs_keywords:
                 doc_id = doc.metadata.get('caminho', '') + str(doc.metadata.get('chunk', ''))
                 if doc_id not in docs_ids:
                     resultados.append(doc)
                     docs_ids.add(doc_id)
-            
-            logger.info(f"Após busca por keywords: {len(resultados)} resultados")
+            logger.info(f"Apos busca por keywords: {len(resultados)} resultados")
     except Exception as e:
         error_msg = str(e).lower()
-        
-        # Verificar se é erro de cota excedida
         if any(keyword in error_msg for keyword in ["insufficient_quota", "429", "quota", "exceeded"]):
-            logger.warning(f"🚨 Erro de cota detectado durante busca: {e}")
-            
-            # Tentar recarregar vectorstore com embeddings gratuitos
+            logger.warning(f"Erro de cota detectado durante busca: {e}")
             if embedding_provider != "free":
-                logger.info("🔄 Recarregando vectorstore com embeddings gratuitos...")
+                logger.info("Recarregando vectorstore com embeddings gratuitos...")
                 try:
                     vectorstore_free = carregar_vectorstore_com_provider("free")
                     return pesquisar_documentos(query, vectorstore_free, k, tipo_documento, ano, numero, "free")
                 except Exception as reload_error:
-                    logger.error(f"❌ Falha ao recarregar vectorstore: {reload_error}")
-            
-            logger.warning("⚠️ Tentando busca sem embeddings (busca por texto)...")
-            # Fallback: busca simples por texto sem embeddings
+                    logger.error(f"Falha ao recarregar vectorstore: {reload_error}")
+            logger.warning("Tentando busca sem embeddings (busca por texto)...")
             return busca_fallback_sem_embeddings(query, k, tipo_documento, ano, numero)
         else:
-            logger.error(f"Erro na busca híbrida: {str(e)}")
-    
+            logger.error(f"Erro na busca hibrida: {str(e)}")
+
     if len(resultados) < 2:
         logger.info("Resultados insuficientes. Tentando busca direta...")
         try:
@@ -1325,11 +1532,11 @@ def pesquisar_documentos(query, vectorstore, k=12, tipo_documento=None, ano=None
         except Exception as e:
             error_msg = str(e).lower()
             if any(keyword in error_msg for keyword in ["insufficient_quota", "429", "quota", "exceeded"]):
-                logger.warning(f"🚨 Erro de cota na busca direta: {e}")
+                logger.warning(f"Erro de cota na busca direta: {e}")
                 return busca_fallback_sem_embeddings(query, k, tipo_documento, ano, numero)
             else:
                 logger.error(f"Erro na busca direta: {str(e)}")
-    
+
     if len(resultados) < 2:
         logger.info("Resultados ainda insuficientes. Tentando busca com termos amplos...")
         try:
@@ -1339,15 +1546,15 @@ def pesquisar_documentos(query, vectorstore, k=12, tipo_documento=None, ano=None
         except Exception as e:
             error_msg = str(e).lower()
             if any(keyword in error_msg for keyword in ["insufficient_quota", "429", "quota", "exceeded"]):
-                logger.warning(f"🚨 Erro de cota na busca ampla: {e}")
+                logger.warning(f"Erro de cota na busca ampla: {e}")
                 return busca_fallback_sem_embeddings(query, k, tipo_documento, ano, numero)
             else:
                 logger.error(f"Erro na busca com termos amplos: {str(e)}")
-    
+
     if resultados:
         resultados_finais = reranking_documentos(query_original, resultados)
-        logger.info(f"Após reranking: {len(resultados_finais)} documentos retornados")
-    
+        logger.info(f"Apos reranking: {len(resultados_finais)} documentos retornados")
+
     return resultados_finais
 
 def busca_fallback_sem_embeddings(query, k=12, tipo_documento=None, ano=None, numero=None):
@@ -1493,6 +1700,19 @@ Para informações mais detalhadas, consulte o documento completo.
         
         return [doc_erro]
 
+def _normalize_text_ascii_lower(value: str) -> str:
+    """
+    Normaliza texto para comparacao: remove diacriticos (NFD -> ASCII) e converte para minusculas.
+    Retorna string segura para buscas de palavras-chave.
+    """
+    try:
+        import unicodedata
+        normalized = unicodedata.normalize("NFD", value)
+        without_diacritics = "".join(ch for ch in normalized if unicodedata.category(ch) != "Mn")
+        return without_diacritics.lower()
+    except Exception:
+        return value.lower()
+
 def gerar_resposta(pergunta, documentos, llm, modelo_usado="gpt-4"):
     """Gera uma resposta baseada nos documentos recuperados usando templates adaptativos."""
     if not documentos:
@@ -1539,32 +1759,51 @@ Conteúdo:
         contextos.append(contexto)
     
     contexto_completo = "\n\n".join(contextos)
-    
-    logger.info(f"Documentos encontrados: {len(documentos)}")
+
+    # Log detalhado dos chunks enviados ao LLM para diagnostico
+    logger.info("=" * 60)
+    logger.info("CHUNKS ENVIADOS AO LLM")
+    logger.info(f"Total de chunks: {len(documentos)}")
+    logger.info(f"Tamanho total do contexto: {len(contexto_completo)} chars")
     logger.info(f"Modelo usado: {modelo_usado}")
     for tipo, contagem in contagem_por_tipo.items():
-        logger.info(f"- {tipo}: {contagem} documentos")
+        logger.info(f"  Tipo '{tipo}': {contagem} chunks")
+    for i, doc in enumerate(documentos):
+        m = doc.metadata
+        preview = doc.page_content[:120].replace("\n", " ")
+        logger.info(
+            f"  chunk[{i}] {m.get('nome_tipo','?')} {m.get('numero','?')}/{m.get('ano','?')} "
+            f"parte {m.get('chunk','?')}/{m.get('total_chunks','?')} "
+            f"({len(doc.page_content)} chars) >> {preview}..."
+        )
+    logger.info("=" * 60)
     
-    # Determinar o tipo de consulta
-    palavras_parametros_tecnicos = ['parâmetro', 'técnico', 'valor', 'limite', 'medida', 'metodologia', 
-                                   'pavimento', 'deflexão', 'iri', 'atrito', 'índice']
+    # Determinar o tipo de consulta (normalizando para evitar problemas com acentos/maiusculas)
+    normalized_question = _normalize_text_ascii_lower(pergunta)
+    normalized_types = [_normalize_text_ascii_lower(t) for t in list(tipos_documentos)]
     
-    palavras_normativas = ['resolução', 'instrução normativa', 'deliberação', 'portaria', 'regulamento', 
-                           'normativo', 'legal', 'direito', 'obrigação', 'dever', 'prazo', 'penalidade']
+    keywords_technical = [
+        'parametro', 'tecnico', 'valor', 'limite', 'medida', 'metodologia',
+        'pavimento', 'deflexao', 'iri', 'atrito', 'indice'
+    ]
     
-    pergunta_lower = pergunta.lower()
+    keywords_normative = [
+        'resolucao', 'instrucao normativa', 'deliberacao', 'portaria', 'regulamento',
+        'normativo', 'legal', 'direito', 'obrigacao', 'dever', 'prazo', 'penalidade',
+        'lei', 'decreto', 'in'
+    ]
     
-    # Selecionar tipo de template baseado na consulta
-    if any(palavra in pergunta_lower for palavra in palavras_parametros_tecnicos) or \
-       'INSTRUÇÃO NORMATIVA' in ' '.join(tipos_documentos) and 'parâmetro' in pergunta_lower:
-        logger.info("Detectada consulta sobre parâmetros técnicos")
+    # Selecionar tipo de template baseado na consulta normalizada
+    if any(k in normalized_question for k in keywords_technical) or \
+       ('instrucao normativa' in " ".join(normalized_types) and 'parametro' in normalized_question):
+        logger.info("Detectada consulta sobre parametros tecnicos")
         template_tipo = 'parametros'
-    elif any(palavra in pergunta_lower for palavra in palavras_normativas) or \
-         any(tipo in ['Resolução', 'Deliberação', 'Portaria'] for tipo in tipos_documentos):
-        logger.info("Detectada consulta sobre aspectos normativos/jurídicos")
+    elif any(k in normalized_question for k in keywords_normative) or \
+         any(t in ['resolucao', 'deliberacao', 'portaria', 'instrucao normativa', 'lei', 'decreto'] for t in normalized_types):
+        logger.info("Detectada consulta sobre aspectos normativos/juridicos")
         template_tipo = 'normativa'
     else:
-        logger.info("Usando template padrão de resposta")
+        logger.info("Usando template padrao de resposta")
         template_tipo = 'resposta'
     
     # Selecionar template adaptativo baseado no modelo
