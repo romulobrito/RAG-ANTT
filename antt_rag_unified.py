@@ -1042,6 +1042,106 @@ def carregar_vectorstore_com_provider(embedding_provider="local"):
             except Exception:
                 raise Exception(f"❌ Erro ao carregar base de conhecimento: {str(e)}")
 
+def _listar_md_em_dados_antt(diretorio: str = "dados_antt") -> dict:
+    """
+    Varre dados_antt/ e retorna um dict {nome_arquivo: caminho_completo}
+    contendo todos os .md encontrados (ja deduplicados por nome).
+
+    Args:
+        diretorio: Raiz da pasta de documentos.
+
+    Returns:
+        dict mapeando basename -> caminho absoluto do primeiro .md encontrado.
+    """
+    resultado: dict = {}
+    if not os.path.isdir(diretorio):
+        return resultado
+    for dirpath, _dirnames, filenames in os.walk(diretorio):
+        for fname in filenames:
+            if fname.endswith(".md") and fname not in resultado:
+                resultado[fname] = os.path.join(dirpath, fname)
+    return resultado
+
+
+def detectar_documentos_novos(diretorio: str = "dados_antt",
+                              relatorio_path: str = "relatorio_documentos.json") -> list:
+    """
+    Compara os arquivos .md existentes em dados_antt/ com o catalogo
+    registrado em relatorio_documentos.json.
+
+    Retorna a lista de nomes de arquivos .md presentes no disco mas
+    ausentes do catalogo (documentos novos nao indexados).
+
+    Args:
+        diretorio: Pasta raiz dos documentos.
+        relatorio_path: Caminho do JSON de catalogo.
+
+    Returns:
+        list[str]: Nomes de arquivos .md novos (nao catalogados).
+    """
+    md_no_disco = _listar_md_em_dados_antt(diretorio)
+
+    catalogados: set = set()
+    if os.path.exists(relatorio_path):
+        try:
+            with open(relatorio_path, "r", encoding="utf-8") as f:
+                import json as _json
+                for doc in _json.load(f):
+                    arq = doc.get("arquivo_md", "")
+                    if arq:
+                        catalogados.add(os.path.basename(arq))
+        except Exception as exc:
+            logger.warning(f"Erro ao ler catalogo {relatorio_path}: {exc}")
+
+    novos = sorted(set(md_no_disco.keys()) - catalogados)
+    return novos
+
+
+def reindexar_base_completa(embedding_provider: str = "local") -> tuple:
+    """
+    Pipeline completo de reindexacao:
+    1. Regenera relatorio_documentos.json varrendo dados_antt/
+    2. Remove vectorstore antigo
+    3. Recria vectorstore com embeddings + OCR + deduplicacao
+
+    Args:
+        embedding_provider: Provedor de embeddings a utilizar.
+
+    Returns:
+        tuple (sucesso: bool, mensagem: str)
+    """
+    import shutil
+
+    # 1) Regenerar catalogo
+    try:
+        from gerar_relatorio import gerar_relatorio_documentos
+        docs = gerar_relatorio_documentos()
+        logger.info(f"Catalogo regenerado: {len(docs)} documentos")
+    except Exception as exc:
+        msg = f"Erro ao regenerar catalogo: {exc}"
+        logger.error(msg)
+        return False, msg
+
+    # 2) Remover vectorstore antigo
+    vpath = "vectorstore_local"
+    if os.path.isdir(vpath):
+        shutil.rmtree(vpath)
+        logger.info(f"Vectorstore antigo removido: {vpath}")
+
+    # 3) Criar embeddings e reconstruir vectorstore
+    try:
+        llm_manager = create_llm_manager("deepseek", embedding_provider=embedding_provider)
+        embeddings = llm_manager.get_embeddings()
+        sucesso = criar_vectorstore_local(embeddings)
+        if sucesso:
+            return True, f"Reindexacao concluida: {len(docs)} documentos catalogados"
+        return False, "Falha ao criar vectorstore"
+    except Exception as exc:
+        msg = f"Erro ao reconstruir vectorstore: {exc}"
+        logger.error(msg)
+        return False, msg
+
+
 def criar_vectorstore_local(embeddings):
     """Cria vectorstore local usando embeddings locais"""
     try:
@@ -2769,12 +2869,36 @@ def interface_usuario_unificada():
         
         st.divider()
 
-        if st.button("Nova Conversa", use_container_width=True,
-                      help="Limpa o historico de conversa para iniciar um novo tema"):
-            st.session_state.chat_history = []
-            if "mensagens_chat" in st.session_state:
-                st.session_state.mensagens_chat = []
-            st.rerun()
+        btn_col_a, btn_col_b = st.columns(2)
+        with btn_col_a:
+            if st.button("Nova Conversa", use_container_width=True,
+                          help="Limpa o historico de conversa para iniciar um novo tema"):
+                st.session_state.chat_history = []
+                if "mensagens_chat" in st.session_state:
+                    st.session_state.mensagens_chat = []
+                st.rerun()
+
+        with btn_col_b:
+            if st.button("Reindexar Base", use_container_width=True,
+                          help="Regenera o catalogo e reconstroi o vectorstore com todos os documentos de dados_antt/"):
+                st.session_state["_reindexando"] = True
+                st.rerun()
+
+        # Executar reindexacao (precisa estar fora do button para manter o spinner)
+        if st.session_state.get("_reindexando"):
+            del st.session_state["_reindexando"]
+            with st.spinner("Reindexando base de conhecimento... (pode levar alguns minutos)"):
+                sucesso, msg = reindexar_base_completa(
+                    embedding_provider=selected_embedding_provider
+                )
+            if sucesso:
+                st.success(msg)
+                # Limpar cache de verificacao para que o alerta desapareca
+                st.session_state.pop("_docs_novos_checado", None)
+                st.session_state.pop("_docs_novos_lista", None)
+                st.balloons()
+            else:
+                st.error(msg)
 
         st.divider()
 
@@ -2819,13 +2943,32 @@ def interface_usuario_unificada():
     # Carregar vectorstore primeiro (fora dos containers)
     try:
         vectorstore = carregar_vectorstore_com_provider(selected_embedding_provider)
-        vectorstore_status = "✅ Sistema Pronto"
+        vectorstore_status = "Sistema Pronto"
         vectorstore_loaded = True
     except Exception as e:
         logger.error(f"Erro ao carregar vectorstore: {str(e)}")
         vectorstore = None
-        vectorstore_status = "❌ Sistema Indisponível"
+        vectorstore_status = "Sistema Indisponivel"
         vectorstore_loaded = False
+
+    # Verificacao automatica de documentos novos na inicializacao
+    # Usa cache no session_state para nao repetir a varredura a cada rerun
+    if "_docs_novos_checado" not in st.session_state:
+        docs_novos = detectar_documentos_novos()
+        st.session_state["_docs_novos_checado"] = True
+        st.session_state["_docs_novos_lista"] = docs_novos
+    else:
+        docs_novos = st.session_state.get("_docs_novos_lista", [])
+
+    if docs_novos:
+        st.warning(
+            f"Detectados **{len(docs_novos)}** documento(s) novo(s) em `dados_antt/` "
+            f"que ainda nao foram indexados na base de conhecimento. "
+            f"Clique em **Reindexar Base** na barra lateral para atualizar."
+        )
+        with st.expander(f"Ver {len(docs_novos)} documento(s) pendente(s)"):
+            for nome in docs_novos:
+                st.text(nome)
 
     # Layout principal em duas colunas
     col_main, col_info = st.columns([2, 1])
