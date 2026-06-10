@@ -1643,6 +1643,8 @@ def _dataframe_para_markdown(df):
     Converte um pandas DataFrame para tabela markdown sem depender de tabulate.
 
     Aplica limpeza de OCR em cada celula antes da conversao.
+    Quando o img2table gera headers numericos (0, 1, 2...), promove a
+    primeira linha de dados como header real da tabela.
 
     Args:
         df: pandas.DataFrame
@@ -1650,11 +1652,23 @@ def _dataframe_para_markdown(df):
     Returns:
         str: Tabela em formato markdown.
     """
-    headers = [_limpar_celula_ocr(h) or f"Col{i}" for i, h in enumerate(df.columns)]
+    # Detectar se os headers sao numericos auto-gerados pelo img2table
+    headers_originais = [str(h).strip() for h in df.columns]
+    headers_sao_numericos = all(h.isdigit() for h in headers_originais)
+
+    if headers_sao_numericos and len(df) > 1:
+        # Promover primeira linha como header e remover do dataframe
+        primeira_linha = df.iloc[0]
+        headers = [_limpar_celula_ocr(v) or f"Col{i}" for i, v in enumerate(primeira_linha)]
+        df_corpo = df.iloc[1:]
+    else:
+        headers = [_limpar_celula_ocr(h) or f"Col{i}" for i, h in enumerate(df.columns)]
+        df_corpo = df
+
     header_line = "| " + " | ".join(headers) + " |"
     separator = "| " + " | ".join("---" for _ in headers) + " |"
     rows = []
-    for _, row in df.iterrows():
+    for _, row in df_corpo.iterrows():
         cells = [_limpar_celula_ocr(v).replace("|", "/") for v in row]
         if all(c == "" for c in cells):
             continue
