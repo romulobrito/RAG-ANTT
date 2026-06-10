@@ -1057,37 +1057,52 @@ def criar_vectorstore_local(embeddings):
         
         logger.info(f"📄 Carregados {len(dados_documentos)} documentos do relatório")
         
-        # Criar documentos para o vectorstore
+        # Criar documentos para o vectorstore (com deduplicacao por nome de arquivo)
         documentos = []
-        
+        nomes_processados: set = set()
+        duplicados_ignorados = 0
+
         for doc_info in dados_documentos:
-            # Ler o arquivo markdown se existir
-            arquivo_md = doc_info.get('arquivo_md', '')
-            if arquivo_md and os.path.exists(arquivo_md):
-                try:
-                    with open(arquivo_md, 'r', encoding='utf-8') as f:
-                        conteudo = f.read()
+            arquivo_md = doc_info.get("arquivo_md", "")
+            if not arquivo_md or not os.path.exists(arquivo_md):
+                continue
 
-                    # Enriquecer imagens via OCR antes de indexar
-                    conteudo = _enriquecer_imagens_documento(conteudo)
+            # Deduplicar: usar nome do arquivo (sem caminho) como chave
+            nome_arquivo = os.path.basename(arquivo_md)
+            if nome_arquivo in nomes_processados:
+                duplicados_ignorados += 1
+                logger.debug(f"Duplicado ignorado: {arquivo_md}")
+                continue
+            nomes_processados.add(nome_arquivo)
 
-                    doc = Document(
-                        page_content=conteudo,
-                        metadata={
-                            'tipo_documento': doc_info.get('tipo', ''),
-                            'nome_tipo': doc_info.get('tipo', ''),
-                            'numero': doc_info.get('numero', ''),
-                            'ano': doc_info.get('ano', ''),
-                            'caminho': arquivo_md,
-                            'titulo': doc_info.get('titulo', ''),
-                            'ementa': doc_info.get('ementa', ''),
-                            'orgao': doc_info.get('orgao', '')
-                        }
-                    )
-                    documentos.append(doc)
-                    
-                except Exception as e:
-                    logger.warning(f"⚠️ Erro ao ler {arquivo_md}: {e}")
+            try:
+                with open(arquivo_md, "r", encoding="utf-8") as f:
+                    conteudo = f.read()
+
+                conteudo = _enriquecer_imagens_documento(conteudo)
+
+                doc = Document(
+                    page_content=conteudo,
+                    metadata={
+                        "tipo_documento": doc_info.get("tipo", ""),
+                        "nome_tipo": doc_info.get("tipo", ""),
+                        "numero": doc_info.get("numero", ""),
+                        "ano": doc_info.get("ano", ""),
+                        "caminho": arquivo_md,
+                        "titulo": doc_info.get("titulo", ""),
+                        "ementa": doc_info.get("ementa", ""),
+                        "orgao": doc_info.get("orgao", ""),
+                    },
+                )
+                documentos.append(doc)
+
+            except Exception as e:
+                logger.warning(f"Erro ao ler {arquivo_md}: {e}")
+
+        if duplicados_ignorados > 0:
+            logger.info(
+                f"Deduplicacao: {duplicados_ignorados} documentos duplicados ignorados"
+            )
         
         logger.info(f"📚 Preparados {len(documentos)} documentos para indexação")
         
@@ -1461,9 +1476,73 @@ def _baixar_imagem(url, timeout=30):
         return None
 
 
+_OCR_LIXO_PATTERNS = re.compile(
+    r"^(?:None|\(?\s*[A-Z]\s*\)?|[\d]+[-\s]*[A-Z]{1,4}[a-z]{0,2}[A-Z]*|\W+)$"
+)
+
+
+def _limpar_celula_ocr(valor: str) -> str:
+    """
+    Limpa o valor de uma celula extraida por OCR/img2table.
+
+    Remove:
+    - Valores literais "None" (celulas vazias do img2table)
+    - Fragmentos de OCR sem valor semantico: "(A)", "1- EXProD", etc.
+    - Celulas contendo apenas pontuacao/espacos
+
+    Args:
+        valor: Conteudo textual da celula.
+
+    Returns:
+        str: Celula limpa ou string vazia se for lixo.
+    """
+    texto = str(valor).strip()
+    if not texto or texto.lower() == "none":
+        return ""
+    if len(texto) <= 2 and not texto.isdigit():
+        return ""
+    if _OCR_LIXO_PATTERNS.match(texto):
+        return ""
+    return texto
+
+
+def _limpar_texto_ocr(texto: str) -> str:
+    """
+    Remove linhas de lixo de texto extraido por OCR textual (pytesseract).
+
+    Filtra:
+    - Linhas muito curtas sem conteudo alfanumerico relevante
+    - Linhas que sao apenas "None" (artefato do img2table)
+    - Linhas que casam com padroes conhecidos de lixo OCR
+    - Colapsa espacos em branco excessivos
+
+    Args:
+        texto: Texto bruto do OCR.
+
+    Returns:
+        str: Texto limpo.
+    """
+    linhas_limpas = []
+    for linha in texto.splitlines():
+        linha_strip = linha.strip()
+        if not linha_strip:
+            continue
+        if linha_strip.lower() == "none":
+            continue
+        conteudo_alfa = re.sub(r"[^a-zA-Z0-9]", "", linha_strip)
+        if len(conteudo_alfa) < 2:
+            continue
+        if _OCR_LIXO_PATTERNS.match(linha_strip):
+            continue
+        linhas_limpas.append(linha_strip)
+    return "\n".join(linhas_limpas)
+
+
 def _dataframe_para_markdown(df):
     """
     Converte um pandas DataFrame para tabela markdown sem depender de tabulate.
+
+    Aplica limpeza de OCR em cada celula antes da conversao.
 
     Args:
         df: pandas.DataFrame
@@ -1471,13 +1550,17 @@ def _dataframe_para_markdown(df):
     Returns:
         str: Tabela em formato markdown.
     """
-    headers = [str(h) for h in df.columns]
+    headers = [_limpar_celula_ocr(h) or f"Col{i}" for i, h in enumerate(df.columns)]
     header_line = "| " + " | ".join(headers) + " |"
     separator = "| " + " | ".join("---" for _ in headers) + " |"
     rows = []
     for _, row in df.iterrows():
-        cells = [str(v).replace("|", "/") for v in row]
+        cells = [_limpar_celula_ocr(v).replace("|", "/") for v in row]
+        if all(c == "" for c in cells):
+            continue
         rows.append("| " + " | ".join(cells) + " |")
+    if not rows:
+        return ""
     return "\n".join([header_line, separator] + rows)
 
 
@@ -1521,7 +1604,8 @@ def _extrair_texto_imagem(imagem_pil, url=""):
                     df = tabela.df
                     if df is not None and not df.empty:
                         md_table = _dataframe_para_markdown(df)
-                        partes.append(md_table)
+                        if md_table.strip():
+                            partes.append(md_table)
 
                 if partes:
                     texto_final = "\n\n".join(partes)
@@ -1534,7 +1618,7 @@ def _extrair_texto_imagem(imagem_pil, url=""):
         # 2) Fallback: OCR textual completo via pytesseract
         if not texto_final.strip():
             texto_ocr = pytesseract.image_to_string(imagem_pil, lang="por")
-            texto_final = texto_ocr.strip()
+            texto_final = _limpar_texto_ocr(texto_ocr)
             if texto_final:
                 logger.info(
                     f"Tesseract OCR extraiu {len(texto_final)} chars de {url}"
@@ -1969,6 +2053,80 @@ def _normalize_text_ascii_lower(value: str) -> str:
 
 _MAX_CONTEXT_CHARS = 30000
 
+_TEMPLATE_REESCRITA = """Reescreva a ULTIMA PERGUNTA como uma pergunta COMPLETA e AUTOCONTIDA
+usando o contexto do historico. Se ja for autocontida, retorne-a sem alteracao.
+
+REGRAS OBRIGATORIAS:
+- Retorne SOMENTE a pergunta reescrita, nada mais.
+- NAO inclua explicacoes, notas, comentarios ou parenteses.
+- NAO comece com "Pergunta:" ou similar.
+- A saida deve conter UMA UNICA frase interrogativa.
+
+HISTORICO:
+{historico}
+
+ULTIMA PERGUNTA: "{pergunta}"
+
+PERGUNTA REESCRITA:"""
+
+
+def _reescrever_query_com_historico(pergunta, historico, llm):
+    """
+    Reescreve a pergunta do usuario incorporando contexto do historico de conversa.
+
+    Usa o LLM para transformar perguntas ambiguas ou de aprofundamento em
+    queries autocontidas que funcionam bem para busca semantica.
+
+    Args:
+        pergunta (str): Pergunta original do usuario.
+        historico (list): Lista de dicts com chaves 'pergunta' e 'resposta'.
+        llm: Instancia do LLM configurado.
+
+    Returns:
+        str: Pergunta reescrita (autocontida) ou a original se nao houver historico.
+    """
+    if not historico:
+        return pergunta
+
+    # Montar texto do historico (ultimas 3 interacoes)
+    turnos = historico[-3:]
+    linhas = []
+    for turno in turnos:
+        linhas.append(f"Usuario: {turno['pergunta']}")
+        resumo_resp = turno["resposta"][:300]
+        linhas.append(f"Assistente: {resumo_resp}...")
+    texto_historico = "\n".join(linhas)
+
+    prompt = PromptTemplate(
+        template=_TEMPLATE_REESCRITA,
+        input_variables=["historico", "pergunta"],
+    )
+
+    try:
+        chain = prompt | llm
+        resultado = chain.invoke({
+            "historico": texto_historico,
+            "pergunta": pergunta,
+        })
+        reescrita = resultado.content.strip() if hasattr(resultado, "content") else str(resultado).strip()
+
+        # Limpar lixo que o LLM pode adicionar
+        reescrita = reescrita.strip('"').strip("'")
+        # Remover notas em parenteses no final (ex: "(Nota: ...)")
+        reescrita = re.sub(r"\s*\((?:Nota|Obs|Observa).*\)\s*$", "", reescrita, flags=re.IGNORECASE | re.DOTALL)
+        # Pegar apenas a primeira linha se o LLM retornou multiplas
+        reescrita = reescrita.split("\n")[0].strip()
+
+        if len(reescrita) < 10:
+            return pergunta
+
+        logger.info(f"Query reescrita: '{pergunta}' -> '{reescrita}'")
+        return reescrita
+
+    except Exception as exc:
+        logger.warning(f"Falha na reescrita de query: {exc}. Usando original.")
+        return pergunta
+
 
 def gerar_resposta(pergunta, documentos, llm, modelo_usado="gpt-4"):
     """Gera uma resposta baseada nos documentos recuperados usando templates adaptativos."""
@@ -2192,42 +2350,187 @@ Conteudo:
             error_msg2 = str(e2).lower()
             logger.error(f"Erro no fallback: {str(e2)}")
             
-            # Se ainda é erro de cota e não tentamos DeepSeek ainda
             if any(keyword in error_msg2 for keyword in ["insufficient_quota", "429", "quota", "exceeded"]):
                 try:
-                    # Último recurso: DeepSeek com template simples
                     from llm_providers import create_llm_manager
                     deepseek_manager = create_llm_manager("deepseek")
                     deepseek_llm = deepseek_manager.get_llm(temperature=0.1, max_tokens=1500)
-                    
-                    # Template muito simples para emergência
-                    template_emergencia = """
-                    Baseado nos documentos abaixo, responda de forma direta e objetiva: {question}
-                    
-                    Documentos:
-                    {context}
-                    
-                    Resposta:
-                    """
-                    
+
+                    # Usar template adaptativo correto com contexto truncado
+                    _EMERGENCIA_MAX_CHARS = 8000
+                    contexto_truncado = contexto_completo[:_EMERGENCIA_MAX_CHARS]
+                    template_emergencia = selecionar_template_adaptativo(
+                        template_tipo, "deepseek"
+                    )
+
                     prompt_emergencia = PromptTemplate(
                         template=template_emergencia,
-                        input_variables=["context", "question"]
+                        input_variables=["context", "question"],
                     )
-                    
+
                     chain_emergencia = prompt_emergencia | deepseek_llm
                     resposta_emergencia = chain_emergencia.invoke({
-                        "context": contexto_completo[:8000],  # Reduzir contexto
-                        "question": pergunta
+                        "context": contexto_truncado,
+                        "question": pergunta,
                     })
-                    
-                    logger.info("✅ Resposta de emergência gerada com DeepSeek")
-                    return f"⚠️ **Resposta de emergência (OpenAI indisponível)**\n\n{resposta_emergencia.content}", "deepseek"
-                    
+
+                    logger.info("Resposta de emergencia gerada com DeepSeek (template adaptativo + contexto truncado)")
+                    return (
+                        f"Resposta de emergencia (OpenAI indisponivel, contexto reduzido)\n\n"
+                        f"{resposta_emergencia.content}"
+                    ), "deepseek"
+
                 except Exception as e3:
-                    logger.error(f"❌ Resposta de emergência falhou: {str(e3)}")
+                    logger.error(f"Resposta de emergencia falhou: {e3}")
             
             return f"❌ Não foi possível gerar uma resposta devido a limitações temporárias da API. Tente novamente em alguns minutos ou use o modo de embeddings locais.", modelo_usado
+
+def _preparar_contexto_resposta(pergunta, documentos, modelo_usado="gpt-4"):
+    """
+    Prepara contexto, seleciona template e monta o prompt para geracao de resposta.
+
+    Compartilha a logica de construcao de contexto entre gerar_resposta e
+    gerar_resposta_streaming para evitar duplicacao.
+
+    Args:
+        pergunta: Pergunta do usuario.
+        documentos: Lista de Document recuperados.
+        modelo_usado: Identificador do provedor (gpt-4, deepseek, etc.).
+
+    Returns:
+        Tuple (prompt_formatado: str, template_tipo: str) prontos para envio ao LLM.
+        Retorna (None, None) se documentos estiver vazio.
+    """
+    if not documentos:
+        return None, None
+
+    if len(documentos) > 20:
+        logger.warning(
+            f"Recebidos {len(documentos)} chunks, truncando para 20 mais relevantes"
+        )
+        documentos = documentos[:20]
+
+    contextos = []
+    tipos_documentos = set()
+    contagem_por_tipo = {}
+
+    for i, doc in enumerate(documentos):
+        metadados = doc.metadata
+        tipo = metadados.get("nome_tipo", "Documento")
+        tipos_documentos.add(tipo)
+        contagem_por_tipo[tipo] = contagem_por_tipo.get(tipo, 0) + 1
+        numero = metadados.get("numero", "N/A")
+        ano = metadados.get("ano", "N/A")
+        doc_id = f"{tipo} {numero}/{ano}"
+        contexto = (
+            f"\n[Documento: {doc_id} - Parte "
+            f"{metadados.get('chunk', 'N/A')}/{metadados.get('total_chunks', 'N/A')}]\n"
+            f"Fonte: {metadados.get('caminho', 'Nao especificado')}\n"
+            f"Conteudo:\n{doc.page_content}\n"
+        )
+        contextos.append(contexto)
+
+    contexto_completo = "\n\n".join(contextos)
+
+    if len(contexto_completo) > _MAX_CONTEXT_CHARS:
+        logger.warning(
+            f"Contexto com {len(contexto_completo)} chars excede limite de "
+            f"{_MAX_CONTEXT_CHARS}. Truncando."
+        )
+        contexto_completo = contexto_completo[:_MAX_CONTEXT_CHARS]
+
+    logger.info("=" * 60)
+    logger.info("CHUNKS ENVIADOS AO LLM")
+    logger.info(f"Total de chunks: {len(documentos)}")
+    logger.info(f"Tamanho total do contexto: {len(contexto_completo)} chars")
+    logger.info(f"Modelo usado: {modelo_usado}")
+    for tipo, contagem in contagem_por_tipo.items():
+        logger.info(f"  Tipo '{tipo}': {contagem} chunks")
+    for i, doc in enumerate(documentos):
+        m = doc.metadata
+        preview = doc.page_content[:120].replace("\n", " ")
+        logger.info(
+            f"  chunk[{i}] {m.get('nome_tipo','?')} {m.get('numero','?')}/{m.get('ano','?')} "
+            f"parte {m.get('chunk','?')}/{m.get('total_chunks','?')} "
+            f"({len(doc.page_content)} chars) >> {preview}..."
+        )
+    logger.info("=" * 60)
+
+    normalized_question = _normalize_text_ascii_lower(pergunta)
+    normalized_types = [_normalize_text_ascii_lower(t) for t in list(tipos_documentos)]
+
+    keywords_technical = [
+        "parametro", "tecnico", "valor", "limite", "medida", "metodologia",
+        "pavimento", "deflexao", "iri", "atrito", "indice",
+    ]
+    keywords_normative = [
+        "resolucao", "instrucao normativa", "deliberacao", "portaria", "regulamento",
+        "normativo", "legal", "direito", "obrigacao", "dever", "prazo", "penalidade",
+        "lei", "decreto", "in",
+    ]
+
+    if any(k in normalized_question for k in keywords_technical) or \
+       ("instrucao normativa" in " ".join(normalized_types) and "parametro" in normalized_question):
+        logger.info("Detectada consulta sobre parametros tecnicos")
+        template_tipo = "parametros"
+    elif any(k in normalized_question for k in keywords_normative) or \
+         any(t in ["resolucao", "deliberacao", "portaria", "instrucao normativa", "lei", "decreto"] for t in normalized_types):
+        logger.info("Detectada consulta sobre aspectos normativos/juridicos")
+        template_tipo = "normativa"
+    else:
+        logger.info("Usando template padrao de resposta")
+        template_tipo = "resposta"
+
+    template_escolhido = selecionar_template_adaptativo(template_tipo, modelo_usado)
+    logger.info(f"Template selecionado: {template_tipo} para modelo {modelo_usado}")
+
+    prompt = PromptTemplate(
+        template=template_escolhido,
+        input_variables=["context", "question"],
+    )
+    prompt_formatado = prompt.format(context=contexto_completo, question=pergunta)
+    return prompt_formatado, template_tipo
+
+
+def gerar_resposta_streaming(pergunta, documentos, llm, modelo_usado="gpt-4"):
+    """
+    Gera resposta via streaming (yield de tokens).
+
+    Retorna um generator de strings para uso com st.write_stream.
+    Ao final, o texto completo pode ser acessado via atributo .texto_completo
+    do generator (apos consumo total).
+
+    Args:
+        pergunta: Pergunta do usuario.
+        documentos: Lista de Document.
+        llm: Instancia do LLM LangChain.
+        modelo_usado: Identificador do provedor.
+
+    Yields:
+        str: Tokens incrementais da resposta.
+    """
+    if not documentos:
+        yield "Nao encontrei documentos relevantes para esta pergunta."
+        return
+
+    prompt_formatado, template_tipo = _preparar_contexto_resposta(
+        pergunta, documentos, modelo_usado
+    )
+    if prompt_formatado is None:
+        yield "Nao encontrei documentos relevantes para esta pergunta."
+        return
+
+    from langchain_core.messages import HumanMessage
+
+    try:
+        for chunk in llm.stream([HumanMessage(content=prompt_formatado)]):
+            token = chunk.content if hasattr(chunk, "content") else str(chunk)
+            if token:
+                yield token
+    except Exception as exc:
+        logger.error(f"Erro durante streaming: {exc}")
+        yield f"\n\n[Erro durante geracao: {exc}]"
+
 
 def extrair_citacoes_da_resposta(resposta):
     """Extrai as citações de documentos da resposta gerada."""
@@ -2293,6 +2596,14 @@ def interface_usuario_unificada():
         layout=STREAMLIT_LAYOUT,
         initial_sidebar_state="expanded"
     )
+
+    # Inicializar historico de conversa no session_state
+    if "chat_history" not in st.session_state:
+        st.session_state.chat_history = []
+
+    # Historico visual do chat (pares pergunta/resposta para exibicao)
+    if "mensagens_chat" not in st.session_state:
+        st.session_state.mensagens_chat = []
     
     # CSS personalizado
     st.markdown("""
@@ -2457,9 +2768,16 @@ def interface_usuario_unificada():
                 st.warning("⚠️ Verificação de chave OpenAI falhou")
         
         st.divider()
-        
 
-        
+        if st.button("Nova Conversa", use_container_width=True,
+                      help="Limpa o historico de conversa para iniciar um novo tema"):
+            st.session_state.chat_history = []
+            if "mensagens_chat" in st.session_state:
+                st.session_state.mensagens_chat = []
+            st.rerun()
+
+        st.divider()
+
         max_tokens = st.number_input(
             "Máximo de tokens:",
             min_value=100,
@@ -2513,17 +2831,30 @@ def interface_usuario_unificada():
     col_main, col_info = st.columns([2, 1])
     
     with col_main:
-        # Verificar se há um exemplo selecionado no session_state
+        # Exibir historico visual do chat
+        if st.session_state.mensagens_chat:
+            chat_container = st.container()
+            with chat_container:
+                for msg in st.session_state.mensagens_chat:
+                    with st.chat_message("user"):
+                        st.markdown(msg["pergunta"])
+                    with st.chat_message("assistant"):
+                        st.markdown(msg["resposta"])
+                        if msg.get("provider"):
+                            st.caption(f"Resposta via {msg['provider']}")
+            st.divider()
+
+        # Verificar se ha um exemplo selecionado no session_state
         valor_inicial = ""
         if "pergunta_exemplo" in st.session_state:
             valor_inicial = st.session_state.pergunta_exemplo
-            
+
         # Campo de pergunta principal
         pergunta = st.text_area(
-            "💬 Digite sua pergunta sobre documentos da ANTT:",
+            "Digite sua pergunta sobre documentos da ANTT:",
             value=valor_inicial,
             height=100,
-            help="Digite sua consulta sobre regulamentações, normas ou procedimentos da ANTT"
+            help="Digite sua consulta sobre regulamentacoes, normas ou procedimentos da ANTT"
         )
         
         # Botões de ação
@@ -2649,10 +2980,23 @@ def interface_usuario_unificada():
                     filtro_ano = None if ano_filtro == "Todos" else ano_filtro
                     filtro_numero = numero_filtro if numero_filtro.strip() else None
                     
+                    # Reescrever query se houver historico de conversa
+                    pergunta_original = pergunta_para_processar
+                    if st.session_state.chat_history:
+                        pergunta_para_processar = _reescrever_query_com_historico(
+                            pergunta_para_processar,
+                            st.session_state.chat_history,
+                            llm,
+                        )
+                        if pergunta_para_processar != pergunta_original:
+                            st.info(
+                                f"Pergunta contextualizada: **{pergunta_para_processar}**"
+                            )
+
                     # Buscar documentos
                     documentos = pesquisar_documentos(
-                        pergunta_para_processar, 
-                        vectorstore, 
+                        pergunta_para_processar,
+                        vectorstore,
                         k=num_documentos,
                         tipo_documento=filtro_tipo,
                         ano=filtro_ano,
@@ -2661,31 +3005,53 @@ def interface_usuario_unificada():
                     )
                     
                     if documentos:
-                        # Gerar resposta com template adaptativo
-                        logger.info(f"🔍 DEBUG: Gerando resposta com {len(documentos)} documentos")
-                        resposta, modelo_usado_final = gerar_resposta(pergunta_para_processar, documentos, llm, provider_usado)
-                        
-                        logger.info(f"🔍 DEBUG: Resposta gerada - Tamanho: {len(resposta) if resposta else 0} caracteres")
-                        logger.info(f"🔍 DEBUG: Modelo usado final: {modelo_usado_final}")
-                        logger.info(f"🔍 DEBUG: Primeiros 100 chars da resposta: {resposta[:100] if resposta else 'VAZIA'}")
-                        
-                        # Exibir resposta
-                        st.subheader("📝 Resposta")
-                        if resposta and resposta.strip():
-                            st.markdown(resposta)
-                            logger.info("🔍 DEBUG: Resposta exibida com sucesso no Streamlit")
-                        else:
-                            st.error("❌ Resposta vazia ou inválida gerada pelo modelo")
-                            logger.error("🔍 DEBUG: Resposta vazia detectada na interface!")
-                        
+                        logger.info(f"DEBUG: Gerando resposta com {len(documentos)} documentos")
+                        modelo_usado_final = provider_usado
+                        provider_label = provider_names.get(
+                            modelo_usado_final, modelo_usado_final
+                        )
+
+                        with st.chat_message("user"):
+                            st.markdown(pergunta_original)
+
+                        with st.chat_message("assistant"):
+                            stream_gen = gerar_resposta_streaming(
+                                pergunta_para_processar, documentos, llm, provider_usado
+                            )
+                            resposta = st.write_stream(stream_gen)
+
+                        if not resposta or not resposta.strip():
+                            resposta, modelo_usado_final = gerar_resposta(
+                                pergunta_para_processar, documentos, llm, provider_usado
+                            )
+                            provider_label = provider_names.get(
+                                modelo_usado_final, modelo_usado_final
+                            )
+                            with st.chat_message("assistant"):
+                                st.markdown(resposta)
+
+                        logger.info(
+                            f"DEBUG: Resposta gerada - Tamanho: "
+                            f"{len(resposta) if resposta else 0} caracteres"
+                        )
+
+                        # Salvar no historico de conversa para reescrita (max 5 turnos)
+                        st.session_state.chat_history.append({
+                            "pergunta": pergunta_original,
+                            "resposta": resposta if resposta else "",
+                        })
+                        if len(st.session_state.chat_history) > 5:
+                            st.session_state.chat_history = st.session_state.chat_history[-5:]
+
+                        # Salvar no historico visual do chat
+                        st.session_state.mensagens_chat.append({
+                            "pergunta": pergunta_original,
+                            "resposta": resposta if resposta else "(sem resposta)",
+                            "provider": provider_label,
+                        })
+
                         # Mostrar qual provedor foi usado
-                        if modelo_usado_final != provider_usado:
-                            if modelo_usado_final == "deepseek" and provider_usado == "openai":
-                                st.info(f"🔄 **Fallback Automático Ativado**: OpenAI estava indisponível (limite de cota temporário), DeepSeek foi usado com sucesso")
-                            else:
-                                st.info(f"ℹ️ Resposta gerada usando {provider_names.get(modelo_usado_final, modelo_usado_final)} (fallback)")
-                        else:
-                            st.success(f"✅ Resposta gerada com {provider_names.get(modelo_usado_final, modelo_usado_final)}")
+                        st.success(f"Resposta gerada com {provider_label}")
                         
                         # Extrair e exibir citações
                         citacoes = extrair_citacoes_da_resposta(resposta)
