@@ -72,8 +72,10 @@ INSTRUÇÕES IMPORTANTES PARA GERAÇÃO DE RESPOSTA:
    - Mencione o tipo de documento, número e ano EXATAMENTE como aparecem no original
    - Destaque artigos, parágrafos e incisos específicos
    - Explique claramente as implicações práticas das normas
-6. Quando houver dados numéricos ou técnicos, apresente-os de forma estruturada
-7. NÃO INVENTE INFORMAÇÕES! Se algo não estiver nos documentos, indique claramente a limitação
+6. Quando houver dados numericos ou tecnicos, apresente-os de forma estruturada
+7. NAO INVENTE INFORMACOES! Se algo nao estiver nos documentos, indique claramente a limitacao
+8. TABELAS: Os documentos podem conter tabelas em formato markdown (linhas com |).
+   Extraia TODOS os valores numericos, limites e criterios presentes nessas tabelas
 8. Após sua resposta, SEMPRE adicione uma seção "TRECHOS DOS DOCUMENTOS CITADOS" estruturada assim:
 
 ### TRECHOS DOS DOCUMENTOS CITADOS:
@@ -133,22 +135,26 @@ Estruture sua resposta com:
 
 # Templates otimizados para DeepSeek (mais diretos e concisos)
 TEMPLATE_RESPOSTA_COM_CITACOES_DEEPSEEK = """
-Você é um especialista em regulamentação da ANTT. Responda de forma direta e precisa.
+Voce e um especialista em regulamentacao da ANTT. Responda de forma direta e precisa.
 
 PERGUNTA: "{question}"
 
-INSTRUÇÕES:
-• Analise os documentos e extraia informações relevantes
-• Seja objetivo e direto na resposta
-• Use listas e marcadores para organizar informações
-• Cite sempre: [TIPO DOCUMENTO] [NÚMERO]/[ANO]
-• Inclua artigos e parágrafos específicos
-• Se não encontrar informação, diga claramente
+INSTRUCOES:
+- Analise os documentos e extraia informacoes relevantes
+- Seja objetivo e direto na resposta
+- Use listas e marcadores para organizar informacoes
+- Cite sempre: [TIPO DOCUMENTO] [NUMERO]/[ANO]
+- Inclua artigos e paragrafos especificos
+- Se nao encontrar informacao, diga claramente
+- IMPORTANTE: Os documentos podem conter TABELAS em formato markdown (linhas com |).
+  Extraia TODOS os valores numericos, limites, faixas e criterios presentes nessas tabelas.
+  Apresente esses dados de forma estruturada na resposta.
 
 FORMATO DA RESPOSTA:
-1. Resposta direta à pergunta
-2. Detalhes técnicos/normativos (se aplicável)
-3. Fontes citadas
+1. Resposta direta a pergunta
+2. Valores numericos e limites (quando existirem nos documentos)
+3. Detalhes tecnicos/normativos (se aplicavel)
+4. Fontes citadas
 
 DOCUMENTOS:
 {context}
@@ -328,29 +334,38 @@ Para cada parâmetro, documente:
 TEMPLATE_PARAMETROS_TECNICOS_DEEPSEEK = """
 ANALISE TECNICA: "{question}"
 
-OBJETIVO: Identificar todos os parametros tecnicos nos documentos.
+OBJETIVO: Identificar todos os parametros tecnicos nos documentos, incluindo valores
+numericos, limites, faixas, unidades e criterios de classificacao.
 
 REGRA DE FUNDAMENTACAO:
 - Preencha SOMENTE campos para os quais exista evidencia textual explicita nos documentos.
 - Se o contexto NAO contiver um parametro solicitado, declare a lacuna em vez de inventar valores.
 - NAO fabrique numeros, unidades ou limites que nao estejam nos trechos fornecidos.
 
+ATENCAO A TABELAS:
+- Os documentos podem conter TABELAS em formato markdown (linhas delimitadas por |).
+- Extraia TODOS os valores numericos dessas tabelas: limites maximos/minimos, faixas,
+  percentuais, unidades de medida (m/km, mm, %, etc.).
+- Inclua na resposta os valores exatos como aparecem nas tabelas.
+
 ESTRUTURA DA RESPOSTA:
 1. **PARAMETROS IDENTIFICADOS**
+   Para cada parametro, informe:
    - Nome do parametro
-   - Valor/limite
-   - Unidade
+   - Valor/limite numerico exato (ex: 2,7 m/km, 7mm, >0,2)
+   - Unidade de medida
+   - Condicoes de aplicacao (ex: pista principal vs marginal, flexivel vs rigido)
+   - Periodicidade de monitoramento
    - Fonte: [DOC] [NUM]/[ANO], Art./Anexo
 
 2. **METODOLOGIAS DE VERIFICACAO**
-   - Como medir
-   - Equipamentos necessarios
+   - Equipamento (ex: Perfilometro Laser, FWD, Grip Tester)
+   - Area monitorada (ex: 100% da extensao, segmentos de 200m)
    - Frequencia
 
-3. **CRITERIOS DE CONFORMIDADE**
-   - Limites aceitaveis
-   - Condicoes especiais
-   - Excecoes
+3. **CRITERIOS DE CLASSIFICACAO/CONFORMIDADE**
+   - Niveis (A, B, C, D) e seus limites quando disponiveis
+   - Condicoes especiais ou excecoes
 
 4. **LACUNAS** (se houver parametros solicitados nao encontrados nos documentos)
 
@@ -1052,8 +1067,10 @@ def criar_vectorstore_local(embeddings):
                 try:
                     with open(arquivo_md, 'r', encoding='utf-8') as f:
                         conteudo = f.read()
-                    
-                    # Criar documento com metadados
+
+                    # Enriquecer imagens via OCR antes de indexar
+                    conteudo = _enriquecer_imagens_documento(conteudo)
+
                     doc = Document(
                         page_content=conteudo,
                         metadata={
@@ -1364,6 +1381,7 @@ def _carregar_documento_markdown(caminho, tipo, nome_tipo, numero, ano):
     if not conteudo.strip():
         return []
 
+    conteudo = _enriquecer_imagens_documento(conteudo)
     chunks = _dividir_por_estrutura(conteudo)
 
     documentos = []
@@ -1384,6 +1402,214 @@ def _carregar_documento_markdown(caminho, tipo, nome_tipo, numero, ano):
         documentos.append(doc)
 
     return documentos
+
+
+# ---------------------------------------------------------------------------
+# Pipeline de enriquecimento OCR para imagens em documentos markdown
+# ---------------------------------------------------------------------------
+
+_OCR_CACHE_DIR = os.path.join(
+    os.path.dirname(os.path.abspath(__file__)),
+    "dados_antt",
+    ".ocr_cache",
+)
+
+
+def _obter_cache_ocr(url_hash):
+    """Retorna texto OCR em cache para o hash da URL, ou None."""
+    cache_path = os.path.join(_OCR_CACHE_DIR, f"{url_hash}.txt")
+    if os.path.exists(cache_path):
+        try:
+            with open(cache_path, "r", encoding="utf-8") as f:
+                return f.read()
+        except Exception:
+            return None
+    return None
+
+
+def _salvar_cache_ocr(url_hash, texto):
+    """Persiste resultado OCR em cache local."""
+    os.makedirs(_OCR_CACHE_DIR, exist_ok=True)
+    cache_path = os.path.join(_OCR_CACHE_DIR, f"{url_hash}.txt")
+    try:
+        with open(cache_path, "w", encoding="utf-8") as f:
+            f.write(texto)
+    except Exception as exc:
+        logger.warning(f"Falha ao salvar cache OCR {cache_path}: {exc}")
+
+
+def _baixar_imagem(url, timeout=30):
+    """
+    Baixa uma imagem de uma URL e retorna como objeto PIL.Image.
+
+    Args:
+        url (str): URL da imagem.
+        timeout (int): Timeout em segundos.
+
+    Returns:
+        PIL.Image | None: Imagem ou None em caso de falha.
+    """
+    import requests as _requests
+    from io import BytesIO
+
+    try:
+        resp = _requests.get(url, timeout=timeout, stream=True)
+        resp.raise_for_status()
+        return Image.open(BytesIO(resp.content))
+    except Exception as exc:
+        logger.warning(f"Falha ao baixar imagem {url}: {exc}")
+        return None
+
+
+def _dataframe_para_markdown(df):
+    """
+    Converte um pandas DataFrame para tabela markdown sem depender de tabulate.
+
+    Args:
+        df: pandas.DataFrame
+
+    Returns:
+        str: Tabela em formato markdown.
+    """
+    headers = [str(h) for h in df.columns]
+    header_line = "| " + " | ".join(headers) + " |"
+    separator = "| " + " | ".join("---" for _ in headers) + " |"
+    rows = []
+    for _, row in df.iterrows():
+        cells = [str(v).replace("|", "/") for v in row]
+        rows.append("| " + " | ".join(cells) + " |")
+    return "\n".join([header_line, separator] + rows)
+
+
+def _extrair_texto_imagem(imagem_pil, url=""):
+    """
+    Extrai texto de uma imagem PIL usando Tesseract OCR e img2table.
+
+    Estrategia:
+    1. Tenta extracao de tabelas via img2table (ideal para documentos regulatorios)
+    2. Se nao encontrar tabelas, faz OCR textual simples via pytesseract
+
+    Args:
+        imagem_pil (PIL.Image): Imagem carregada.
+        url (str): URL original (para logging).
+
+    Returns:
+        str: Texto extraido em formato markdown.
+    """
+    import pytesseract
+    import tempfile
+
+    texto_final = ""
+
+    with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as tmp:
+        tmp_path = tmp.name
+        imagem_pil.save(tmp_path)
+
+    try:
+        # 1) Tentar extracao de tabelas estruturadas com img2table
+        try:
+            from img2table.document import Image as Img2TableImage
+            from img2table.ocr import TesseractOCR as Img2TableOCR
+
+            ocr_engine = Img2TableOCR(lang="por")
+            img_doc = Img2TableImage(src=tmp_path)
+            tabelas = img_doc.extract_tables(ocr=ocr_engine)
+
+            if tabelas:
+                partes = []
+                for tabela in tabelas:
+                    df = tabela.df
+                    if df is not None and not df.empty:
+                        md_table = _dataframe_para_markdown(df)
+                        partes.append(md_table)
+
+                if partes:
+                    texto_final = "\n\n".join(partes)
+                    logger.info(
+                        f"img2table extraiu {len(tabelas)} tabela(s) de {url}"
+                    )
+        except Exception as exc:
+            logger.debug(f"img2table falhou para {url}: {exc}")
+
+        # 2) Fallback: OCR textual completo via pytesseract
+        if not texto_final.strip():
+            texto_ocr = pytesseract.image_to_string(imagem_pil, lang="por")
+            texto_final = texto_ocr.strip()
+            if texto_final:
+                logger.info(
+                    f"Tesseract OCR extraiu {len(texto_final)} chars de {url}"
+                )
+            else:
+                logger.warning(f"OCR nao extraiu texto de {url}")
+    finally:
+        try:
+            os.unlink(tmp_path)
+        except OSError:
+            pass
+
+    return texto_final
+
+
+def _enriquecer_imagens_documento(conteudo_md):
+    """
+    Substitui referencias de imagem (![...](url)) por texto extraido via OCR.
+
+    Percorre o markdown, identifica todas as tags de imagem com URLs externas,
+    baixa cada imagem, executa OCR/extracao de tabelas e substitui a tag
+    pelo conteudo textual extraido.
+
+    Usa cache local (dados_antt/.ocr_cache/) para evitar re-download e
+    re-processamento em re-indexacoes.
+
+    Args:
+        conteudo_md (str): Conteudo markdown do documento.
+
+    Returns:
+        str: Conteudo markdown enriquecido (imagens substituidas por texto).
+    """
+    import hashlib
+
+    padrao_imagem = re.compile(
+        r"!\[([^\]]*)\]\((https?://[^\s)]+\.(?:png|jpg|jpeg|gif|svg))\)",
+        re.IGNORECASE,
+    )
+
+    matches = list(padrao_imagem.finditer(conteudo_md))
+    if not matches:
+        return conteudo_md
+
+    logger.info(f"Encontradas {len(matches)} imagens para enriquecimento OCR")
+
+    resultado = conteudo_md
+    substituicoes = 0
+
+    for match in reversed(matches):
+        url = match.group(2)
+        url_hash = hashlib.sha256(url.encode()).hexdigest()[:16]
+
+        # Verificar cache
+        texto_cache = _obter_cache_ocr(url_hash)
+        if texto_cache is not None:
+            logger.info(f"Cache OCR encontrado para {url_hash}")
+            texto_extraido = texto_cache
+        else:
+            # Baixar e processar
+            imagem = _baixar_imagem(url)
+            if imagem is None:
+                continue
+
+            texto_extraido = _extrair_texto_imagem(imagem, url)
+            _salvar_cache_ocr(url_hash, texto_extraido)
+
+        if texto_extraido.strip():
+            bloco = f"\n{texto_extraido}\n"
+            resultado = resultado[:match.start()] + bloco + resultado[match.end():]
+            substituicoes += 1
+
+    logger.info(
+        f"Enriquecimento OCR concluido: {substituicoes}/{len(matches)} imagens convertidas"
+    )
+    return resultado
 
 
 def reranking_documentos(query, documentos):
@@ -1435,6 +1661,10 @@ def reranking_documentos(query, documentos):
         if artigos_encontrados:
             score += min(len(artigos_encontrados) * 0.3, 2.0)
 
+        # Boost para chunks com tabelas markdown (dados numericos extraidos por OCR)
+        if "| --- |" in doc.page_content:
+            score += 3.0
+
         # Boost forte para documentos priorizados (referencia explicita na query)
         caminho = metadados.get("caminho", "")
         if caminho in caminhos_prioritarios or metadados.get("prioritario"):
@@ -1446,7 +1676,7 @@ def reranking_documentos(query, documentos):
     docs_ordenados = [doc for doc, score in sorted(docs_com_score, key=lambda x: x[1], reverse=True)]
     return docs_ordenados
 
-def pesquisar_documentos(query, vectorstore, k=12, tipo_documento=None, ano=None, numero=None, embedding_provider="free"):
+def pesquisar_documentos(query, vectorstore, k=16, tipo_documento=None, ano=None, numero=None, embedding_provider="free"):
     """Pesquisa documentos com base em uma query, podendo filtrar por metadados."""
     resultados = []
     resultados_finais = []
@@ -1551,8 +1781,32 @@ def pesquisar_documentos(query, vectorstore, k=12, tipo_documento=None, ano=None
             else:
                 logger.error(f"Erro na busca com termos amplos: {str(e)}")
 
+    # Deduplicar resultados antes do reranking
+    if resultados:
+        vistos = set()
+        resultados_unicos = []
+        for doc in resultados:
+            chave = (
+                doc.metadata.get("caminho", "")
+                + "|"
+                + str(doc.metadata.get("chunk", ""))
+            )
+            if chave not in vistos:
+                vistos.add(chave)
+                resultados_unicos.append(doc)
+        if len(resultados_unicos) < len(resultados):
+            logger.info(
+                f"Deduplicacao: {len(resultados)} -> {len(resultados_unicos)} chunks unicos"
+            )
+        resultados = resultados_unicos
+
     if resultados:
         resultados_finais = reranking_documentos(query_original, resultados)
+        if len(resultados_finais) > k:
+            logger.info(
+                f"Reranking produziu {len(resultados_finais)} docs, limitando a top-{k}"
+            )
+            resultados_finais = resultados_finais[:k]
         logger.info(f"Apos reranking: {len(resultados_finais)} documentos retornados")
 
     return resultados_finais
@@ -1713,52 +1967,70 @@ def _normalize_text_ascii_lower(value: str) -> str:
     except Exception:
         return value.lower()
 
+_MAX_CONTEXT_CHARS = 30000
+
+
 def gerar_resposta(pergunta, documentos, llm, modelo_usado="gpt-4"):
     """Gera uma resposta baseada nos documentos recuperados usando templates adaptativos."""
     if not documentos:
-        return "Não encontrei documentos relevantes para esta pergunta. Por favor, reformule sua consulta ou forneça mais detalhes.", modelo_usado
-    
+        return "Nao encontrei documentos relevantes para esta pergunta. Por favor, reformule sua consulta ou forneca mais detalhes.", modelo_usado
+
+    # Guarda: limitar quantidade de chunks para nao estourar limite de tokens
+    if len(documentos) > 20:
+        logger.warning(
+            f"Recebidos {len(documentos)} chunks, truncando para 20 mais relevantes"
+        )
+        documentos = documentos[:20]
+
     contextos = []
     documentos_info = {}
-    
+
     tipos_documentos = set()
     contagem_por_tipo = {}
-    
+
     for i, doc in enumerate(documentos):
         metadados = doc.metadata
         tipo = metadados.get('nome_tipo', 'Documento')
         tipos_documentos.add(tipo)
-        
+
         contagem_por_tipo[tipo] = contagem_por_tipo.get(tipo, 0) + 1
-        
+
         numero = metadados.get('numero', 'N/A')
         ano = metadados.get('ano', 'N/A')
         doc_id = f"{tipo} {numero}/{ano}"
-        
+
         if doc_id not in documentos_info:
             documentos_info[doc_id] = {
                 'tipo': tipo,
                 'numero': numero,
                 'ano': ano,
-                'caminho': metadados.get('caminho', 'Não especificado'),
+                'caminho': metadados.get('caminho', 'Nao especificado'),
                 'trechos': []
             }
-        
+
         documentos_info[doc_id]['trechos'].append({
             'chunk': metadados.get('chunk', 'N/A'),
             'total_chunks': metadados.get('total_chunks', 'N/A'),
             'conteudo': doc.page_content
         })
-        
+
         contexto = f"""
 [Documento: {doc_id} - Parte {metadados.get('chunk', 'N/A')}/{metadados.get('total_chunks', 'N/A')}]
-Fonte: {metadados.get('caminho', 'Não especificado')}
-Conteúdo:
+Fonte: {metadados.get('caminho', 'Nao especificado')}
+Conteudo:
 {doc.page_content}
 """
         contextos.append(contexto)
-    
+
     contexto_completo = "\n\n".join(contextos)
+
+    # Guarda de tamanho: truncar contexto se exceder limite de chars
+    if len(contexto_completo) > _MAX_CONTEXT_CHARS:
+        logger.warning(
+            f"Contexto com {len(contexto_completo)} chars excede limite de "
+            f"{_MAX_CONTEXT_CHARS}. Truncando."
+        )
+        contexto_completo = contexto_completo[:_MAX_CONTEXT_CHARS]
 
     # Log detalhado dos chunks enviados ao LLM para diagnostico
     logger.info("=" * 60)
@@ -1881,8 +2153,8 @@ Conteúdo:
                 
                 logger.info("✅ DeepSeek configurado com sucesso para fallback")
                 
-                # Tentar com DeepSeek usando template apropriado
-                template_deepseek = selecionar_template_adaptativo('resposta', 'deepseek')
+                # Tentar com DeepSeek usando o MESMO tipo de template da consulta original
+                template_deepseek = selecionar_template_adaptativo(template_tipo, 'deepseek')
                 prompt_deepseek = PromptTemplate(
                     template=template_deepseek,
                     input_variables=["context", "question"]
@@ -2200,8 +2472,8 @@ def interface_usuario_unificada():
         num_documentos = st.slider(
             "Documentos para busca:",
             min_value=5,
-            max_value=20,
-            value=12,
+            max_value=30,
+            value=16,
             help="Número de documentos a recuperar"
         )
         
