@@ -26,54 +26,73 @@ class LocalEmbeddings:
             raise
     
     def _load_model(self):
-        """Carrega o modelo sentence-transformers com tentativas e modo offline."""
+        """Carrega o modelo sentence-transformers com tentativas e modo offline.
+
+        Trata erros de meta tensor (transformers >= 4.45 com safetensors)
+        desabilitando low_cpu_mem_usage quando accelerate nao resolve.
+        """
         try:
             from sentence_transformers import SentenceTransformer
             import torch
             import os
             import time
-            
-            # Definir pasta de cache local
+
             cache_dir = os.path.expanduser("~/.cache/sentence_transformers")
             os.makedirs(cache_dir, exist_ok=True)
-            
-            # 1) Tentar carregar somente de arquivos locais (sem rede)
-            try:
-                self.model = SentenceTransformer(self.model_name, device="cpu", cache_folder=cache_dir, local_files_only=True)
-                logger.info("📦 Modelo carregado do cache local (offline)")
-                return
-            except Exception as e_local_only:
-                logger.warning(f"⚠️ Modelo nao encontrado no cache local: {e_local_only}")
-            
-            # 2) Tentar baixar com algumas tentativas graduais (tratar 429)
-            retries = 3
-            backoff = 2
+
+            model_kwargs_default = {}
+            model_kwargs_safe = {"low_cpu_mem_usage": False}
+
+            configs = [
+                (True, model_kwargs_default, "cache local"),
+                (True, model_kwargs_safe, "cache local (sem meta tensors)"),
+                (False, model_kwargs_default, "download"),
+                (False, model_kwargs_safe, "download (sem meta tensors)"),
+            ]
+
             last_err = None
-            for attempt in range(1, retries + 1):
-                try:
-                    self.model = SentenceTransformer(self.model_name, device="cpu", cache_folder=cache_dir)
-                    logger.info("⬇️ Download do modelo concluido e carregado com sucesso")
-                    return
-                except Exception as e_dl:
-                    last_err = e_dl
-                    msg = str(e_dl).lower()
-                    if "429" in msg or "rate" in msg or "too many" in msg:
-                        logger.warning(f"HTTP 429/Rate limit ao baixar modelo (tentativa {attempt}/{retries}). Aguardando {backoff}s...")
-                        time.sleep(backoff)
-                        backoff *= 2
-                        continue
-                    if "meta tensor" in msg:
-                        logger.warning("Erro de 'meta tensor' ao mover modelo; tentando recarregar em CPU pura")
-                        time.sleep(1)
-                        continue
-                    # Outros erros: nao insistir
-                    break
-            
-            # Se chegou aqui, falhou
-            raise RuntimeError(f"Falha ao carregar modelo local '{self.model_name}': {last_err}")
+            for local_only, mkwargs, desc in configs:
+                retries = 1 if local_only else 3
+                backoff = 2
+                for attempt in range(1, retries + 1):
+                    try:
+                        self.model = SentenceTransformer(
+                            self.model_name,
+                            device="cpu",
+                            cache_folder=cache_dir,
+                            local_files_only=local_only,
+                            model_kwargs=mkwargs,
+                        )
+                        logger.info(f"Modelo carregado via {desc}")
+                        return
+                    except Exception as exc:
+                        last_err = exc
+                        msg = str(exc).lower()
+                        if local_only and ("not found" in msg or "no such" in msg
+                                           or "does not appear" in msg):
+                            break
+                        if "429" in msg or "rate" in msg or "too many" in msg:
+                            logger.warning(
+                                f"HTTP 429 (tentativa {attempt}/{retries}). "
+                                f"Aguardando {backoff}s..."
+                            )
+                            time.sleep(backoff)
+                            backoff *= 2
+                            continue
+                        if "meta tensor" in msg:
+                            logger.warning(
+                                f"Meta tensor em {desc}; tentando proximo modo"
+                            )
+                            break
+                        break
+
+            raise RuntimeError(
+                f"Falha ao carregar modelo local '{self.model_name}': {last_err}"
+            )
         except ImportError:
             raise ImportError(
-                "sentence-transformers nao esta instalado. Execute: pip install sentence-transformers"
+                "sentence-transformers nao esta instalado. "
+                "Execute: pip install sentence-transformers"
             )
     
     def embed_query(self, text):

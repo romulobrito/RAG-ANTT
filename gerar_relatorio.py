@@ -13,28 +13,59 @@ _PADRAO_NOME = re.compile(
 
 def _extrair_metadados_do_nome(nome_arquivo: str, caminho: str) -> dict:
     """
-    Extrai tipo, numero e ano a partir do nome padrao do arquivo .md.
+    Extrai tipo, numero e ano a partir do nome do arquivo .md.
+
+    Suporta dois formatos:
+    - Padrao regulatorio: RES-00006053-2024.md
+    - Processo SEI/generico: 50500.0124472025-25.md, SEI_34503555_Nota_Tecnica.md
 
     Args:
-        nome_arquivo: Nome do arquivo (ex: RES-00006053-2024.md).
+        nome_arquivo: Nome do arquivo.
         caminho: Caminho completo do arquivo.
 
     Returns:
-        dict com campos compatíveis com o formato do catalogo.
+        dict com campos compativeis com o formato do catalogo.
     """
     match = _PADRAO_NOME.match(nome_arquivo)
-    if not match:
-        return {}
-    tipo = match.group(1)
-    numero = str(int(match.group(2)))
-    ano = match.group(3)
+    if match:
+        tipo = match.group(1)
+        numero = str(int(match.group(2)))
+        ano = match.group(3)
+        return {
+            "titulo": f"{tipo} {numero}/{ano}",
+            "ementa": "",
+            "data": "",
+            "tipo": tipo,
+            "numero": numero,
+            "ano": ano,
+            "orgao": "ANTT",
+            "url": "",
+            "arquivo_html": "",
+            "arquivo_md": caminho,
+        }
+
+    # Fallback: inferir tipo pela pasta pai ou pelo nome do arquivo
+    nome_base = os.path.splitext(nome_arquivo)[0]
+    pasta_pai = os.path.basename(os.path.dirname(caminho))
+
+    # Detectar tipo SEI pelo padrao de processo (50500.XXXXXXX-XX)
+    if re.match(r"^\d{5}\.\d{7}", nome_base):
+        tipo = "SEI"
+        numero = nome_base
+    elif "nota_tecnica" in nome_base.lower() or "Nota_Tecnica" in nome_base:
+        tipo = "NT"
+        numero = nome_base
+    else:
+        tipo = pasta_pai.upper() if pasta_pai else "DOC"
+        numero = nome_base
+
     return {
-        "titulo": f"{tipo} {numero}/{ano}",
+        "titulo": nome_base.replace("_", " ").replace("-", "/"),
         "ementa": "",
         "data": "",
         "tipo": tipo,
         "numero": numero,
-        "ano": ano,
+        "ano": "",
         "orgao": "ANTT",
         "url": "",
         "arquivo_html": "",

@@ -76,7 +76,10 @@ INSTRUÇÕES IMPORTANTES PARA GERAÇÃO DE RESPOSTA:
 7. NAO INVENTE INFORMACOES! Se algo nao estiver nos documentos, indique claramente a limitacao
 8. TABELAS: Os documentos podem conter tabelas em formato markdown (linhas com |).
    Extraia TODOS os valores numericos, limites e criterios presentes nessas tabelas
-8. Após sua resposta, SEMPRE adicione uma seção "TRECHOS DOS DOCUMENTOS CITADOS" estruturada assim:
+9. DEMANDAS DISTINTAS: Quando os trechos fornecidos tratarem de demandas, processos ou
+   assuntos distintos (ex: notas tecnicas diferentes, processos SEI diferentes), identifique-os
+   separadamente e NAO os funda em uma unica narrativa. Quando tratarem do mesmo assunto, consolide.
+10. Após sua resposta, SEMPRE adicione uma seção "TRECHOS DOS DOCUMENTOS CITADOS" estruturada assim:
 
 ### TRECHOS DOS DOCUMENTOS CITADOS:
 
@@ -119,6 +122,14 @@ Pergunta: "{question}"
 - Base-se EXCLUSIVAMENTE nos documentos fornecidos
 - Se informação incompleta, indique limitações claramente
 - Não faça inferências além do que está documentado
+- TABELAS: Os documentos podem conter tabelas em formato markdown (linhas com |).
+  Extraia TODOS os valores numéricos, limites e critérios presentes nessas tabelas.
+
+### 4.1 DEMANDAS DISTINTAS
+- Quando os trechos tratarem de demandas, processos ou assuntos distintos
+  (ex: notas técnicas diferentes, processos SEI diferentes), identifique-os
+  separadamente e NÃO os funda em uma única narrativa
+- Quando tratarem do mesmo assunto, consolide normalmente
 
 ### 5. FORMATAÇÃO FINAL
 Estruture sua resposta com:
@@ -149,6 +160,9 @@ INSTRUCOES:
 - IMPORTANTE: Os documentos podem conter TABELAS em formato markdown (linhas com |).
   Extraia TODOS os valores numericos, limites, faixas e criterios presentes nessas tabelas.
   Apresente esses dados de forma estruturada na resposta.
+- DEMANDAS DISTINTAS: Quando os trechos tratarem de demandas, processos ou assuntos
+  distintos (ex: notas tecnicas diferentes, processos SEI diferentes), identifique-os
+  separadamente. Quando tratarem do mesmo assunto, consolide normalmente.
 
 FORMATO DA RESPOSTA:
 1. Resposta direta a pergunta
@@ -175,7 +189,10 @@ INSTRUÇÕES DE EXTRAÇÃO:
    - Seções com subtítulos para diferentes aspectos da resposta
 5. Se houver conteudo parcialmente relevante, extraia o que for possivel e indique as lacunas restantes. Se NENHUMA informacao relevante existir nos documentos, informe claramente que nao ha dados disponiveis
 6. Se os documentos apresentarem informações contraditórias ou ambíguas, EXPLIQUE as diferentes interpretações
-7. Para cada informação, CITE A FONTE EXATA de onde a extraiu
+6.1 Quando os trechos tratarem de demandas ou processos DISTINTOS, apresente-os separadamente. Quando tratarem do mesmo assunto, consolide
+7. TABELAS: Os documentos podem conter tabelas em formato markdown (linhas com |).
+   Extraia TODOS os valores numericos, limites e criterios presentes nessas tabelas.
+8. Para cada informação, CITE A FONTE EXATA de onde a extraiu
 8. Ao final, SEMPRE adicione uma seção "TRECHOS DOS DOCUMENTOS CITADOS" estruturada assim:
 
 ### TRECHOS DOS DOCUMENTOS CITADOS:
@@ -221,6 +238,9 @@ Extrair TODAS as informações relevantes para: "{question}"
 - Clareza na apresentacao
 - Rastreabilidade das fontes
 - Se algum dado solicitado NAO constar nos documentos, indique a lacuna explicitamente
+- TABELAS: Os documentos podem conter tabelas em formato markdown (linhas com |).
+  Extraia TODOS os valores numericos, limites e criterios presentes nessas tabelas.
+- Quando os trechos tratarem de demandas ou processos DISTINTOS, apresente-os separadamente
 
 ## BASE DOCUMENTAL
 {context}
@@ -243,6 +263,11 @@ REGRAS:
 - Se ha contradicoes, explique ambas
 - Use formato claro e direto
 - Se o contexto NAO contiver a informacao solicitada, declare a lacuna. NAO invente dados.
+- TABELAS: Os documentos podem conter tabelas em formato markdown (linhas com |).
+  Extraia TODOS os valores numericos, limites e criterios presentes nessas tabelas.
+- Quando os trechos tratarem de demandas ou processos DISTINTOS (ex: notas tecnicas
+  diferentes, processos SEI diferentes), apresente-os SEPARADAMENTE. Quando tratarem
+  do mesmo assunto, consolide.
 
 DOCUMENTOS:
 {context}
@@ -272,8 +297,13 @@ INSTRUÇÕES DE ANÁLISE TÉCNICA:
 
 4. EXPLIQUE o contexto técnico e a finalidade de cada parâmetro
 5. COMPARE diferentes requisitos quando existirem variações por categoria, situação ou período
-6. CITE a fonte específica de cada parâmetro (documento, artigo, anexo) 
-7. SEMPRE adicione uma seção "TRECHOS DOS DOCUMENTOS CITADOS" estruturada assim:
+6. CITE a fonte específica de cada parâmetro (documento, artigo, anexo)
+7. TABELAS: Os documentos podem conter tabelas em formato markdown (linhas com |).
+   Extraia TODOS os valores numericos, limites e criterios presentes nessas tabelas.
+8. NAO INVENTE DADOS! Se um parametro solicitado nao constar nos documentos, declare a lacuna.
+9. Quando os trechos tratarem de demandas ou processos DISTINTOS, apresente-os separadamente.
+   Quando tratarem do mesmo assunto, consolide normalmente.
+10. SEMPRE adicione uma seção "TRECHOS DOS DOCUMENTOS CITADOS" estruturada assim:
 
 ### TRECHOS DOS DOCUMENTOS CITADOS:
 
@@ -319,11 +349,17 @@ Para cada parâmetro, documente:
 - Destaque para valores críticos
 - Comparações entre diferentes categorias
 
+### 3.1 ATENCAO A TABELAS
+- Os documentos podem conter TABELAS em formato markdown (linhas com |)
+- Extraia TODOS os valores numéricos dessas tabelas: limites, faixas, percentuais, unidades
+- Inclua na resposta os valores exatos como aparecem nas tabelas
+
 ### 4. CONTEXTUALIZAÇÃO NORMATIVA
 - Finalidade técnica de cada parâmetro
 - Impacto na segurança operacional
 - Relação com outras normas
 - Evolução histórica dos requisitos
+- Quando os trechos tratarem de demandas ou processos DISTINTOS, apresente-os separadamente
 
 ## DOCUMENTAÇÃO TÉCNICA
 {context}
@@ -369,6 +405,10 @@ ESTRUTURA DA RESPOSTA:
 
 4. **LACUNAS** (se houver parametros solicitados nao encontrados nos documentos)
 
+5. **DEMANDAS DISTINTAS**: Quando os trechos tratarem de demandas ou processos DISTINTOS
+   (ex: notas tecnicas diferentes, processos SEI diferentes), apresente-os SEPARADAMENTE.
+   Quando tratarem do mesmo assunto, consolide.
+
 DOCUMENTOS TECNICOS:
 {context}
 
@@ -398,7 +438,12 @@ INSTRUÇÕES DE ANÁLISE JURÍDICA:
    - Explique termos técnico-jurídicos quando necessário
    
 5. CONTEXTUALIZE a evolução normativa quando relevante (alterações, revogações, etc.)
-6. SEMPRE adicione uma seção "TRECHOS DOS DOCUMENTOS CITADOS" estruturada assim:
+6. TABELAS: Os documentos podem conter tabelas em formato markdown (linhas com |).
+   Extraia TODOS os valores numericos, limites e criterios presentes nessas tabelas.
+7. NAO INVENTE INFORMACOES! Se algo nao estiver nos documentos, indique claramente a lacuna.
+8. Quando os trechos tratarem de demandas ou processos DISTINTOS, apresente-os separadamente.
+   Quando tratarem do mesmo assunto, consolide normalmente.
+9. SEMPRE adicione uma seção "TRECHOS DOS DOCUMENTOS CITADOS" estruturada assim:
 
 ### TRECHOS DOS DOCUMENTOS CITADOS:
 
@@ -426,6 +471,9 @@ Diretrizes (sem formato fixo):
 - Cite sempre no formato [TIPO NUMERO/ANO, Art. X, paragrafo Y, inciso Z].
 - Ao final, inclua uma secao com trechos textuais exatos usados.
 - Se houver lacunas nos documentos, indique explicitamente.
+- TABELAS: Os documentos podem conter tabelas em formato markdown (linhas com |).
+  Extraia TODOS os valores numericos, limites e criterios presentes nessas tabelas.
+- Quando os trechos tratarem de demandas ou processos DISTINTOS, apresente-os separadamente.
 
 Base documental:
 {context}
@@ -441,6 +489,9 @@ Requisitos (sem impor estrutura fixa):
 - Responda de forma direta e completa, com citacoes precisas no formato [TIPO NUMERO/ANO, Art. X, paragrafo Y, inciso Z].
 - Inclua ao final trechos textuais exatos usados.
 - Se faltar informacao nos documentos, declare a lacuna.
+- TABELAS: Os documentos podem conter tabelas em formato markdown (linhas com |).
+  Extraia TODOS os valores numericos, limites e criterios presentes nessas tabelas.
+- Quando os trechos tratarem de demandas ou processos DISTINTOS, apresente-os separadamente.
 
 Documentos:
 {context}
@@ -1063,21 +1114,44 @@ def _listar_md_em_dados_antt(diretorio: str = "dados_antt") -> dict:
     return resultado
 
 
+def _listar_pdfs_sem_md(diretorio: str = "dados_antt") -> list:
+    """
+    Retorna lista de nomes de PDFs que nao possuem .md correspondente.
+
+    Args:
+        diretorio: Raiz da pasta de documentos.
+
+    Returns:
+        list[str]: Nomes dos arquivos PDF sem markdown.
+    """
+    pdfs_pendentes: list = []
+    for dirpath, _dirs, filenames in os.walk(diretorio):
+        for fname in filenames:
+            if not fname.lower().endswith(".pdf"):
+                continue
+            nome_base = os.path.splitext(fname)[0]
+            md_correspondente = os.path.join(dirpath, f"{nome_base}.md")
+            if not os.path.exists(md_correspondente):
+                pdfs_pendentes.append(fname)
+    return sorted(pdfs_pendentes)
+
+
 def detectar_documentos_novos(diretorio: str = "dados_antt",
                               relatorio_path: str = "relatorio_documentos.json") -> list:
     """
-    Compara os arquivos .md existentes em dados_antt/ com o catalogo
+    Compara os arquivos .md e .pdf existentes em dados_antt/ com o catalogo
     registrado em relatorio_documentos.json.
 
-    Retorna a lista de nomes de arquivos .md presentes no disco mas
-    ausentes do catalogo (documentos novos nao indexados).
+    Detecta:
+    - Arquivos .md presentes no disco mas ausentes do catalogo
+    - Arquivos .pdf que nao possuem .md correspondente (nao convertidos)
 
     Args:
         diretorio: Pasta raiz dos documentos.
         relatorio_path: Caminho do JSON de catalogo.
 
     Returns:
-        list[str]: Nomes de arquivos .md novos (nao catalogados).
+        list[str]: Nomes de arquivos pendentes (novos .md + PDFs nao convertidos).
     """
     md_no_disco = _listar_md_em_dados_antt(diretorio)
 
@@ -1093,16 +1167,19 @@ def detectar_documentos_novos(diretorio: str = "dados_antt",
         except Exception as exc:
             logger.warning(f"Erro ao ler catalogo {relatorio_path}: {exc}")
 
-    novos = sorted(set(md_no_disco.keys()) - catalogados)
-    return novos
+    novos_md = sorted(set(md_no_disco.keys()) - catalogados)
+    pdfs_pendentes = _listar_pdfs_sem_md(diretorio)
+
+    return novos_md + pdfs_pendentes
 
 
 def reindexar_base_completa(embedding_provider: str = "local") -> tuple:
     """
     Pipeline completo de reindexacao:
-    1. Regenera relatorio_documentos.json varrendo dados_antt/
-    2. Remove vectorstore antigo
-    3. Recria vectorstore com embeddings + OCR + deduplicacao
+    1. Converte PDFs sem .md correspondente em markdown
+    2. Regenera relatorio_documentos.json varrendo dados_antt/
+    3. Remove vectorstore antigo
+    4. Recria vectorstore com embeddings + OCR + deduplicacao
 
     Args:
         embedding_provider: Provedor de embeddings a utilizar.
@@ -1112,7 +1189,15 @@ def reindexar_base_completa(embedding_provider: str = "local") -> tuple:
     """
     import shutil
 
-    # 1) Regenerar catalogo
+    # 1) Converter PDFs que ainda nao tem .md
+    try:
+        n_pdfs = converter_pdfs_para_md()
+        if n_pdfs > 0:
+            logger.info(f"{n_pdfs} PDF(s) convertido(s) para markdown")
+    except Exception as exc:
+        logger.warning(f"Conversao de PDFs falhou (continuando): {exc}")
+
+    # 2) Regenerar catalogo (agora inclui os .md recem-criados)
     try:
         from gerar_relatorio import gerar_relatorio_documentos
         docs = gerar_relatorio_documentos()
@@ -1122,19 +1207,22 @@ def reindexar_base_completa(embedding_provider: str = "local") -> tuple:
         logger.error(msg)
         return False, msg
 
-    # 2) Remover vectorstore antigo
+    # 3) Remover vectorstore antigo
     vpath = "vectorstore_local"
     if os.path.isdir(vpath):
         shutil.rmtree(vpath)
         logger.info(f"Vectorstore antigo removido: {vpath}")
 
-    # 3) Criar embeddings e reconstruir vectorstore
+    # 4) Criar embeddings e reconstruir vectorstore
     try:
         llm_manager = create_llm_manager("deepseek", embedding_provider=embedding_provider)
         embeddings = llm_manager.get_embeddings()
         sucesso = criar_vectorstore_local(embeddings)
         if sucesso:
-            return True, f"Reindexacao concluida: {len(docs)} documentos catalogados"
+            msg_final = f"Reindexacao concluida: {len(docs)} documentos catalogados"
+            if n_pdfs > 0:
+                msg_final += f" ({n_pdfs} PDF(s) convertido(s))"
+            return True, msg_final
         return False, "Falha ao criar vectorstore"
     except Exception as exc:
         msg = f"Erro ao reconstruir vectorstore: {exc}"
@@ -1394,7 +1482,7 @@ def _detectar_referencia_documento(query):
     resultados = []
 
     tipos_regex = (
-        r"(?:instrucao\s+normativa|instruc[aã]o\s+normativa|"
+        r"(?:instru[cç][aã]o\s+normativa|instrucao\s+normativa|"
         r"resolu[cç][aã]o|delibera[cç][aã]o|portaria|decreto|lei|voto|"
         r"INM|RES|DLB|POR|DEC|INC|VTO|IN)"
     )
@@ -1520,6 +1608,173 @@ def _carregar_documento_markdown(caminho, tipo, nome_tipo, numero, ano):
 
 
 # ---------------------------------------------------------------------------
+# Pipeline de conversao PDF -> Markdown
+# ---------------------------------------------------------------------------
+
+
+def _tabela_pdfplumber_para_markdown(tabela: list) -> str:
+    """
+    Converte uma tabela extraida por pdfplumber (lista de listas) em markdown.
+
+    Aplica limpeza de OCR em cada celula. Pula tabelas vazias.
+
+    Args:
+        tabela: Lista de listas (linhas x colunas) do pdfplumber.
+
+    Returns:
+        str: Tabela em formato markdown, ou string vazia se nao tiver conteudo.
+    """
+    if not tabela or len(tabela) < 2:
+        return ""
+
+    headers = [_limpar_celula_ocr(c or "") for c in tabela[0]]
+    if all(h == "" for h in headers):
+        return ""
+
+    header_line = "| " + " | ".join(h or " " for h in headers) + " |"
+    separator = "| " + " | ".join("---" for _ in headers) + " |"
+
+    rows = []
+    for linha in tabela[1:]:
+        cells = [_limpar_celula_ocr(c or "").replace("|", "/") for c in linha]
+        if all(c == "" for c in cells):
+            continue
+        rows.append("| " + " | ".join(cells) + " |")
+
+    if not rows:
+        return ""
+    return "\n".join([header_line, separator] + rows)
+
+
+def _converter_pdf_para_md(caminho_pdf: str) -> str:
+    """
+    Converte um arquivo PDF em texto markdown usando pdfplumber.
+
+    Estrategia por pagina:
+    1. Extrai tabelas estruturadas e converte para markdown
+    2. Extrai texto restante da pagina
+    3. Se nao houver texto (PDF escaneado), faz fallback OCR via pytesseract
+
+    Args:
+        caminho_pdf: Caminho do arquivo PDF.
+
+    Returns:
+        str: Conteudo completo em formato markdown.
+    """
+    import pdfplumber
+
+    partes: list = []
+
+    try:
+        with pdfplumber.open(caminho_pdf) as pdf:
+            total_paginas = len(pdf.pages)
+            logger.info(f"Convertendo PDF: {caminho_pdf} ({total_paginas} paginas)")
+
+            for i, pagina in enumerate(pdf.pages):
+                conteudo_pagina: list = []
+
+                # 1) Extrair tabelas
+                tabelas = pagina.extract_tables() or []
+                tabelas_md = []
+                for tab in tabelas:
+                    md = _tabela_pdfplumber_para_markdown(tab)
+                    if md:
+                        tabelas_md.append(md)
+
+                # 2) Extrair texto
+                texto = pagina.extract_text() or ""
+                texto = texto.strip()
+
+                # 3) Fallback OCR se pagina sem texto (escaneada)
+                if not texto and not tabelas_md:
+                    try:
+                        img = pagina.to_image(resolution=300)
+                        pil_img = img.original
+                        texto_ocr = _limpar_texto_ocr(
+                            __import__("pytesseract").image_to_string(
+                                pil_img, lang="por"
+                            )
+                        )
+                        if texto_ocr:
+                            conteudo_pagina.append(texto_ocr)
+                            logger.debug(
+                                f"PDF pagina {i+1}: OCR fallback "
+                                f"({len(texto_ocr)} chars)"
+                            )
+                    except Exception as exc:
+                        logger.debug(f"OCR fallback falhou pagina {i+1}: {exc}")
+
+                if texto:
+                    conteudo_pagina.append(texto)
+
+                for tmd in tabelas_md:
+                    conteudo_pagina.append(f"\n{tmd}\n")
+
+                if conteudo_pagina:
+                    partes.append("\n\n".join(conteudo_pagina))
+
+    except Exception as exc:
+        logger.error(f"Erro ao converter PDF {caminho_pdf}: {exc}")
+        return ""
+
+    resultado = "\n\n---\n\n".join(partes)
+    logger.info(
+        f"PDF convertido: {caminho_pdf} -> {len(resultado)} chars, "
+        f"{total_paginas} paginas"
+    )
+    return resultado
+
+
+def converter_pdfs_para_md(diretorio: str = "dados_antt") -> int:
+    """
+    Varre dados_antt/ e converte todos os PDFs que nao tem .md correspondente.
+
+    Para cada arquivo .pdf encontrado, verifica se existe um .md com o mesmo
+    nome base. Se nao existir, converte via _converter_pdf_para_md e salva
+    o .md ao lado do PDF original.
+
+    Args:
+        diretorio: Pasta raiz dos documentos.
+
+    Returns:
+        int: Quantidade de PDFs convertidos.
+    """
+    convertidos = 0
+
+    for dirpath, _dirs, filenames in os.walk(diretorio):
+        for fname in filenames:
+            if not fname.lower().endswith(".pdf"):
+                continue
+
+            caminho_pdf = os.path.join(dirpath, fname)
+            nome_base = os.path.splitext(fname)[0]
+            caminho_md = os.path.join(dirpath, f"{nome_base}.md")
+
+            if os.path.exists(caminho_md):
+                logger.debug(f"PDF ja tem .md: {fname}")
+                continue
+
+            logger.info(f"Convertendo PDF -> MD: {fname}")
+            conteudo_md = _converter_pdf_para_md(caminho_pdf)
+
+            if not conteudo_md or len(conteudo_md.strip()) < 50:
+                logger.warning(f"PDF sem conteudo extraivel: {fname}")
+                continue
+
+            try:
+                with open(caminho_md, "w", encoding="utf-8") as f:
+                    f.write(conteudo_md)
+                convertidos += 1
+                logger.info(f"Salvo: {caminho_md} ({len(conteudo_md)} chars)")
+            except Exception as exc:
+                logger.error(f"Erro ao salvar {caminho_md}: {exc}")
+
+    if convertidos > 0:
+        logger.info(f"Conversao PDF concluida: {convertidos} arquivo(s) convertido(s)")
+    return convertidos
+
+
+# ---------------------------------------------------------------------------
 # Pipeline de enriquecimento OCR para imagens em documentos markdown
 # ---------------------------------------------------------------------------
 
@@ -1530,13 +1785,57 @@ _OCR_CACHE_DIR = os.path.join(
 )
 
 
+def _corrigir_tabela_markdown_cache(texto: str) -> str:
+    """
+    Corrige tabelas markdown em cache OCR onde celulas multi-linha
+    quebraram a estrutura da tabela.
+
+    Em markdown valido, cada linha de tabela deve comecar e terminar com |.
+    Quando o OCR extrai celulas com quebras de linha, o resultado fica:
+        | celula1 | celula2 parcial
+        resto | celula3 |
+    Esta funcao junta essas linhas quebradas em uma unica linha.
+
+    Args:
+        texto: Conteudo em cache (pode conter tabelas e/ou texto livre).
+
+    Returns:
+        str: Texto com tabelas markdown corrigidas.
+    """
+    linhas = texto.split("\n")
+    resultado: list = []
+    buffer = ""
+
+    for linha in linhas:
+        stripped = linha.strip()
+        if buffer:
+            buffer = buffer + " " + stripped
+            if stripped.endswith("|"):
+                resultado.append(buffer)
+                buffer = ""
+        elif stripped.startswith("|"):
+            if stripped.endswith("|"):
+                resultado.append(stripped)
+            else:
+                buffer = stripped
+        else:
+            resultado.append(linha)
+
+    if buffer:
+        resultado.append(buffer)
+
+    return "\n".join(resultado)
+
+
 def _obter_cache_ocr(url_hash):
     """Retorna texto OCR em cache para o hash da URL, ou None."""
     cache_path = os.path.join(_OCR_CACHE_DIR, f"{url_hash}.txt")
     if os.path.exists(cache_path):
         try:
             with open(cache_path, "r", encoding="utf-8") as f:
-                return f.read()
+                texto = f.read()
+            texto = _corrigir_tabela_markdown_cache(texto)
+            return _corrigir_decimais_ocr(texto)
         except Exception:
             return None
     return None
@@ -1589,6 +1888,8 @@ def _limpar_celula_ocr(valor: str) -> str:
     - Valores literais "None" (celulas vazias do img2table)
     - Fragmentos de OCR sem valor semantico: "(A)", "1- EXProD", etc.
     - Celulas contendo apenas pontuacao/espacos
+    - Quebras de linha internas (substituidas por espaco) para manter
+      a integridade da tabela markdown
 
     Args:
         valor: Conteudo textual da celula.
@@ -1598,6 +1899,10 @@ def _limpar_celula_ocr(valor: str) -> str:
     """
     texto = str(valor).strip()
     if not texto or texto.lower() == "none":
+        return ""
+    texto = re.sub(r"\s*\n\s*", " ", texto)
+    texto = re.sub(r"\s{2,}", " ", texto).strip()
+    if not texto:
         return ""
     if len(texto) <= 2 and not texto.isdigit():
         return ""
@@ -1678,13 +1983,127 @@ def _dataframe_para_markdown(df):
     return "\n".join([header_line, separator] + rows)
 
 
+def _preprocessar_imagem_ocr(imagem_pil):
+    """
+    Pre-processa imagem para melhorar a qualidade do OCR.
+
+    Aplica:
+    - Upscale 2x (bilinear) para melhorar leitura de caracteres pequenos
+      como virgulas decimais
+    - Conversao para escala de cinza
+    - Aumento de contraste para nitidez de texto
+
+    Args:
+        imagem_pil (PIL.Image): Imagem original.
+
+    Returns:
+        PIL.Image: Imagem pre-processada.
+    """
+    try:
+        from PIL import ImageEnhance, ImageFilter
+
+        w, h = imagem_pil.size
+        if w < 1500:
+            fator = max(2, 1500 // w)
+            imagem_pil = imagem_pil.resize(
+                (w * fator, h * fator), Image.LANCZOS
+            )
+
+        if imagem_pil.mode != "L":
+            imagem_pil = imagem_pil.convert("L")
+
+        imagem_pil = ImageEnhance.Contrast(imagem_pil).enhance(1.8)
+        imagem_pil = ImageEnhance.Sharpness(imagem_pil).enhance(2.0)
+
+        return imagem_pil
+    except Exception as exc:
+        logger.debug(f"Pre-processamento de imagem falhou (usando original): {exc}")
+        return imagem_pil
+
+
+_RE_NUMERO_UNIDADE = re.compile(
+    r"\b(\d{2,})(\s*(?:m/km|mm))\b"
+)
+
+_RE_COMPARADOR_DECIMAL = re.compile(
+    r"([><]=?\s*)0(\d)(?=\s*[|\s,;)]|$)"
+)
+
+
+def _corrigir_decimais_ocr(texto: str) -> str:
+    """
+    Corrige numeros decimais cujas virgulas foram perdidas pelo OCR.
+
+    Duas heuristicas:
+    1. Numeros seguidos de unidades de medida (m/km, mm): se o valor
+       inteiro for improvavel (ex: 27 m/km deveria ser 2,7 m/km),
+       insere virgula na posicao mais provavel.
+    2. Valores com comparadores (>, <, >=, <=) seguidos de "0X":
+       padroes como ">02" provavelmente sao ">0,2" (IFI, indices
+       fracionarios).
+
+    Args:
+        texto: Texto OCR com possiveis erros de decimal.
+
+    Returns:
+        str: Texto corrigido.
+    """
+    limites_por_unidade = {
+        "m/km": 10.0,
+        "mm": 100.0,
+    }
+
+    def _corrigir_match_unidade(m):
+        num_str = m.group(1)
+        unidade = m.group(2).strip()
+
+        unidade_lower = unidade.lower()
+        limite = None
+        for u, lim in limites_por_unidade.items():
+            if unidade_lower.startswith(u):
+                limite = lim
+                break
+
+        if limite is None:
+            return m.group(0)
+
+        try:
+            valor = float(num_str)
+        except ValueError:
+            return m.group(0)
+
+        if valor <= limite:
+            return m.group(0)
+
+        corrigido = num_str[:-1] + "," + num_str[-1]
+        try:
+            novo_valor = float(corrigido.replace(",", "."))
+        except ValueError:
+            return m.group(0)
+
+        if novo_valor <= limite:
+            return corrigido + m.group(2)
+
+        return m.group(0)
+
+    def _corrigir_match_comparador(m):
+        """Converte '>02' em '>0,2', '<05' em '<0,5', etc."""
+        return f"{m.group(1)}0,{m.group(2)}"
+
+    resultado = _RE_NUMERO_UNIDADE.sub(_corrigir_match_unidade, texto)
+    resultado = _RE_COMPARADOR_DECIMAL.sub(_corrigir_match_comparador, resultado)
+    return resultado
+
+
 def _extrair_texto_imagem(imagem_pil, url=""):
     """
     Extrai texto de uma imagem PIL usando Tesseract OCR e img2table.
 
-    Estrategia:
-    1. Tenta extracao de tabelas via img2table (ideal para documentos regulatorios)
-    2. Se nao encontrar tabelas, faz OCR textual simples via pytesseract
+    Pipeline:
+    1. Pre-processa a imagem (upscale, contraste, nitidez)
+    2. Tenta extracao de tabelas via img2table
+    3. Se nao encontrar tabelas, faz OCR textual via pytesseract
+    4. Aplica pos-processamento para corrigir decimais perdidos
 
     Args:
         imagem_pil (PIL.Image): Imagem carregada.
@@ -1698,9 +2117,11 @@ def _extrair_texto_imagem(imagem_pil, url=""):
 
     texto_final = ""
 
+    imagem_processada = _preprocessar_imagem_ocr(imagem_pil)
+
     with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as tmp:
         tmp_path = tmp.name
-        imagem_pil.save(tmp_path)
+        imagem_processada.save(tmp_path)
 
     try:
         # 1) Tentar extracao de tabelas estruturadas com img2table
@@ -1708,7 +2129,10 @@ def _extrair_texto_imagem(imagem_pil, url=""):
             from img2table.document import Image as Img2TableImage
             from img2table.ocr import TesseractOCR as Img2TableOCR
 
-            ocr_engine = Img2TableOCR(lang="por")
+            ocr_engine = Img2TableOCR(
+                lang="por+eng",
+                psm=6,
+            )
             img_doc = Img2TableImage(src=tmp_path)
             tabelas = img_doc.extract_tables(ocr=ocr_engine)
 
@@ -1731,7 +2155,10 @@ def _extrair_texto_imagem(imagem_pil, url=""):
 
         # 2) Fallback: OCR textual completo via pytesseract
         if not texto_final.strip():
-            texto_ocr = pytesseract.image_to_string(imagem_pil, lang="por")
+            custom_config = "--psm 6 --oem 3"
+            texto_ocr = pytesseract.image_to_string(
+                imagem_processada, lang="por+eng", config=custom_config
+            )
             texto_final = _limpar_texto_ocr(texto_ocr)
             if texto_final:
                 logger.info(
@@ -1739,6 +2166,11 @@ def _extrair_texto_imagem(imagem_pil, url=""):
                 )
             else:
                 logger.warning(f"OCR nao extraiu texto de {url}")
+
+        # 3) Pos-processamento: corrigir decimais perdidos pelo OCR
+        if texto_final:
+            texto_final = _corrigir_decimais_ocr(texto_final)
+
     finally:
         try:
             os.unlink(tmp_path)
@@ -2165,7 +2597,8 @@ def _normalize_text_ascii_lower(value: str) -> str:
     except Exception:
         return value.lower()
 
-_MAX_CONTEXT_CHARS = 30000
+_MAX_CONTEXT_CHARS = 50000
+_MAX_CHUNKS_LLM = 30
 
 _TEMPLATE_REESCRITA = """Reescreva a ULTIMA PERGUNTA como uma pergunta COMPLETA e AUTOCONTIDA
 usando o contexto do historico. Se ja for autocontida, retorne-a sem alteracao.
@@ -2247,12 +2680,12 @@ def gerar_resposta(pergunta, documentos, llm, modelo_usado="gpt-4"):
     if not documentos:
         return "Nao encontrei documentos relevantes para esta pergunta. Por favor, reformule sua consulta ou forneca mais detalhes.", modelo_usado
 
-    # Guarda: limitar quantidade de chunks para nao estourar limite de tokens
-    if len(documentos) > 20:
+    if len(documentos) > _MAX_CHUNKS_LLM:
         logger.warning(
-            f"Recebidos {len(documentos)} chunks, truncando para 20 mais relevantes"
+            f"Recebidos {len(documentos)} chunks, truncando para "
+            f"{_MAX_CHUNKS_LLM} mais relevantes"
         )
-        documentos = documentos[:20]
+        documentos = documentos[:_MAX_CHUNKS_LLM]
 
     contextos = []
     documentos_info = {}
@@ -2421,7 +2854,7 @@ Conteudo:
                 # Criar LLM DeepSeek para fallback
                 from llm_providers import create_llm_manager
                 deepseek_manager = create_llm_manager("deepseek")
-                deepseek_llm = deepseek_manager.get_llm(temperature=0.1, max_tokens=2000)
+                deepseek_llm = deepseek_manager.get_llm(temperature=0.1, max_tokens=2048)
                 
                 logger.info("✅ DeepSeek configurado com sucesso para fallback")
                 
@@ -2468,7 +2901,7 @@ Conteudo:
                 try:
                     from llm_providers import create_llm_manager
                     deepseek_manager = create_llm_manager("deepseek")
-                    deepseek_llm = deepseek_manager.get_llm(temperature=0.1, max_tokens=1500)
+                    deepseek_llm = deepseek_manager.get_llm(temperature=0.1, max_tokens=2048)
 
                     # Usar template adaptativo correto com contexto truncado
                     _EMERGENCIA_MAX_CHARS = 8000
@@ -2518,11 +2951,12 @@ def _preparar_contexto_resposta(pergunta, documentos, modelo_usado="gpt-4"):
     if not documentos:
         return None, None
 
-    if len(documentos) > 20:
+    if len(documentos) > _MAX_CHUNKS_LLM:
         logger.warning(
-            f"Recebidos {len(documentos)} chunks, truncando para 20 mais relevantes"
+            f"Recebidos {len(documentos)} chunks, truncando para "
+            f"{_MAX_CHUNKS_LLM} mais relevantes"
         )
-        documentos = documentos[:20]
+        documentos = documentos[:_MAX_CHUNKS_LLM]
 
     contextos = []
     tipos_documentos = set()
@@ -2886,7 +3320,7 @@ def interface_usuario_unificada():
         btn_col_a, btn_col_b = st.columns(2)
         with btn_col_a:
             if st.button("Nova Conversa", use_container_width=True,
-                          help="Limpa o historico de conversa para iniciar um novo tema"):
+                          help="Limpa o histórico de conversa para iniciar um novo tema"):
                 st.session_state.chat_history = []
                 if "mensagens_chat" in st.session_state:
                     st.session_state.mensagens_chat = []
@@ -2898,10 +3332,41 @@ def interface_usuario_unificada():
                 st.session_state["_reindexando"] = True
                 st.rerun()
 
+        if st.button(
+            "Limpar Cache OCR e Reindexar",
+            use_container_width=True,
+            help=(
+                "Remove todo o cache de OCR e forca a re-extracao "
+                "das imagens com o pipeline melhorado (upscale, "
+                "contraste, correcao de decimais). Usar quando "
+                "tabelas tiverem dados numericos incorretos."
+            ),
+        ):
+            st.session_state["_limpar_ocr_e_reindexar"] = True
+            st.rerun()
+
+        # Executar limpeza OCR + reindexacao
+        if st.session_state.get("_limpar_ocr_e_reindexar"):
+            del st.session_state["_limpar_ocr_e_reindexar"]
+            import glob as _glob_mod
+
+            cache_dir = _OCR_CACHE_DIR
+            cache_files = _glob_mod.glob(os.path.join(cache_dir, "*.txt"))
+            for f in cache_files:
+                try:
+                    os.remove(f)
+                except OSError:
+                    pass
+            st.info(
+                f"Cache OCR limpo ({len(cache_files)} arquivo(s) removidos). "
+                "Reindexando com re-extracao..."
+            )
+            st.session_state["_reindexando"] = True
+
         # Executar reindexacao (precisa estar fora do button para manter o spinner)
         if st.session_state.get("_reindexando"):
             del st.session_state["_reindexando"]
-            with st.spinner("Reindexando base de conhecimento... (pode levar alguns minutos)"):
+            with st.spinner("Reindexando base de conhecimento... (pode levar alguns minutos, dependendo da quantidade de documentos)"):
                 sucesso, msg = reindexar_base_completa(
                     embedding_provider=selected_embedding_provider
                 )
@@ -2910,6 +3375,7 @@ def interface_usuario_unificada():
                 # Limpar cache de verificacao para que o alerta desapareca
                 st.session_state.pop("_docs_novos_checado", None)
                 st.session_state.pop("_docs_novos_lista", None)
+                st.session_state.pop("_vectorstore_desatualizado", None)
                 st.balloons()
             else:
                 st.error(msg)
@@ -2917,20 +3383,23 @@ def interface_usuario_unificada():
         st.divider()
 
         max_tokens = st.number_input(
-            "Máximo de tokens:",
-            min_value=100,
-            max_value=4000,
-            value=2000,
-            step=100,
-            help="Limite de tokens para a resposta"
+            "Maximo de tokens:",
+            min_value=500,
+            max_value=4096,
+            value=2048,
+            step=256,
+            help="Limite de tokens para a resposta gerada pelo LLM. "
+                 "Valores altos consomem mais creditos no OpenRouter. "
+                 "Recomendado: 2048-3072 para respostas detalhadas."
         )
         
         num_documentos = st.slider(
             "Documentos para busca:",
             min_value=5,
-            max_value=30,
-            value=16,
-            help="Número de documentos a recuperar"
+            max_value=40,
+            value=20,
+            help="Numero de chunks recuperados da base. Valores maiores trazem "
+                 "mais contexto, mas podem diluir a relevancia."
         )
         
         # Filtros de busca
@@ -2969,20 +3438,49 @@ def interface_usuario_unificada():
     # Usa cache no session_state para nao repetir a varredura a cada rerun
     if "_docs_novos_checado" not in st.session_state:
         docs_novos = detectar_documentos_novos()
+
+        # Verificar se o vectorstore esta desatualizado comparando
+        # timestamps: se relatorio_documentos.json e mais recente que
+        # o vectorstore, significa que novos docs foram catalogados
+        # mas ainda nao indexados.
+        vectorstore_desatualizado = False
+        try:
+            catalogo_path = "relatorio_documentos.json"
+            vs_index_path = os.path.join("vectorstore_local", "index.faiss")
+            if not vectorstore_loaded:
+                vectorstore_desatualizado = True
+            elif os.path.exists(catalogo_path) and os.path.exists(vs_index_path):
+                ts_catalogo = os.path.getmtime(catalogo_path)
+                ts_vectorstore = os.path.getmtime(vs_index_path)
+                if ts_catalogo > ts_vectorstore:
+                    vectorstore_desatualizado = True
+                    logger.info(
+                        "Vectorstore desatualizado: catalogo mais recente que o indice"
+                    )
+        except Exception:
+            pass
+
         st.session_state["_docs_novos_checado"] = True
         st.session_state["_docs_novos_lista"] = docs_novos
+        st.session_state["_vectorstore_desatualizado"] = vectorstore_desatualizado
     else:
         docs_novos = st.session_state.get("_docs_novos_lista", [])
+        vectorstore_desatualizado = st.session_state.get("_vectorstore_desatualizado", False)
 
     if docs_novos:
         st.warning(
             f"Detectados **{len(docs_novos)}** documento(s) novo(s) em `dados_antt/` "
-            f"que ainda nao foram indexados na base de conhecimento. "
+            f"que ainda não foram indexados na base de conhecimento. "
             f"Clique em **Reindexar Base** na barra lateral para atualizar."
         )
         with st.expander(f"Ver {len(docs_novos)} documento(s) pendente(s)"):
             for nome in docs_novos:
                 st.text(nome)
+    elif vectorstore_desatualizado:
+        st.warning(
+            "O vectorstore parece estar desatualizado em relação ao catálogo de documentos. "
+            "Clique em **Reindexar Base** na barra lateral para reconstruir."
+        )
 
     # Layout principal em duas colunas
     col_main, col_info = st.columns([2, 1])
@@ -3011,7 +3509,7 @@ def interface_usuario_unificada():
             "Digite sua pergunta sobre documentos da ANTT:",
             value=valor_inicial,
             height=100,
-            help="Digite sua consulta sobre regulamentacoes, normas ou procedimentos da ANTT"
+            help="Digite sua consulta sobre regulamentações, normas ou procedimentos da ANTT"
         )
         
         # Botões de ação
