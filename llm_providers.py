@@ -1,99 +1,277 @@
 """
-Módulo para gerenciar diferentes provedores de LLM.
+Modulo para gerenciar diferentes provedores de LLM.
 Suporta OpenAI e embeddings locais gratuitos.
 """
+
+import gc
+import os
+import threading
+import time
 
 from langchain_openai import ChatOpenAI, OpenAIEmbeddings
 from langchain_community.embeddings import OpenAIEmbeddings as CommunityOpenAIEmbeddings
 from config import LLM_PROVIDERS, logger
-import os
+
+os.environ.setdefault("TOKENIZERS_PARALLELISM", "false")
+
+_LOCAL_EMBEDDINGS_LOCK = threading.Lock()
+_LOADED_SENTENCE_MODELS: dict = {}
+
+
+def _preparar_ambiente_cpu_embeddings() -> None:
+    """Reduz conflitos CUDA/meta tensor ao carregar sentence-transformers."""
+    os.environ.setdefault("TOKENIZERS_PARALLELISM", "false")
+    os.environ.setdefault("HF_HUB_DISABLE_SYMLINKS_WARNING", "1")
+    try:
+        import torch
+
+        if hasattr(torch, "set_default_device"):
+            torch.set_default_device("cpu")
+    except Exception:
+        pass
+
+
+def _resolver_snapshot_local(model_name: str):
+    """
+    Resolve caminho local do snapshot HuggingFace do modelo, se existir.
+
+    Returns:
+        str | None: Caminho do snapshot ou None.
+    """
+    repo_id = f"sentence-transformers/{model_name}"
+    try:
+        from huggingface_hub import snapshot_download
+
+        return snapshot_download(repo_id, local_files_only=True)
+    except Exception:
+        pass
+
+    hub_root = os.path.expanduser("~/.cache/huggingface/hub")
+    slug = f"models--sentence-transformers--{model_name.replace('/', '--')}"
+    snapshots_dir = os.path.join(hub_root, slug, "snapshots")
+    if not os.path.isdir(snapshots_dir):
+        return None
+
+    candidatos = []
+    for entry in os.listdir(snapshots_dir):
+        path = os.path.join(snapshots_dir, entry)
+        if os.path.isdir(path):
+            candidatos.append(path)
+
+    if not candidatos:
+        return None
+
+    candidatos.sort(key=lambda p: os.path.getmtime(p), reverse=True)
+    return candidatos[0]
+
+
+def _kwargs_seguros_sentence_transformer():
+    """Kwargs que evitam meta tensors em transformers/sentence-transformers recentes."""
+    import torch
+
+    seguros = {
+        "low_cpu_mem_usage": False,
+        "device_map": None,
+        "torch_dtype": torch.float32,
+    }
+    return seguros, dict(seguros)
+
 
 class LocalEmbeddings:
     """Classe para embeddings locais usando sentence-transformers - 100% GRATUITO.
     Modelo padrao: paraphrase-multilingual-MiniLM-L12-v2 (50+ idiomas, 384 dims).
     """
-    
+
     def __init__(self, model_name="paraphrase-multilingual-MiniLM-L12-v2"):
         self.model_name = model_name
         self.model = None
-        logger.info(f"🔄 Carregando modelo local de embeddings: {model_name}")
-        
+        logger.info(f"Carregando modelo local de embeddings: {model_name}")
+
         try:
             self._load_model()
-            logger.info("✅ Modelo de embeddings local carregado com sucesso")
+            logger.info("Modelo de embeddings local carregado com sucesso")
         except Exception as e:
-            logger.error(f"❌ Erro ao carregar modelo de embeddings: {e}")
+            logger.error(f"Erro ao carregar modelo de embeddings: {e}")
             raise
-    
-    def _load_model(self):
-        """Carrega o modelo sentence-transformers com tentativas e modo offline.
 
-        Trata erros de meta tensor (transformers >= 4.45 com safetensors)
-        desabilitando low_cpu_mem_usage quando accelerate nao resolve.
-        """
+    def _load_model(self):
+        """Carrega sentence-transformers com estrategias robustas anti meta tensor."""
+        with _LOCAL_EMBEDDINGS_LOCK:
+            cached = _LOADED_SENTENCE_MODELS.get(self.model_name)
+            if cached is not None:
+                self.model = cached
+                logger.info("Modelo local reutilizado do cache em memoria")
+                return
+
+            self.model = self._load_model_impl()
+            _LOADED_SENTENCE_MODELS[self.model_name] = self.model
+
+    def _load_model_impl(self):
+        """Implementacao interna de carregamento (protegida por lock)."""
         try:
             from sentence_transformers import SentenceTransformer
-            import torch
-            import os
-            import time
-
-            cache_dir = os.path.expanduser("~/.cache/sentence_transformers")
-            os.makedirs(cache_dir, exist_ok=True)
-
-            model_kwargs_default = {}
-            model_kwargs_safe = {"low_cpu_mem_usage": False}
-
-            configs = [
-                (True, model_kwargs_default, "cache local"),
-                (True, model_kwargs_safe, "cache local (sem meta tensors)"),
-                (False, model_kwargs_default, "download"),
-                (False, model_kwargs_safe, "download (sem meta tensors)"),
-            ]
-
-            last_err = None
-            for local_only, mkwargs, desc in configs:
-                retries = 1 if local_only else 3
-                backoff = 2
-                for attempt in range(1, retries + 1):
-                    try:
-                        self.model = SentenceTransformer(
-                            self.model_name,
-                            device="cpu",
-                            cache_folder=cache_dir,
-                            local_files_only=local_only,
-                            model_kwargs=mkwargs,
-                        )
-                        logger.info(f"Modelo carregado via {desc}")
-                        return
-                    except Exception as exc:
-                        last_err = exc
-                        msg = str(exc).lower()
-                        if local_only and ("not found" in msg or "no such" in msg
-                                           or "does not appear" in msg):
-                            break
-                        if "429" in msg or "rate" in msg or "too many" in msg:
-                            logger.warning(
-                                f"HTTP 429 (tentativa {attempt}/{retries}). "
-                                f"Aguardando {backoff}s..."
-                            )
-                            time.sleep(backoff)
-                            backoff *= 2
-                            continue
-                        if "meta tensor" in msg:
-                            logger.warning(
-                                f"Meta tensor em {desc}; tentando proximo modo"
-                            )
-                            break
-                        break
-
-            raise RuntimeError(
-                f"Falha ao carregar modelo local '{self.model_name}': {last_err}"
-            )
-        except ImportError:
+        except ImportError as exc:
             raise ImportError(
                 "sentence-transformers nao esta instalado. "
                 "Execute: pip install sentence-transformers"
+            ) from exc
+
+        _preparar_ambiente_cpu_embeddings()
+        gc.collect()
+
+        cache_dir = os.path.expanduser("~/.cache/sentence_transformers")
+        os.makedirs(cache_dir, exist_ok=True)
+        snapshot_path = _resolver_snapshot_local(self.model_name)
+        model_kwargs_safe, config_kwargs_safe = _kwargs_seguros_sentence_transformer()
+
+        tentativas = []
+
+        tentativas.append(
+            (
+                "cache local",
+                {
+                    "model_name_or_path": self.model_name,
+                    "local_files_only": True,
+                    "model_kwargs": {},
+                    "config_kwargs": {},
+                },
             )
+        )
+        tentativas.append(
+            (
+                "cache local (anti meta tensor)",
+                {
+                    "model_name_or_path": self.model_name,
+                    "local_files_only": True,
+                    "model_kwargs": model_kwargs_safe,
+                    "config_kwargs": config_kwargs_safe,
+                },
+            )
+        )
+
+        if snapshot_path:
+            tentativas.append(
+                (
+                    f"snapshot local ({os.path.basename(snapshot_path)})",
+                    {
+                        "model_name_or_path": snapshot_path,
+                        "local_files_only": True,
+                        "model_kwargs": model_kwargs_safe,
+                        "config_kwargs": config_kwargs_safe,
+                    },
+                )
+            )
+
+        tentativas.append(
+            (
+                "download (anti meta tensor)",
+                {
+                    "model_name_or_path": self.model_name,
+                    "local_files_only": False,
+                    "model_kwargs": model_kwargs_safe,
+                    "config_kwargs": config_kwargs_safe,
+                },
+            )
+        )
+
+        last_err = None
+        for desc, params in tentativas:
+            retries = 1 if params.get("local_files_only") else 3
+            backoff = 2
+            for attempt in range(1, retries + 1):
+                try:
+                    model = SentenceTransformer(
+                        params["model_name_or_path"],
+                        device="cpu",
+                        cache_folder=cache_dir,
+                        local_files_only=params["local_files_only"],
+                        model_kwargs=params["model_kwargs"],
+                        config_kwargs=params["config_kwargs"],
+                        trust_remote_code=False,
+                        backend="torch",
+                    )
+                    _ = model.encode(["validacao"], show_progress_bar=False)
+                    logger.info(f"Modelo carregado via {desc}")
+                    return model
+                except Exception as exc:
+                    last_err = exc
+                    msg = str(exc).lower()
+                    if params.get("local_files_only") and (
+                        "not found" in msg
+                        or "no such" in msg
+                        or "does not appear" in msg
+                        or "offline" in msg
+                    ):
+                        break
+                    if "429" in msg or "rate" in msg or "too many" in msg:
+                        logger.warning(
+                            f"HTTP 429 em {desc} (tentativa {attempt}/{retries}). "
+                            f"Aguardando {backoff}s..."
+                        )
+                        time.sleep(backoff)
+                        backoff *= 2
+                        continue
+                    if "meta tensor" in msg:
+                        logger.warning(
+                            f"Meta tensor em {desc}; tentando proxima estrategia"
+                        )
+                        break
+                    logger.warning(f"Falha em {desc}: {exc}")
+                    break
+
+        model_manual = self._load_model_manual_transformer(snapshot_path)
+        if model_manual is not None:
+            logger.info("Modelo carregado via fallback manual Transformer+Pooling")
+            return model_manual
+
+        raise RuntimeError(
+            f"Falha ao carregar modelo local '{self.model_name}': {last_err}"
+        )
+
+    def _load_model_manual_transformer(self, snapshot_path):
+        """
+        Fallback manual quando SentenceTransformer falha por meta tensor.
+
+        Monta o modelo a partir de Transformer + Pooling com carregamento
+        explicito em CPU e sem device_map.
+        """
+        try:
+            import torch
+            from sentence_transformers import SentenceTransformer
+            from sentence_transformers.models import Pooling, Transformer
+        except ImportError:
+            return None
+
+        origem = snapshot_path or self.model_name
+        model_kwargs_safe, _ = _kwargs_seguros_sentence_transformer()
+
+        try:
+            transformer = Transformer(
+                origem,
+                max_seq_length=128,
+                model_args=model_kwargs_safe,
+                config_args=model_kwargs_safe,
+                cache_dir=os.path.expanduser("~/.cache/sentence_transformers"),
+            )
+            dim = transformer.get_word_embedding_dimension()
+            pooling = Pooling(dim)
+            model = SentenceTransformer(
+                modules=[transformer, pooling],
+                device="cpu",
+                backend="torch",
+            )
+            _ = model.encode(["validacao manual"], show_progress_bar=False)
+            return model
+        except Exception as exc:
+            logger.warning(f"Fallback manual de embeddings falhou: {exc}")
+            try:
+                import torch
+
+                if hasattr(torch, "cuda") and torch.cuda.is_available():
+                    torch.cuda.empty_cache()
+            except Exception:
+                pass
+            return None
     
     def embed_query(self, text):
         """

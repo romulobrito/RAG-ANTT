@@ -29,6 +29,9 @@ from antt_rag_unified import (
 def test_instrucoes_completude_presentes():
     assert "NAO generalize" in _INSTRUCOES_COMPLETUDE or "Nao generalize" in _INSTRUCOES_COMPLETUDE
     assert "fase" in _INSTRUCOES_COMPLETUDE.lower()
+    assert "RESPOSTA DIRETA" in _INSTRUCOES_COMPLETUDE
+    assert "EQUIVALENCIA TERMINOLOGICA" in _INSTRUCOES_COMPLETUDE
+    assert "LACUNAS PONTUAIS" in _INSTRUCOES_COMPLETUDE
     print("OK: instrucoes de completude definidas")
 
 

@@ -120,7 +120,8 @@ Pergunta: "{question}"
 
 ### 4. VALIDAÇÃO DE INFORMAÇÕES
 - Base-se EXCLUSIVAMENTE nos documentos fornecidos
-- Se informação incompleta, indique limitações claramente
+- Se o contexto contiver limites ou tabelas, apresente-os diretamente; não negue sua existência
+- Lacuna pontual para campos ausentes; omita seções sem evidência textual
 - Não faça inferências além do que está documentado
 - TABELAS: Os documentos podem conter tabelas em formato markdown (linhas com |).
   Extraia TODOS os valores numéricos, limites e critérios presentes nessas tabelas.
@@ -153,6 +154,9 @@ PERGUNTA: "{question}"
 INSTRUCOES:
 - Analise os documentos e extraia informacoes relevantes
 - Seja objetivo e direto na resposta
+- Se o contexto contiver limites ou tabelas, apresente-os no inicio; nao declare ausencia de dados
+- Relacione equipamento/metodo da pergunta ao parametro normativo correspondente quando aplicavel
+- Lacuna pontual apenas para campos ausentes; omita secoes sem evidencia no contexto
 - Use listas e marcadores para organizar informacoes
 - Cite sempre: [TIPO DOCUMENTO] [NUMERO]/[ANO]
 - Inclua artigos e paragrafos especificos
@@ -280,8 +284,11 @@ Você é um especialista técnico em regulamentações da ANTT.
 Para a consulta sobre parâmetros ou especificações técnicas: "{question}"
 
 INSTRUÇÕES DE ANÁLISE TÉCNICA:
+0. RESPOSTA DIRETA: Se o contexto contiver limites ou tabelas, apresente-os no inicio.
+   Nao declare ausencia de dados se esses valores estiverem no contexto.
+   Relacione equipamento/metodo da pergunta ao parametro normativo correspondente quando aplicavel.
 1. IDENTIFIQUE todos os parâmetros técnicos, especificações, limites ou critérios mencionados
-2. Para cada parâmetro técnico, DETALHE:
+2. Para cada parâmetro técnico COM EVIDENCIA NO CONTEXTO, DETALHE:
    - Nome/tipo do parâmetro
    - Valores numéricos, faixas ou limites especificados
    - Unidades de medida
@@ -300,7 +307,7 @@ INSTRUÇÕES DE ANÁLISE TÉCNICA:
 6. CITE a fonte específica de cada parâmetro (documento, artigo, anexo)
 7. TABELAS: Os documentos podem conter tabelas em formato markdown (linhas com |).
    Extraia TODOS os valores numericos, limites e criterios presentes nessas tabelas.
-8. NAO INVENTE DADOS! Se um parametro solicitado nao constar nos documentos, declare a lacuna.
+8. NAO INVENTE DADOS! Lacuna apenas para campos especificos ausentes; omita secoes sem evidencia.
 9. Quando os trechos tratarem de demandas ou processos DISTINTOS, apresente-os separadamente.
    Quando tratarem do mesmo assunto, consolide normalmente.
 10. SEMPRE adicione uma seção "TRECHOS DOS DOCUMENTOS CITADOS" estruturada assim:
@@ -327,13 +334,25 @@ Você é um engenheiro especialista em normas técnicas da ANTT.
 Parâmetros/especificações para: "{question}"
 
 ## PROTOCOLO DE ANÁLISE TÉCNICA
+
+REGRAS TRANSVERSAIS (OBRIGATÓRIAS):
+- Resposta direta primeiro: limites e tabelas no início quando existirem no contexto.
+- Nunca negue ausência de dados se o contexto contiver valores ou tabelas relevantes.
+- Equipamento/método na pergunta -> identifique o parâmetro normativo e seus limites no contexto.
+- Lacuna pontual (campo ausente), nunca lacuna global se parte dos dados existir.
+- Omita seções sem evidência textual; não invente detalhes operacionais.
+
+### 0. RESPOSTA DIRETA À PERGUNTA
+- Apresente objetivamente os limites/valores encontrados (tabela ou lista).
+- Só então desenvolva detalhes complementares com evidência no contexto.
+
 ### 1. IDENTIFICAÇÃO DE PARÂMETROS
 - Mapeie todos os parâmetros técnicos mencionados
 - Classifique por categoria (segurança, qualidade, desempenho)
 - Identifique hierarquia de importância
 
 ### 2. ESPECIFICAÇÃO DETALHADA
-Para cada parâmetro, documente:
+Para cada parâmetro COM EVIDÊNCIA NO CONTEXTO, documente:
 - **Denominação técnica oficial**
 - **Valores numéricos e tolerâncias**
 - **Unidades de medida padronizadas**
@@ -370,44 +389,45 @@ Para cada parâmetro, documente:
 TEMPLATE_PARAMETROS_TECNICOS_DEEPSEEK = """
 ANALISE TECNICA: "{question}"
 
-OBJETIVO: Identificar todos os parametros tecnicos nos documentos, incluindo valores
-numericos, limites, faixas, unidades e criterios de classificacao.
+OBJETIVO: Responder com os limites/valores normativos presentes no contexto, em qualquer
+disciplina (pavimento, sinalizacao, estruturas, seguranca, etc.).
 
-REGRA DE FUNDAMENTACAO:
-- Preencha SOMENTE campos para os quais exista evidencia textual explicita nos documentos.
-- Se o contexto NAO contiver um parametro solicitado, declare a lacuna em vez de inventar valores.
-- NAO fabrique numeros, unidades ou limites que nao estejam nos trechos fornecidos.
+REGRAS DE FUNDAMENTACAO (OBRIGATORIAS):
+- Resposta direta primeiro: se o contexto tiver limites ou tabelas, apresente-os no inicio.
+- NUNCA diga que nao ha valores/limites se o contexto contiver esses dados.
+- Pergunta por equipamento ou metodo de ensaio: identifique o parametro normativo correspondente
+  (ex: FWD -> Dadm; perfilometro -> IRI) e responda com os limites desse parametro.
+- Lacuna PONTUAL apenas para campos especificos ausentes; entregue o que existir no contexto.
+- NAO fabrique numeros, unidades, espacamentos, exclusoes ou frequencias sem evidencia textual.
+- Omita secoes do template sem evidencia; nao preencha com suposicoes.
 
 ATENCAO A TABELAS:
-- Os documentos podem conter TABELAS em formato markdown (linhas delimitadas por |).
-- Extraia TODOS os valores numericos dessas tabelas: limites maximos/minimos, faixas,
-  percentuais, unidades de medida (m/km, mm, %, etc.).
-- Inclua na resposta os valores exatos como aparecem nas tabelas.
+- Os documentos podem conter TABELAS em formato markdown (linhas delimitadas por |) ou blocos
+  tabulares em texto (OCR). Extraia TODOS os valores numericos: limites, faixas, percentuais,
+  unidades (m/km, mm, %, etc.). Preserve dimensoes (fase, pista, faixa, categoria, VDM).
+- Inclua na resposta os valores exatos como aparecem no contexto.
 
 ESTRUTURA DA RESPOSTA:
-1. **PARAMETROS IDENTIFICADOS**
-   Para cada parametro, informe:
+0. **RESPOSTA DIRETA** - limites/valores solicitados (tabela ou lista)
+1. **PARAMETROS IDENTIFICADOS** (somente com evidencia no contexto)
+   Para cada parametro:
    - Nome do parametro
    - Valor/limite numerico exato (ex: 2,7 m/km, 7mm, >0,2)
    - Unidade de medida
-   - Condicoes de aplicacao (ex: pista principal vs marginal, flexivel vs rigido)
-   - Periodicidade de monitoramento
+   - Condicoes de aplicacao (ex: pista principal vs marginal, faixa de VDM)
+   - Periodicidade (se constar no contexto)
    - Fonte: [DOC] [NUM]/[ANO], Art./Anexo
 
-2. **METODOLOGIAS DE VERIFICACAO**
-   - Equipamento (ex: Perfilometro Laser, FWD, Grip Tester)
-   - Area monitorada (ex: 100% da extensao, segmentos de 200m)
+2. **METODOLOGIAS DE VERIFICACAO** (somente se constar no contexto)
+   - Equipamento ou metodo
+   - Area monitorada
    - Frequencia
 
-3. **CRITERIOS DE CLASSIFICACAO/CONFORMIDADE**
-   - Niveis (A, B, C, D) e seus limites quando disponiveis
-   - Condicoes especiais ou excecoes
+3. **CRITERIOS DE CLASSIFICACAO/CONFORMIDADE** (somente se constar no contexto)
 
-4. **LACUNAS** (se houver parametros solicitados nao encontrados nos documentos)
+4. **LACUNAS PONTUAIS** - apenas campos solicitados e ausentes no contexto
 
-5. **DEMANDAS DISTINTAS**: Quando os trechos tratarem de demandas ou processos DISTINTOS
-   (ex: notas tecnicas diferentes, processos SEI diferentes), apresente-os SEPARADAMENTE.
-   Quando tratarem do mesmo assunto, consolide.
+5. **DEMANDAS DISTINTAS**: processos ou assuntos distintos -> apresente separadamente
 
 DOCUMENTOS TECNICOS:
 {context}
@@ -1283,8 +1303,15 @@ def _reindexar_base_impl(embedding_provider: str) -> tuple:
 
     # 4) Criar embeddings e reconstruir vectorstore
     try:
-        llm_manager = create_llm_manager("deepseek", embedding_provider=embedding_provider)
-        embeddings = llm_manager.get_embeddings()
+        embeddings = _criar_embeddings_local()
+        if embeddings is None:
+            return (
+                False,
+                "Erro ao reconstruir vectorstore: falha ao carregar embeddings locais. "
+                "Reinicie o Streamlit e tente novamente. Se persistir, execute "
+                "'pip install -U sentence-transformers accelerate' e use "
+                "'Limpar Cache OCR e Reindexar'."
+            )
         sucesso = criar_vectorstore_local(embeddings)
         if sucesso:
             msg_final = f"Reindexação concluída: {len(docs)} documentos catalogados"
@@ -1458,14 +1485,47 @@ def simplificar_query(query):
 # Mapeamento de tipos de documentos regulatorios para siglas de arquivo
 # ---------------------------------------------------------------------------
 _INSTRUCOES_COMPLETUDE = """
-REGRAS DE FOCO E COMPLETUDE (OBRIGATORIAS):
-- Responda PRIMEIRO exatamente o que foi perguntado; so depois acrescente contexto complementar.
-- Nao inclua parametros, processos ou assuntos nao solicitados na pergunta.
-- Tabelas markdown (linhas com |): preserve as dimensoes das colunas (fase, pista, periodicidade, etc.).
-- Quando a norma define valores por fase, pista ou periodo, apresente CADA combinacao separadamente.
-- Nao generalize multiplos valores em um unico limite (ex: nao dizer "3,5 m/km para todos" se o contexto
-  traz 2,7 m/km, 3,0 m/km e 3,5 m/km em contextos distintos).
-- Declare lacuna apenas para o que realmente nao constar nos documentos fornecidos.
+REGRAS DE FOCO, FUNDAMENTACAO E COMPLETUDE (OBRIGATORIAS - TODOS OS DOCUMENTOS):
+
+1) RESPOSTA DIRETA PRIMEIRO
+- Comece afirmando objetivamente o que a norma/documento estabelece para a pergunta.
+- Se o contexto contiver limites, faixas, tabelas ou valores numericos relevantes, apresente-os
+  logo no inicio (tabela ou lista), antes de qualquer contextualizacao.
+- NUNCA abra dizendo que "nao ha valores", "nao estao explicitamente mencionados" ou que ha
+  "lacuna" se o contexto contiver esses dados (mesmo em tabela markdown, texto OCR ou anexo).
+
+2) EQUIVALENCIA TERMINOLOGICA (GERAL)
+- A pergunta pode citar equipamento (ex: FWD, perfilometro), metodo de ensaio, sigla ou nome
+  coloquial. Identifique o PARAMETRO NORMATIVO correspondente no contexto (ex: Dadm, IRI, IFI)
+  e responda com os LIMITES/VALORES desse parametro.
+- Deixe claro a relacao quando util: "O ensaio FWD verifica a deflexao; os limites sao dados
+  pela Deflexao Admissivel (Dadm), conforme tabela abaixo."
+
+3) LACUNAS PONTUAIS (NAO GLOBAIS)
+- Declare lacuna SOMENTE para campos especificos ausentes no contexto (ex: "periodicidade nao
+  consta nos trechos fornecidos").
+- Se parte da resposta existir no contexto, entregue essa parte com confianca. Nao invalide
+  a resposta inteira por campos secundarios faltantes.
+- NUNCA contradiga a propria resposta (ex: dizer que nao ha dados e em seguida listar tabela).
+
+4) FIDELIDADE AO CONTEXTO
+- Preencha SOMENTE campos com evidencia textual explicita nos documentos fornecidos.
+- NAO invente detalhes operacionais (espacamento, exclusoes, equipamentos auxiliares,
+  frequencias, tolerancias) sem trecho correspondente no contexto.
+- Omita secoes do template quando nao houver evidencia; nao preencha com suposicoes.
+
+5) TABELAS E VALORES NUMERICOS
+- Tabelas markdown (linhas com |) e blocos tabulares em texto: extraia TODOS os valores,
+  limites, faixas, unidades e criterios; preserve dimensoes (fase, pista, VDM, categoria, etc.).
+- Quando a norma define valores por fase, pista, faixa, classe ou periodo, apresente CADA
+  combinacao separadamente.
+- Nao generalize multiplos valores em um unico limite (ex: nao dizer "3,5 para todos" se o
+  contexto traz 2,7, 3,0 e 3,5 em contextos distintos).
+
+6) ESCOPO DA PERGUNTA
+- Responda exatamente o que foi perguntado; contexto complementar so depois da resposta direta.
+- Nao inclua parametros, processos ou assuntos nao solicitados.
+- Demandas ou processos distintos nos trechos: apresente separadamente; nao funda em narrativa unica.
 """
 
 _TIPO_DOCUMENTO_MAP = {
@@ -1999,21 +2059,40 @@ def _obter_cache_ocr(url_hash):
     if os.path.exists(cache_path):
         try:
             with open(cache_path, "r", encoding="utf-8") as f:
-                texto = f.read()
-            texto = _corrigir_tabela_markdown_cache(texto)
-            return _corrigir_decimais_ocr(texto)
+                texto_cache = f.read()
+
+            if _cache_ocr_deve_ser_invalidado(texto_cache):
+                logger.info(
+                    f"Cache OCR invalido (versao/qualidade) para {url_hash}, "
+                    "sera reprocessado"
+                )
+                try:
+                    os.remove(cache_path)
+                except OSError:
+                    pass
+                return None
+
+            _, conteudo = _parse_meta_cache_ocr(texto_cache)
+            return _pos_processar_tabela_ocr(conteudo)
         except Exception:
             return None
     return None
 
 
 def _salvar_cache_ocr(url_hash, texto):
-    """Persiste resultado OCR em cache local."""
+    """Persiste resultado OCR em cache local com versao e score de qualidade."""
     os.makedirs(_OCR_CACHE_DIR, exist_ok=True)
     cache_path = os.path.join(_OCR_CACHE_DIR, f"{url_hash}.txt")
     try:
+        texto_proc = _pos_processar_tabela_ocr(texto)
+        score = _calcular_score_qualidade_ocr(texto_proc)
+        payload = _formatar_cache_ocr(texto_proc, score)
         with open(cache_path, "w", encoding="utf-8") as f:
-            f.write(texto)
+            f.write(payload)
+        if score < _OCR_QUALIDADE_MINIMA:
+            logger.warning(
+                f"Cache OCR salvo com baixa qualidade ({score:.2f}): {url_hash}"
+            )
     except Exception as exc:
         logger.warning(f"Falha ao salvar cache OCR {cache_path}: {exc}")
 
@@ -2261,15 +2340,365 @@ def _corrigir_decimais_ocr(texto: str) -> str:
     return resultado
 
 
+_OCR_PIPELINE_VERSION = "3"
+_OCR_QUALIDADE_MINIMA = 0.55
+_OCR_QUALIDADE_ALTA = 0.85
+
+_RE_GARBAGE_OCR = re.compile(
+    r"(?:\b[a-z]{2,}\s*/\s*\]|\btooo\b|\bas\s*/\]|[^\w\s,;.\-+Ee\d/]{4,})",
+    re.IGNORECASE,
+)
+_RE_NOTACAO_CIENTIFICA = re.compile(
+    r"^\d+[,.]?\d*E[+\-]?\d+$",
+    re.IGNORECASE,
+)
+_RE_CELULA_NUMERICA_CORROMPIDA = re.compile(
+    r"^\d{5,8}$"
+)
+
+
+def _preprocessar_imagem_ocr_binarizada(imagem_pil):
+    """
+    Pre-processamento alternativo com binarizacao adaptativa.
+
+    Melhora leitura de tabelas com linhas finas e texto pequeno,
+    comum em anexos normativos escaneados ou gerados como imagem.
+    """
+    from PIL import ImageEnhance, ImageOps
+
+    imagem = imagem_pil.copy()
+    largura, altura = imagem.size
+    if largura < 1500:
+        fator = max(2, 1500 // largura)
+        imagem = imagem.resize((largura * fator, altura * fator), Image.LANCZOS)
+
+    if imagem.mode != "L":
+        imagem = imagem.convert("L")
+
+    imagem = ImageEnhance.Contrast(imagem).enhance(2.0)
+    imagem = ImageOps.autocontrast(imagem)
+    arr = np.array(imagem, dtype=np.float32)
+    limiar = float(np.mean(arr)) * 0.85
+    binario = (arr > limiar).astype(np.uint8) * 255
+    return Image.fromarray(binario)
+
+
+def _preprocessar_imagem_ocr_agressivo(imagem_pil):
+    """Upscale mais agressivo para imagens pequenas de tabelas normativas."""
+    from PIL import ImageEnhance
+
+    imagem = imagem_pil.copy()
+    largura, altura = imagem.size
+    fator = max(3, 2400 // max(largura, 1))
+    imagem = imagem.resize((largura * fator, altura * fator), Image.LANCZOS)
+
+    if imagem.mode != "L":
+        imagem = imagem.convert("L")
+
+    imagem = ImageEnhance.Contrast(imagem).enhance(2.2)
+    imagem = ImageEnhance.Sharpness(imagem).enhance(2.5)
+    return imagem
+
+
+def _gerar_variantes_preprocessamento_ocr(imagem_pil):
+    """
+    Gera variantes de pre-processamento para tentativas multiplas de OCR.
+
+    Returns:
+        list: Tuplas (nome_variante, imagem_pil_processada).
+    """
+    variantes = [("padrao", _preprocessar_imagem_ocr(imagem_pil))]
+
+    try:
+        variantes.append(("binarizada", _preprocessar_imagem_ocr_binarizada(imagem_pil)))
+    except Exception as exc:
+        logger.debug(f"Variante binarizada indisponivel: {exc}")
+
+    largura, _ = imagem_pil.size
+    if largura < 2000:
+        try:
+            variantes.append(
+                ("upscale", _preprocessar_imagem_ocr_agressivo(imagem_pil))
+            )
+        except Exception as exc:
+            logger.debug(f"Variante upscale indisponivel: {exc}")
+
+    return variantes
+
+
+def _celula_parece_corrompida(valor: str) -> bool:
+    """
+    Detecta celulas de tabela com conteudo provavelmente corrompido pelo OCR.
+
+    Heuristicas gerais (nao especificas de um documento):
+    - Caracteres especiais isolados (/], etc.)
+    - Mistura de letras e numeros em celulas curtas
+    - Sequencias longas de digitos sem notacao cientifica (ex.: 600807)
+    """
+    celula = str(valor).strip()
+    if not celula:
+        return False
+
+    if _RE_GARBAGE_OCR.search(celula):
+        return True
+
+    if re.search(r"[/\[\]{}|\\^~`]", celula):
+        return True
+
+    if re.match(r"^[a-zA-Z]{2,}$", celula) and celula.lower() not in {
+        "principal",
+        "marginal",
+        "quinquenal",
+    }:
+        if re.search(r"\d", celula):
+            return True
+        if len(celula) <= 5 and not celula.isupper():
+            return True
+
+    if _RE_CELULA_NUMERICA_CORROMPIDA.match(celula):
+        if not _RE_NOTACAO_CIENTIFICA.match(celula):
+            return True
+
+    return False
+
+
+def _calcular_score_qualidade_ocr(texto: str) -> float:
+    """
+    Calcula score de qualidade (0.0 a 1.0) do texto OCR extraido.
+
+    Penaliza celulas corrompidas em tabelas markdown e padroes de lixo
+    conhecidos. Usado para escolher a melhor estrategia de extracao e
+    invalidar cache de baixa qualidade.
+    """
+    if not texto or not texto.strip():
+        return 0.0
+
+    score = 1.0
+    lixo = len(_RE_GARBAGE_OCR.findall(texto))
+    score -= min(0.5, lixo * 0.12)
+
+    linhas_tabela = [
+        linha.strip()
+        for linha in texto.splitlines()
+        if linha.strip().startswith("|") and "| ---" not in linha
+    ]
+
+    if not linhas_tabela:
+        conteudo_util = re.sub(r"[^a-zA-Z0-9]", "", texto)
+        if len(conteudo_util) < 20:
+            return max(0.0, score - 0.4)
+        return max(0.0, min(1.0, score))
+
+    total_celulas = 0
+    celulas_ruins = 0
+    for linha in linhas_tabela:
+        if re.match(r"^\|\s*[-:\s|]+\s*\|$", linha):
+            continue
+        celulas = [c.strip() for c in linha.split("|")[1:-1]]
+        for celula in celulas:
+            total_celulas += 1
+            if _celula_parece_corrompida(celula):
+                celulas_ruins += 1
+
+    if total_celulas > 0:
+        ratio_ruim = celulas_ruins / total_celulas
+        score -= ratio_ruim * 0.75
+
+    return max(0.0, min(1.0, score))
+
+
+def _tentar_corrigir_notacao_cientifica_celula(celula: str) -> str:
+    """
+    Tenta reconstruir notacao cientifica corrompida em celulas numericas.
+
+    Exemplo generico: '600807' -> '6,00E+07' (E e virgula perdidos pelo OCR).
+    """
+    valor = str(celula).strip()
+    if not valor or _RE_NOTACAO_CIENTIFICA.match(valor):
+        return valor
+
+    if not _RE_CELULA_NUMERICA_CORROMPIDA.match(valor):
+        return valor
+
+    for tam_int in (1, 2):
+        for tam_dec in (2,):
+            if len(valor) <= tam_int + tam_dec + 2:
+                continue
+            parte_int = valor[:tam_int]
+            parte_dec = valor[tam_int : tam_int + tam_dec]
+            resto = valor[tam_int + tam_dec :]
+            if not parte_int.isdigit() or not parte_dec.isdigit():
+                continue
+            if not resto.isdigit() or len(resto) < 2:
+                continue
+            expoente = resto[-2:]
+            if expoente not in {"06", "07", "08", "09"}:
+                continue
+            candidato = f"{parte_int},{parte_dec}E+{expoente}"
+            return candidato
+
+    return valor
+
+
+def _corrigir_celulas_tabela_markdown(linha: str) -> str:
+    """Aplica correcoes celula a celula em uma linha de tabela markdown."""
+    if not linha.strip().startswith("|") or "| ---" in linha:
+        return linha
+
+    partes = linha.split("|")
+    if len(partes) < 3:
+        return linha
+
+    celulas_corrigidas = []
+    for idx, celula in enumerate(partes):
+        if idx == 0 or idx == len(partes) - 1:
+            celulas_corrigidas.append(celula)
+            continue
+        limpa = _limpar_celula_ocr(celula)
+        limpa = _tentar_corrigir_notacao_cientifica_celula(limpa)
+        celulas_corrigidas.append(limpa)
+
+    return "|".join(celulas_corrigidas)
+
+
+def _pos_processar_tabela_ocr(texto: str) -> str:
+    """
+    Pos-processamento geral de texto/tabelas OCR.
+
+    Aplica correcao de linhas quebradas, notacao cientifica, decimais
+    e limpeza de celulas antes de cachear ou enviar ao vectorstore.
+    """
+    if not texto:
+        return texto
+
+    texto = _corrigir_tabela_markdown_cache(texto)
+    linhas = [_corrigir_celulas_tabela_markdown(l) for l in texto.splitlines()]
+    texto = "\n".join(linhas)
+    texto = _corrigir_decimais_ocr(texto)
+    return texto
+
+
+def _parse_meta_cache_ocr(texto: str) -> tuple:
+    """
+    Separa metadados do cabecalho do cache OCR do conteudo util.
+
+    Returns:
+        tuple: (meta_dict, conteudo_sem_meta)
+    """
+    meta = {}
+    linhas = texto.splitlines()
+    idx_conteudo = 0
+
+    for idx, linha in enumerate(linhas):
+        if not linha.startswith("#"):
+            idx_conteudo = idx
+            break
+        if "=" in linha:
+            chave, _, val = linha[1:].strip().partition("=")
+            meta[chave.strip()] = val.strip()
+        idx_conteudo = idx + 1
+    else:
+        idx_conteudo = len(linhas)
+
+    conteudo = "\n".join(linhas[idx_conteudo:]).lstrip("\n")
+    return meta, conteudo
+
+
+def _formatar_cache_ocr(texto: str, score: float) -> str:
+    """Formata texto OCR com cabecalho de versao e score de qualidade."""
+    cabecalho = (
+        f"# ocr_pipeline_v={_OCR_PIPELINE_VERSION}\n"
+        f"# quality={score:.3f}\n"
+    )
+    return cabecalho + texto
+
+
+def _cache_ocr_deve_ser_invalidado(texto_cache: str) -> bool:
+    """
+    Decide se uma entrada de cache OCR deve ser descartada e reprocessada.
+
+    Invalida caches de versoes antigas do pipeline ou com qualidade
+    abaixo do minimo aceitavel apos pos-processamento.
+    """
+    meta, conteudo = _parse_meta_cache_ocr(texto_cache)
+    versao = meta.get("ocr_pipeline_v", "1")
+    if versao != _OCR_PIPELINE_VERSION:
+        return True
+
+    conteudo_proc = _pos_processar_tabela_ocr(conteudo)
+    score = _calcular_score_qualidade_ocr(conteudo_proc)
+    return score < _OCR_QUALIDADE_MINIMA
+
+
+def _tentar_extrair_com_img2table(
+    imagem_processada,
+    borderless: bool = False,
+    implicit_rows: bool = False,
+) -> str:
+    """Extrai tabelas via img2table e converte para markdown."""
+    import tempfile
+
+    from img2table.document import Image as Img2TableImage
+    from img2table.ocr import TesseractOCR as Img2TableOCR
+
+    with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as tmp:
+        tmp_path = tmp.name
+        imagem_processada.save(tmp_path)
+
+    try:
+        ocr_engine = Img2TableOCR(lang="por+eng", psm=6)
+        img_doc = Img2TableImage(src=tmp_path)
+        tabelas = img_doc.extract_tables(
+            ocr=ocr_engine,
+            implicit_rows=implicit_rows,
+            borderless_tables=borderless,
+            min_confidence=50,
+        )
+
+        if not tabelas:
+            return ""
+
+        partes = []
+        for tabela in tabelas:
+            df = tabela.df
+            if df is not None and not df.empty:
+                md_table = _dataframe_para_markdown(df)
+                if md_table.strip():
+                    partes.append(md_table)
+
+        return "\n\n".join(partes)
+    except Exception as exc:
+        logger.debug(f"img2table falhou (borderless={borderless}): {exc}")
+        return ""
+    finally:
+        try:
+            os.unlink(tmp_path)
+        except OSError:
+            pass
+
+
+def _tentar_extrair_com_tesseract(imagem_processada, psm: int = 6) -> str:
+    """Extrai texto livre via pytesseract com PSM configuravel."""
+    import pytesseract
+
+    config = f"--psm {psm} --oem 3"
+    texto_ocr = pytesseract.image_to_string(
+        imagem_processada,
+        lang="por+eng",
+        config=config,
+    )
+    return _limpar_texto_ocr(texto_ocr)
+
+
 def _extrair_texto_imagem(imagem_pil, url=""):
     """
-    Extrai texto de uma imagem PIL usando Tesseract OCR e img2table.
+    Extrai texto de imagem com pipeline OCR multi-estrategia.
 
     Pipeline:
-    1. Pre-processa a imagem (upscale, contraste, nitidez)
-    2. Tenta extracao de tabelas via img2table
-    3. Se nao encontrar tabelas, faz OCR textual via pytesseract
-    4. Aplica pos-processamento para corrigir decimais perdidos
+    1. Gera variantes de pre-processamento (padrao, binarizada, upscale)
+    2. Para cada variante, tenta img2table (borderless e padrao) e Tesseract
+    3. Pos-processa e pontua cada candidato
+    4. Retorna o candidato com maior score de qualidade
 
     Args:
         imagem_pil (PIL.Image): Imagem carregada.
@@ -2278,72 +2707,64 @@ def _extrair_texto_imagem(imagem_pil, url=""):
     Returns:
         str: Texto extraido em formato markdown.
     """
-    import pytesseract
-    import tempfile
+    variantes = _gerar_variantes_preprocessamento_ocr(imagem_pil)
+    candidatos = []
 
-    texto_final = ""
+    estrategias = [
+        ("img2table_borderless", lambda img: _tentar_extrair_com_img2table(
+            img, borderless=True, implicit_rows=True
+        )),
+        ("img2table", lambda img: _tentar_extrair_com_img2table(img)),
+        ("tesseract_psm6", lambda img: _tentar_extrair_com_tesseract(img, psm=6)),
+        ("tesseract_psm4", lambda img: _tentar_extrair_com_tesseract(img, psm=4)),
+    ]
 
-    imagem_processada = _preprocessar_imagem_ocr(imagem_pil)
-
-    with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as tmp:
-        tmp_path = tmp.name
-        imagem_processada.save(tmp_path)
-
-    try:
-        # 1) Tentar extracao de tabelas estruturadas com img2table
-        try:
-            from img2table.document import Image as Img2TableImage
-            from img2table.ocr import TesseractOCR as Img2TableOCR
-
-            ocr_engine = Img2TableOCR(
-                lang="por+eng",
-                psm=6,
-            )
-            img_doc = Img2TableImage(src=tmp_path)
-            tabelas = img_doc.extract_tables(ocr=ocr_engine)
-
-            if tabelas:
-                partes = []
-                for tabela in tabelas:
-                    df = tabela.df
-                    if df is not None and not df.empty:
-                        md_table = _dataframe_para_markdown(df)
-                        if md_table.strip():
-                            partes.append(md_table)
-
-                if partes:
-                    texto_final = "\n\n".join(partes)
-                    logger.info(
-                        f"img2table extraiu {len(tabelas)} tabela(s) de {url}"
-                    )
-        except Exception as exc:
-            logger.debug(f"img2table falhou para {url}: {exc}")
-
-        # 2) Fallback: OCR textual completo via pytesseract
-        if not texto_final.strip():
-            custom_config = "--psm 6 --oem 3"
-            texto_ocr = pytesseract.image_to_string(
-                imagem_processada, lang="por+eng", config=custom_config
-            )
-            texto_final = _limpar_texto_ocr(texto_ocr)
-            if texto_final:
-                logger.info(
-                    f"Tesseract OCR extraiu {len(texto_final)} chars de {url}"
+    for nome_variante, imagem_proc in variantes:
+        for nome_estrategia, extrator in estrategias:
+            try:
+                bruto = extrator(imagem_proc)
+            except Exception as exc:
+                logger.debug(
+                    f"Estrategia {nome_estrategia}/{nome_variante} falhou "
+                    f"para {url}: {exc}"
                 )
-            else:
-                logger.warning(f"OCR nao extraiu texto de {url}")
+                continue
 
-        # 3) Pos-processamento: corrigir decimais perdidos pelo OCR
-        if texto_final:
-            texto_final = _corrigir_decimais_ocr(texto_final)
+            if not bruto or not bruto.strip():
+                continue
 
-    finally:
-        try:
-            os.unlink(tmp_path)
-        except OSError:
-            pass
+            processado = _pos_processar_tabela_ocr(bruto)
+            score = _calcular_score_qualidade_ocr(processado)
+            candidatos.append(
+                (score, processado, nome_variante, nome_estrategia)
+            )
 
-    return texto_final
+            if score >= _OCR_QUALIDADE_ALTA:
+                logger.info(
+                    f"OCR alta qualidade ({score:.2f}) via "
+                    f"{nome_estrategia}/{nome_variante} para {url}"
+                )
+                return processado
+
+    if not candidatos:
+        logger.warning(f"OCR nao extraiu texto utilizavel de {url}")
+        return ""
+
+    candidatos.sort(key=lambda item: item[0], reverse=True)
+    melhor_score, melhor_texto, melhor_var, melhor_est = candidatos[0]
+
+    if melhor_score < _OCR_QUALIDADE_MINIMA:
+        logger.warning(
+            f"OCR baixa qualidade ({melhor_score:.2f}) via "
+            f"{melhor_est}/{melhor_var} para {url}"
+        )
+    else:
+        logger.info(
+            f"OCR qualidade {melhor_score:.2f} via "
+            f"{melhor_est}/{melhor_var} para {url}"
+        )
+
+    return melhor_texto
 
 
 _OCR_MAX_WORKERS = min(4, (os.cpu_count() or 2))
@@ -3001,8 +3422,10 @@ Conteudo:
     normalized_types = [_normalize_text_ascii_lower(t) for t in list(tipos_documentos)]
     
     keywords_technical = [
-        'parametro', 'tecnico', 'valor', 'limite', 'medida', 'metodologia',
-        'pavimento', 'deflexao', 'iri', 'atrito', 'indice'
+        "parametro", "tecnico", "valor", "valores", "limite", "limites", "medida",
+        "metodologia", "pavimento", "deflexao", "dadm", "iri", "ifi", "atrito",
+        "indice", "fwd", "ensaio", "equipamento", "tolerancia", "faixa", "vdm",
+        "maximo", "minimo", "conformidade", "desempenho",
     ]
     
     keywords_normative = [
@@ -3025,10 +3448,23 @@ Conteudo:
         template_tipo = 'resposta'
 
     tem_tabela_md = any("| --- |" in doc.page_content for doc in documentos)
-    if tem_tabela_md and any(k in normalized_question for k in keywords_technical):
+    tem_bloco_numerico = any(
+        re.search(r"\d+[,.]?\d*E[+\-]?\d+", doc.page_content)
+        or re.search(r"\d+\s+\d+\s+\d+", doc.page_content)
+        for doc in documentos
+    )
+    pergunta_sobre_limites = any(
+        k in normalized_question
+        for k in ("limite", "limites", "valor", "valores", "maximo", "minimo", "tolerancia")
+    )
+    if (tem_tabela_md or tem_bloco_numerico) and (
+        any(k in normalized_question for k in keywords_technical) or pergunta_sobre_limites
+    ):
         if template_tipo == 'resposta':
             template_tipo = 'parametros'
-            logger.info("Tabelas no contexto + pergunta tecnica: template parametros")
+            logger.info(
+                "Dados tabulares no contexto + pergunta sobre limites: template parametros"
+            )
     
     # Selecionar template adaptativo baseado no modelo
     template_escolhido = selecionar_template_adaptativo(template_tipo, modelo_usado)
@@ -3257,8 +3693,10 @@ def _preparar_contexto_resposta(pergunta, documentos, modelo_usado="gpt-4"):
     normalized_types = [_normalize_text_ascii_lower(t) for t in list(tipos_documentos)]
 
     keywords_technical = [
-        "parametro", "tecnico", "valor", "limite", "medida", "metodologia",
-        "pavimento", "deflexao", "iri", "atrito", "indice",
+        "parametro", "tecnico", "valor", "valores", "limite", "limites", "medida",
+        "metodologia", "pavimento", "deflexao", "dadm", "iri", "ifi", "atrito",
+        "indice", "fwd", "ensaio", "equipamento", "tolerancia", "faixa", "vdm",
+        "maximo", "minimo", "conformidade", "desempenho",
     ]
     keywords_normative = [
         "resolucao", "instrucao normativa", "deliberacao", "portaria", "regulamento",
@@ -3279,10 +3717,23 @@ def _preparar_contexto_resposta(pergunta, documentos, modelo_usado="gpt-4"):
         template_tipo = "resposta"
 
     tem_tabela_md = any("| --- |" in doc.page_content for doc in documentos)
-    if tem_tabela_md and any(k in normalized_question for k in keywords_technical):
+    tem_bloco_numerico = any(
+        re.search(r"\d+[,.]?\d*E[+\-]?\d+", doc.page_content)
+        or re.search(r"\d+\s+\d+\s+\d+", doc.page_content)
+        for doc in documentos
+    )
+    pergunta_sobre_limites = any(
+        k in normalized_question
+        for k in ("limite", "limites", "valor", "valores", "maximo", "minimo", "tolerancia")
+    )
+    if (tem_tabela_md or tem_bloco_numerico) and (
+        any(k in normalized_question for k in keywords_technical) or pergunta_sobre_limites
+    ):
         if template_tipo == "resposta":
             template_tipo = "parametros"
-            logger.info("Tabelas no contexto + pergunta tecnica: template parametros")
+            logger.info(
+                "Dados tabulares no contexto + pergunta sobre limites: template parametros"
+            )
 
     template_escolhido = selecionar_template_adaptativo(template_tipo, modelo_usado)
     logger.info(f"Template selecionado: {template_tipo} para modelo {modelo_usado}")
@@ -3591,10 +4042,10 @@ def interface_usuario_unificada():
             "Limpar Cache OCR e Reindexar",
             use_container_width=True,
             help=(
-                "Remove todo o cache de OCR e força a re-extração "
-                "das imagens com o pipeline melhorado (upscale, "
-                "contraste, correção de decimais). Usar quando "
-                "tabelas tiverem dados numéricos incorretos."
+                "Remove todo o cache de OCR e forca a re-extracao "
+                "das imagens com o pipeline v3 (multi-estrategia, "
+                "validacao de qualidade, correcao de tabelas). "
+                "Usar quando tabelas tiverem dados numericos incorretos."
             ),
         ):
             st.session_state["_limpar_ocr_e_reindexar"] = True
