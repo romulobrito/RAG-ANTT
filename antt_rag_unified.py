@@ -1457,6 +1457,17 @@ def simplificar_query(query):
 # ---------------------------------------------------------------------------
 # Mapeamento de tipos de documentos regulatorios para siglas de arquivo
 # ---------------------------------------------------------------------------
+_INSTRUCOES_COMPLETUDE = """
+REGRAS DE FOCO E COMPLETUDE (OBRIGATORIAS):
+- Responda PRIMEIRO exatamente o que foi perguntado; so depois acrescente contexto complementar.
+- Nao inclua parametros, processos ou assuntos nao solicitados na pergunta.
+- Tabelas markdown (linhas com |): preserve as dimensoes das colunas (fase, pista, periodicidade, etc.).
+- Quando a norma define valores por fase, pista ou periodo, apresente CADA combinacao separadamente.
+- Nao generalize multiplos valores em um unico limite (ex: nao dizer "3,5 m/km para todos" se o contexto
+  traz 2,7 m/km, 3,0 m/km e 3,5 m/km em contextos distintos).
+- Declare lacuna apenas para o que realmente nao constar nos documentos fornecidos.
+"""
+
 _TIPO_DOCUMENTO_MAP = {
     "resolucao": "RES",
     "res": "RES",
@@ -1523,13 +1534,100 @@ def _dividir_por_estrutura(texto, chunk_max=1500, chunk_overlap=200):
 
     resultado = []
     for bloco in blocos:
-        if len(bloco) <= chunk_max:
+        tem_tabela_md = "| --- |" in bloco or (
+            sum(1 for ln in bloco.split("\n") if ln.strip().startswith("|")) >= 2
+        )
+        if tem_tabela_md and len(bloco) <= chunk_max * 3:
+            resultado.append(bloco)
+        elif len(bloco) <= chunk_max:
             resultado.append(bloco)
         else:
             sub_chunks = fallback_splitter.split_text(bloco)
             resultado.extend(sub_chunks)
 
     return resultado
+
+
+def _aplicar_limite_k_preservando_prioritarios(documentos, k):
+    """
+    Limita resultados a k chunks, mas mantem TODOS os chunks prioritarios.
+
+    Chunks prioritarios sao os de documentos explicitamente referenciados
+    na pergunta (ex: INM 34/2024). Nunca sao descartados por causa do limite k.
+
+    Args:
+        documentos: Lista de Document ja rerankeada.
+        k: Limite maximo desejado para chunks nao prioritarios.
+
+    Returns:
+        Lista de Document com prioritarios preservados.
+    """
+    if not documentos:
+        return []
+
+    prioritarios = []
+    outros = []
+    vistos_prior = set()
+
+    for doc in documentos:
+        if doc.metadata.get("prioritario"):
+            chave = (
+                doc.metadata.get("caminho", "")
+                + "|"
+                + str(doc.metadata.get("chunk", ""))
+            )
+            if chave not in vistos_prior:
+                vistos_prior.add(chave)
+                prioritarios.append(doc)
+        else:
+            outros.append(doc)
+
+    restante = max(0, k - len(prioritarios))
+    final = prioritarios + outros[:restante]
+
+    if len(prioritarios) > 0:
+        logger.info(
+            f"Limite k={k}: mantidos {len(prioritarios)} chunk(s) prioritario(s) "
+            f"+ {min(restante, len(outros))} outros = {len(final)} total"
+        )
+
+    return final
+
+
+def _buscar_chunks_por_caminho_no_vectorstore(vectorstore, caminho, limite=50):
+    """
+    Recupera chunks indexados de um documento especifico pelo caminho do arquivo.
+
+    Complementa o carregamento direto do .md quando o vectorstore ja contem
+    o documento enriquecido com OCR.
+
+    Args:
+        vectorstore: Vectorstore FAISS carregado.
+        caminho: Caminho absoluto do arquivo .md.
+        limite: Maximo de chunks a retornar.
+
+    Returns:
+        Lista de Document do vectorstore para o caminho informado.
+    """
+    if vectorstore is None or not caminho:
+        return []
+
+    try:
+        docs = vectorstore.similarity_search(
+            "conteudo documento",
+            k=limite,
+            filter={"caminho": caminho},
+        )
+        for doc in docs:
+            doc.metadata["prioritario"] = True
+        if docs:
+            logger.info(
+                f"Vectorstore: {len(docs)} chunk(s) recuperados para {caminho}"
+            )
+        return docs
+    except Exception as exc:
+        logger.debug(f"Busca por caminho no vectorstore falhou: {exc}")
+        return []
 
 
 def _detectar_referencia_documento(query):
@@ -2453,17 +2551,28 @@ def pesquisar_documentos(query, vectorstore, k=16, tipo_documento=None, ano=None
         for ref in refs:
             candidatos, nome_tipo = _resolver_caminho_documento(ref["tipo"], ref["numero"], ref["ano"])
             for caminho in candidatos:
-                if os.path.exists(caminho):
-                    docs_carregados = _carregar_documento_markdown(caminho, ref["tipo"], nome_tipo, ref["numero"], ref["ano"])
-                    if docs_carregados:
-                        resultados.extend(docs_carregados)
-                        caminhos_prioritarios.add(caminho)
-                        logger.info(f"Documento priorizado carregado: {caminho} ({len(docs_carregados)} chunks)")
-        # Guardar informacao para boosting no reranking
+                if not os.path.exists(caminho):
+                    continue
+                docs_carregados = _carregar_documento_markdown(
+                    caminho, ref["tipo"], nome_tipo, ref["numero"], ref["ano"]
+                )
+                if docs_carregados:
+                    resultados.extend(docs_carregados)
+                    caminhos_prioritarios.add(caminho)
+                    logger.info(
+                        f"Documento priorizado carregado: {caminho} "
+                        f"({len(docs_carregados)} chunks)"
+                    )
+                docs_vs = _buscar_chunks_por_caminho_no_vectorstore(
+                    vectorstore, caminho
+                )
+                if docs_vs:
+                    resultados.extend(docs_vs)
+                    caminhos_prioritarios.add(caminho)
         if caminhos_prioritarios:
-            # Anexar como atributo para uso interno no reranking
             for doc in resultados:
-                doc.metadata["prioritario"] = doc.metadata.get("caminho", "") in caminhos_prioritarios
+                if doc.metadata.get("caminho", "") in caminhos_prioritarios:
+                    doc.metadata["prioritario"] = True
     except Exception as e:
         logger.warning(f"Deteccao de referencia de documento falhou: {e}")
 
@@ -2561,9 +2670,12 @@ def pesquisar_documentos(query, vectorstore, k=16, tipo_documento=None, ano=None
         resultados_finais = reranking_documentos(query_original, resultados)
         if len(resultados_finais) > k:
             logger.info(
-                f"Reranking produziu {len(resultados_finais)} docs, limitando a top-{k}"
+                f"Reranking produziu {len(resultados_finais)} docs, "
+                f"aplicando limite k={k} (preservando prioritarios)"
             )
-            resultados_finais = resultados_finais[:k]
+        resultados_finais = _aplicar_limite_k_preservando_prioritarios(
+            resultados_finais, k
+        )
         logger.info(f"Apos reranking: {len(resultados_finais)} documentos retornados")
 
     return resultados_finais
@@ -2810,9 +2922,11 @@ def gerar_resposta(pergunta, documentos, llm, modelo_usado="gpt-4"):
     if len(documentos) > _MAX_CHUNKS_LLM:
         logger.warning(
             f"Recebidos {len(documentos)} chunks, truncando para "
-            f"{_MAX_CHUNKS_LLM} mais relevantes"
+            f"{_MAX_CHUNKS_LLM} (preservando prioritarios)"
         )
-        documentos = documentos[:_MAX_CHUNKS_LLM]
+        documentos = _aplicar_limite_k_preservando_prioritarios(
+            documentos, _MAX_CHUNKS_LLM
+        )
 
     contextos = []
     documentos_info = {}
@@ -2854,7 +2968,7 @@ Conteudo:
 """
         contextos.append(contexto)
 
-    contexto_completo = "\n\n".join(contextos)
+    contexto_completo = _INSTRUCOES_COMPLETUDE + "\n\n" + "\n\n".join(contextos)
 
     # Guarda de tamanho: truncar contexto se exceder limite de chars
     if len(contexto_completo) > _MAX_CONTEXT_CHARS:
@@ -2909,6 +3023,12 @@ Conteudo:
     else:
         logger.info("Usando template padrao de resposta")
         template_tipo = 'resposta'
+
+    tem_tabela_md = any("| --- |" in doc.page_content for doc in documentos)
+    if tem_tabela_md and any(k in normalized_question for k in keywords_technical):
+        if template_tipo == 'resposta':
+            template_tipo = 'parametros'
+            logger.info("Tabelas no contexto + pergunta tecnica: template parametros")
     
     # Selecionar template adaptativo baseado no modelo
     template_escolhido = selecionar_template_adaptativo(template_tipo, modelo_usado)
@@ -3081,9 +3201,11 @@ def _preparar_contexto_resposta(pergunta, documentos, modelo_usado="gpt-4"):
     if len(documentos) > _MAX_CHUNKS_LLM:
         logger.warning(
             f"Recebidos {len(documentos)} chunks, truncando para "
-            f"{_MAX_CHUNKS_LLM} mais relevantes"
+            f"{_MAX_CHUNKS_LLM} (preservando prioritarios)"
         )
-        documentos = documentos[:_MAX_CHUNKS_LLM]
+        documentos = _aplicar_limite_k_preservando_prioritarios(
+            documentos, _MAX_CHUNKS_LLM
+        )
 
     contextos = []
     tipos_documentos = set()
@@ -3105,7 +3227,7 @@ def _preparar_contexto_resposta(pergunta, documentos, modelo_usado="gpt-4"):
         )
         contextos.append(contexto)
 
-    contexto_completo = "\n\n".join(contextos)
+    contexto_completo = _INSTRUCOES_COMPLETUDE + "\n\n" + "\n\n".join(contextos)
 
     if len(contexto_completo) > _MAX_CONTEXT_CHARS:
         logger.warning(
@@ -3155,6 +3277,12 @@ def _preparar_contexto_resposta(pergunta, documentos, modelo_usado="gpt-4"):
     else:
         logger.info("Usando template padrao de resposta")
         template_tipo = "resposta"
+
+    tem_tabela_md = any("| --- |" in doc.page_content for doc in documentos)
+    if tem_tabela_md and any(k in normalized_question for k in keywords_technical):
+        if template_tipo == "resposta":
+            template_tipo = "parametros"
+            logger.info("Tabelas no contexto + pergunta tecnica: template parametros")
 
     template_escolhido = selecionar_template_adaptativo(template_tipo, modelo_usado)
     logger.info(f"Template selecionado: {template_tipo} para modelo {modelo_usado}")
