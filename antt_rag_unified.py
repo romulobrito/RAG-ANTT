@@ -952,146 +952,151 @@ def carregar_vectorstore():
         raise
 
 
+def _criar_embeddings_local():
+    """Cria embeddings locais via sentence-transformers.
+
+    Returns:
+        LocalEmbeddings ou None em caso de falha.
+    """
+    try:
+        llm_manager = create_llm_manager("deepseek", embedding_provider="local")
+        emb = llm_manager.get_embeddings()
+        try:
+            _ = emb.embed_query("teste-local")
+        except Exception:
+            pass
+        logger.info("Embeddings locais configurados com sucesso")
+        return emb
+    except Exception as exc:
+        logger.warning(f"Embeddings locais falharam: {exc}")
+        return None
+
+
+def _criar_embeddings_openai():
+    """Cria embeddings OpenAI.
+
+    Returns:
+        OpenAIEmbeddings ou None em caso de falha.
+    """
+    try:
+        from langchain_openai import OpenAIEmbeddings
+        emb = OpenAIEmbeddings(
+            openai_api_key=get_openai_api_key(),
+            model="text-embedding-ada-002",
+            max_retries=1,
+            timeout=10,
+        )
+        _ = emb.embed_query("teste")
+        logger.info("OpenAI embeddings configurados com sucesso")
+        return emb
+    except Exception as exc:
+        logger.warning(f"OpenAI embeddings falharam: {exc}")
+        return None
+
+
 def carregar_vectorstore_com_provider(embedding_provider="local"):
-    """Carrega o vectorstore ANTT com suporte a diferentes provedores de embeddings."""
-    logger.info(f"Carregando vectorstore com provedor de embeddings: {embedding_provider}")
-    
-    # Definir caminhos dos vectorstores
-    if embedding_provider == "openai":
-        vectorstore_path = DB_FAISS_PATH  # vectorstore/ (OpenAI)
-        logger.info(f"🔍 Usando vectorstore OpenAI: {vectorstore_path}")
-    elif embedding_provider in ["local", "free"]:
-        vectorstore_path = "vectorstore_local"  # vectorstore_local/ (Local)
-        logger.info(f"🔍 Usando vectorstore local: {vectorstore_path}")
-    else:
-        logger.warning(f"Provedor '{embedding_provider}' não reconhecido, usando local")
-        vectorstore_path = "vectorstore_local"
-        embedding_provider = "local"
-    
-    # Tentar carregar embeddings com o provedor especificado
+    """Carrega o vectorstore ANTT com suporte a diferentes provedores.
+
+    Ordem de tentativa de embeddings (sem recursao):
+      - local/free: tenta local primeiro, depois OpenAI como fallback
+      - openai: tenta OpenAI primeiro, depois local como fallback
+
+    Ordem de tentativa de vectorstore:
+      - vectorstore_local (quando embeddings locais) ou vectorstore/db_faiss (OpenAI)
+      - Se nao existir e embeddings locais disponiveis, tenta criar automaticamente
+    """
+    logger.info(f"Carregando vectorstore com provedor: {embedding_provider}")
+
+    # --- 1. Resolver embeddings (sem recursao) -------------------------
     embeddings = None
-    
-    try:
-        if embedding_provider == "openai":
-            logger.info("🔧 Configurando embeddings OpenAI...")
-            try:
-                from langchain_openai import OpenAIEmbeddings
-                embeddings = OpenAIEmbeddings(
-                    openai_api_key=get_openai_api_key(),
-                    model="text-embedding-ada-002",
-                    max_retries=1,
-                    timeout=10,
-                    request_timeout=10
-                )
-                # Teste simples
-                _ = embeddings.embed_query("teste")
-                logger.info("✅ OpenAI embeddings funcionando corretamente")
-            except Exception as e:
-                error_msg = str(e).lower()
-                if any(keyword in error_msg for keyword in ["insufficient_quota", "429", "quota", "exceeded"]):
-                    logger.warning(f"🚨 OpenAI com problema de cota: {e}")
-                    logger.info("🔄 Tentando fallback para embeddings locais (free)...")
-                    return carregar_vectorstore_com_provider("free")
-                else:
-                    logger.error(f"❌ Erro OpenAI não relacionado à cota: {e}")
-                    raise e
-        elif embedding_provider in ["local", "free"]:
-            logger.info("🔧 Configurando embeddings locais (100% GRATUITO)...")
-            try:
-                # Usar o LLMManager para criar embeddings locais
-                llm_manager = create_llm_manager("deepseek", embedding_provider="local")
-                embeddings = llm_manager.get_embeddings()
-                # Teste simples
-                try:
-                    _ = embeddings.embed_query("teste-local")
-                except Exception:
-                    pass
-                logger.info("✅ Embeddings locais configurados com sucesso")
-            except Exception as e:
-                error_msg = str(e).lower()
-                logger.warning(f"⚠️ Embeddings locais falharam: {e}")
-                if embedding_provider == "local":
-                    # Fallback automatico para modo 'free'
-                    logger.info("🔄 Fallback automatico: tentando provider 'free' (local -> OpenAI)")
-                    return carregar_vectorstore_com_provider("free")
-                # Modo 'free' tambem falhou local: tentar OpenAI se houver chave
-                try:
-                    from langchain_openai import OpenAIEmbeddings
-                    embeddings = OpenAIEmbeddings(
-                        openai_api_key=get_openai_api_key(),
-                        model="text-embedding-ada-002",
-                        max_retries=0,
-                        timeout=5
-                    )
-                    vectorstore_path = DB_FAISS_PATH
-                    logger.info("⚠️ Usando embeddings OpenAI em modo de emergência (fallback do 'free')")
-                except Exception as e2:
-                    logger.error(f"❌ Fallback OpenAI também falhou: {e2}")
-                    raise Exception("❌ Não foi possível configurar embeddings. Instale sentence-transformers ou configure chave OpenAI.")
-    except Exception as e:
-        error_msg = str(e).lower()
-        if any(keyword in error_msg for keyword in ["insufficient_quota", "429", "quota", "exceeded"]):
-            logger.warning(f"🚨 Cota excedida: {e}")
-            if embedding_provider != "local":
-                logger.info("🔄 Tentando com embeddings locais...")
-                return carregar_vectorstore_com_provider("local")
-            else:
-                logger.error("❌ Todos os provedores de embeddings falharam")
-                raise Exception("❌ Sistema temporariamente indisponível devido a limitações da API.")
+    vectorstore_path = None
+
+    if embedding_provider in ("local", "free"):
+        embeddings = _criar_embeddings_local()
+        if embeddings is not None:
+            vectorstore_path = "vectorstore_local"
         else:
-            logger.error(f"❌ Erro não relacionado à cota: {e}")
-            # Tentar rota final: se estava no local, tente OpenAI; se estava no openai, tente local
-            try:
-                alt = "openai" if embedding_provider in ["local", "free"] else "local"
-                logger.info(f"🔄 Tentando provedor alternativo: {alt}")
-                return carregar_vectorstore_com_provider(alt)
-            except Exception:
-                raise Exception(f"Erro ao configurar embeddings: {str(e)}")
-    
-    # Tentar carregar o vectorstore
-    try:
-        if not os.path.exists(vectorstore_path):
-            logger.warning(f"⚠️ Vectorstore não encontrado em {vectorstore_path}")
-            if embedding_provider in ["local", "free"] and "local" in vectorstore_path:
-                logger.info("🚀 Criando vectorstore local automaticamente...")
-                if os.path.exists("relatorio_documentos.json"):
-                    try:
-                        sucesso = criar_vectorstore_local(embeddings)
-                        if sucesso:
-                            logger.info("✅ Vectorstore local criado com sucesso!")
-                        else:
-                            logger.error("❌ Falha ao criar vectorstore local")
-                            raise Exception("Falha na criação automática do vectorstore local")
-                    except Exception as e:
-                        logger.error(f"❌ Erro ao criar vectorstore local: {e}")
-                        if embedding_provider == "free":
-                            logger.info("🔄 Tentando fallback para vectorstore OpenAI...")
-                            return carregar_vectorstore_com_provider("openai")
-                        else:
-                            raise Exception(f"Erro ao criar vectorstore local: {str(e)}")
-                else:
-                    logger.error("❌ Arquivo relatorio_documentos.json não encontrado")
-                    raise Exception("❌ Dados necessários para criar vectorstore não encontrados")
-            else:
-                raise Exception(f"❌ Vectorstore não encontrado em {vectorstore_path}")
-        logger.info(f"📚 Carregando vectorstore de {vectorstore_path}...")
-        vectorstore = FAISS.load_local(vectorstore_path, embeddings, allow_dangerous_deserialization=True)
-        logger.info("✅ Vectorstore carregado com sucesso")
-        vectorstore._embedding_provider = embedding_provider
-        vectorstore._vectorstore_path = vectorstore_path
-        return vectorstore
-    except Exception as e:
-        logger.error(f"❌ Erro ao carregar vectorstore: {e}")
-        if "No such file or directory" in str(e) or "does not exist" in str(e):
-            raise Exception("❌ Base de conhecimento não encontrada. Execute o processo de indexação primeiro.")
+            logger.info("Tentando fallback para OpenAI...")
+            embeddings = _criar_embeddings_openai()
+            if embeddings is not None:
+                vectorstore_path = DB_FAISS_PATH
+    elif embedding_provider == "openai":
+        embeddings = _criar_embeddings_openai()
+        if embeddings is not None:
+            vectorstore_path = DB_FAISS_PATH
         else:
-            # Tentar provedor alternativo uma ultima vez
-            try:
-                alt = "openai" if embedding_provider in ["local", "free"] else "local"
-                logger.info(f"🔄 Tentando carregar vectorstore com provedor alternativo: {alt}")
-                return carregar_vectorstore_com_provider(alt)
-            except Exception:
-                raise Exception(f"❌ Erro ao carregar base de conhecimento: {str(e)}")
+            logger.info("Tentando fallback para embeddings locais...")
+            embeddings = _criar_embeddings_local()
+            if embeddings is not None:
+                vectorstore_path = "vectorstore_local"
+    else:
+        logger.warning(f"Provedor '{embedding_provider}' nao reconhecido, usando local")
+        embeddings = _criar_embeddings_local()
+        if embeddings is not None:
+            vectorstore_path = "vectorstore_local"
+
+    if embeddings is None:
+        raise Exception(
+            "Nao foi possivel configurar embeddings. "
+            "Instale sentence-transformers ou configure chave OpenAI."
+        )
+
+    # --- 2. Carregar ou criar vectorstore ------------------------------
+    if os.path.exists(vectorstore_path):
+        logger.info(f"Carregando vectorstore de {vectorstore_path}...")
+        try:
+            vectorstore = FAISS.load_local(
+                vectorstore_path, embeddings,
+                allow_dangerous_deserialization=True,
+            )
+            logger.info("Vectorstore carregado com sucesso")
+            vectorstore._embedding_provider = embedding_provider
+            vectorstore._vectorstore_path = vectorstore_path
+            return vectorstore
+        except Exception as exc:
+            logger.error(f"Erro ao carregar vectorstore: {exc}")
+            raise Exception(f"Erro ao carregar base de conhecimento: {exc}")
+
+    # Vectorstore nao existe -- tentar criar automaticamente (so local)
+    if "local" not in vectorstore_path:
+        raise Exception(
+            f"Vectorstore nao encontrado em {vectorstore_path}. "
+            "Execute a reindexacao pela barra lateral."
+        )
+
+    logger.warning(f"Vectorstore nao encontrado em {vectorstore_path}")
+
+    if not os.path.exists("relatorio_documentos.json"):
+        raise Exception(
+            "Arquivo relatorio_documentos.json nao encontrado. "
+            "Clique em Reindexar Base na barra lateral."
+        )
+
+    if not _adquirir_lock_reindexacao():
+        raise Exception(
+            "Criacao do vectorstore em andamento em outra instancia. "
+            "Recarregue a pagina em alguns minutos."
+        )
+
+    try:
+        logger.info("Criando vectorstore local automaticamente...")
+        sucesso = criar_vectorstore_local(embeddings)
+        if not sucesso:
+            raise Exception("Falha na criacao automatica do vectorstore local")
+        logger.info("Vectorstore local criado com sucesso!")
+    except Exception as exc:
+        logger.error(f"Erro ao criar vectorstore local: {exc}")
+        raise
+    finally:
+        _liberar_lock_reindexacao()
+
+    vectorstore = FAISS.load_local(
+        vectorstore_path, embeddings,
+        allow_dangerous_deserialization=True,
+    )
+    vectorstore._embedding_provider = embedding_provider
+    vectorstore._vectorstore_path = vectorstore_path
+    return vectorstore
 
 def _listar_md_em_dados_antt(diretorio: str = "dados_antt") -> dict:
     """
@@ -1173,6 +1178,50 @@ def detectar_documentos_novos(diretorio: str = "dados_antt",
     return novos_md + pdfs_pendentes
 
 
+_LOCK_REINDEXACAO = os.path.join(
+    os.path.dirname(os.path.abspath(__file__)), ".reindexando.lock"
+)
+
+
+def _adquirir_lock_reindexacao() -> bool:
+    """Tenta criar arquivo de lock para evitar reindexacoes simultaneas.
+
+    Returns:
+        True se o lock foi adquirido, False se ja existe outra execucao.
+    """
+    import time as _time
+
+    if os.path.exists(_LOCK_REINDEXACAO):
+        try:
+            mtime = os.path.getmtime(_LOCK_REINDEXACAO)
+            idade_segundos = _time.time() - mtime
+            if idade_segundos > 3600:
+                logger.warning(
+                    "Lock de reindexacao encontrado mas com mais de 1h "
+                    "(possivelmente orfao). Removendo."
+                )
+                os.remove(_LOCK_REINDEXACAO)
+            else:
+                return False
+        except OSError:
+            return False
+
+    try:
+        with open(_LOCK_REINDEXACAO, "w") as f:
+            f.write(str(os.getpid()))
+        return True
+    except OSError:
+        return False
+
+
+def _liberar_lock_reindexacao():
+    """Remove o arquivo de lock."""
+    try:
+        os.remove(_LOCK_REINDEXACAO)
+    except OSError:
+        pass
+
+
 def reindexar_base_completa(embedding_provider: str = "local") -> tuple:
     """
     Pipeline completo de reindexacao:
@@ -1181,6 +1230,9 @@ def reindexar_base_completa(embedding_provider: str = "local") -> tuple:
     3. Remove vectorstore antigo
     4. Recria vectorstore com embeddings + OCR + deduplicacao
 
+    Usa lock de arquivo para impedir execucoes simultaneas (comum
+    quando o Streamlit dispara multiplos reruns).
+
     Args:
         embedding_provider: Provedor de embeddings a utilizar.
 
@@ -1188,6 +1240,22 @@ def reindexar_base_completa(embedding_provider: str = "local") -> tuple:
         tuple (sucesso: bool, mensagem: str)
     """
     import shutil
+
+    if not _adquirir_lock_reindexacao():
+        logger.warning("Reindexacao ja em andamento (lock ativo). Ignorando.")
+        return False, "Reindexação já em andamento. Aguarde a conclusão."
+
+    try:
+        return _reindexar_base_impl(embedding_provider)
+    finally:
+        _liberar_lock_reindexacao()
+
+
+def _reindexar_base_impl(embedding_provider: str) -> tuple:
+    """Implementacao interna do pipeline de reindexacao (protegida por lock)."""
+    import shutil
+
+    n_pdfs = 0
 
     # 1) Converter PDFs que ainda nao tem .md
     try:
@@ -1219,7 +1287,7 @@ def reindexar_base_completa(embedding_provider: str = "local") -> tuple:
         embeddings = llm_manager.get_embeddings()
         sucesso = criar_vectorstore_local(embeddings)
         if sucesso:
-            msg_final = f"Reindexacao concluida: {len(docs)} documentos catalogados"
+            msg_final = f"Reindexação concluída: {len(docs)} documentos catalogados"
             if n_pdfs > 0:
                 msg_final += f" ({n_pdfs} PDF(s) convertido(s))"
             return True, msg_final
@@ -2180,6 +2248,38 @@ def _extrair_texto_imagem(imagem_pil, url=""):
     return texto_final
 
 
+_OCR_MAX_WORKERS = min(4, (os.cpu_count() or 2))
+
+
+def _processar_imagem_ocr(url_e_hash: tuple) -> tuple:
+    """Processa uma unica imagem: verifica cache, baixa e faz OCR.
+
+    Funcao auxiliar projetada para execucao em ThreadPoolExecutor.
+    O Tesseract roda como subprocesso externo, portanto nao e
+    bloqueado pelo GIL do Python.
+
+    Args:
+        url_e_hash: Tupla (url, url_hash).
+
+    Returns:
+        Tupla (url_hash, texto_extraido) ou (url_hash, None) em caso de falha.
+    """
+    url, url_hash = url_e_hash
+
+    texto_cache = _obter_cache_ocr(url_hash)
+    if texto_cache is not None:
+        logger.info(f"Cache OCR encontrado para {url_hash}")
+        return (url_hash, texto_cache)
+
+    imagem = _baixar_imagem(url)
+    if imagem is None:
+        return (url_hash, None)
+
+    texto_extraido = _extrair_texto_imagem(imagem, url)
+    _salvar_cache_ocr(url_hash, texto_extraido)
+    return (url_hash, texto_extraido)
+
+
 def _enriquecer_imagens_documento(conteudo_md):
     """
     Substitui referencias de imagem (![...](url)) por texto extraido via OCR.
@@ -2191,6 +2291,10 @@ def _enriquecer_imagens_documento(conteudo_md):
     Usa cache local (dados_antt/.ocr_cache/) para evitar re-download e
     re-processamento em re-indexacoes.
 
+    Imagens sem cache sao processadas em paralelo usando ThreadPoolExecutor
+    (ate _OCR_MAX_WORKERS threads). O Tesseract roda como subprocesso
+    nativo, portanto o paralelismo e real mesmo com o GIL.
+
     Args:
         conteudo_md (str): Conteudo markdown do documento.
 
@@ -2198,6 +2302,7 @@ def _enriquecer_imagens_documento(conteudo_md):
         str: Conteudo markdown enriquecido (imagens substituidas por texto).
     """
     import hashlib
+    from concurrent.futures import ThreadPoolExecutor, as_completed
 
     padrao_imagem = re.compile(
         r"!\[([^\]]*)\]\((https?://[^\s)]+\.(?:png|jpg|jpeg|gif|svg))\)",
@@ -2210,28 +2315,50 @@ def _enriquecer_imagens_documento(conteudo_md):
 
     logger.info(f"Encontradas {len(matches)} imagens para enriquecimento OCR")
 
+    urls_unicas: dict = {}
+    for match in matches:
+        url = match.group(2)
+        url_hash = hashlib.sha256(url.encode()).hexdigest()[:16]
+        if url_hash not in urls_unicas:
+            urls_unicas[url_hash] = url
+
+    resultados_ocr: dict = {}
+
+    tarefas = [(url, h) for h, url in urls_unicas.items()]
+    n_workers = min(_OCR_MAX_WORKERS, len(tarefas))
+
+    if n_workers <= 1:
+        for url, h in tarefas:
+            h_out, texto = _processar_imagem_ocr((url, h))
+            resultados_ocr[h_out] = texto
+    else:
+        logger.info(
+            f"Processando {len(tarefas)} imagens em paralelo "
+            f"({n_workers} workers)"
+        )
+        with ThreadPoolExecutor(max_workers=n_workers) as executor:
+            futuros = {
+                executor.submit(_processar_imagem_ocr, (url, h)): h
+                for url, h in tarefas
+            }
+            for futuro in as_completed(futuros):
+                try:
+                    h_out, texto = futuro.result()
+                    resultados_ocr[h_out] = texto
+                except Exception as exc:
+                    h_falha = futuros[futuro]
+                    logger.warning(f"OCR falhou para {h_falha}: {exc}")
+                    resultados_ocr[h_falha] = None
+
     resultado = conteudo_md
     substituicoes = 0
 
     for match in reversed(matches):
         url = match.group(2)
         url_hash = hashlib.sha256(url.encode()).hexdigest()[:16]
+        texto_extraido = resultados_ocr.get(url_hash)
 
-        # Verificar cache
-        texto_cache = _obter_cache_ocr(url_hash)
-        if texto_cache is not None:
-            logger.info(f"Cache OCR encontrado para {url_hash}")
-            texto_extraido = texto_cache
-        else:
-            # Baixar e processar
-            imagem = _baixar_imagem(url)
-            if imagem is None:
-                continue
-
-            texto_extraido = _extrair_texto_imagem(imagem, url)
-            _salvar_cache_ocr(url_hash, texto_extraido)
-
-        if texto_extraido.strip():
+        if texto_extraido and texto_extraido.strip():
             bloco = f"\n{texto_extraido}\n"
             resultado = resultado[:match.start()] + bloco + resultado[match.end():]
             substituicoes += 1
@@ -3328,7 +3455,7 @@ def interface_usuario_unificada():
 
         with btn_col_b:
             if st.button("Reindexar Base", use_container_width=True,
-                          help="Regenera o catalogo e reconstroi o vectorstore com todos os documentos de dados_antt/"):
+                          help="Regenera o catálogo e reconstrói o vectorstore com todos os documentos de dados_antt/"):
                 st.session_state["_reindexando"] = True
                 st.rerun()
 
@@ -3336,10 +3463,10 @@ def interface_usuario_unificada():
             "Limpar Cache OCR e Reindexar",
             use_container_width=True,
             help=(
-                "Remove todo o cache de OCR e forca a re-extracao "
+                "Remove todo o cache de OCR e força a re-extração "
                 "das imagens com o pipeline melhorado (upscale, "
-                "contraste, correcao de decimais). Usar quando "
-                "tabelas tiverem dados numericos incorretos."
+                "contraste, correção de decimais). Usar quando "
+                "tabelas tiverem dados numéricos incorretos."
             ),
         ):
             st.session_state["_limpar_ocr_e_reindexar"] = True
@@ -3359,7 +3486,7 @@ def interface_usuario_unificada():
                     pass
             st.info(
                 f"Cache OCR limpo ({len(cache_files)} arquivo(s) removidos). "
-                "Reindexando com re-extracao..."
+                "Reindexando com re-extração..."
             )
             st.session_state["_reindexando"] = True
 
