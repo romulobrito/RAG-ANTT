@@ -843,11 +843,164 @@ def _score_irmao(documento: Document) -> float:
     ):
         score += 1.5
 
+    fonte = classificar_fonte_qualidade(documento.page_content, metadados)
+    if fonte == "estruturada":
+        score += 2.0
+    elif fonte == "ocr":
+        score -= 1.0
+
     secao = normalizar_para_busca(str(metadados.get("secao", "")))
     if "anexo" in secao or "tabela" in secao or "quadro" in secao:
         score += 1.0
 
     return score
+
+
+# ---------------------------------------------------------------------------
+# Qualidade da fonte (tabela auxiliar estruturada vs OCR)
+# ---------------------------------------------------------------------------
+
+# Marcadores genericos: nao dependem de dominio (IRI, pavimento, etc.).
+_MARCADORES_ESTRUTURADA = (
+    "tabelas auxiliares estruturadas",
+    "transcricao estruturada",
+    "transcricao)",
+)
+_MARCADORES_OCR = (
+    "anexo ocr",
+    "## anexo ocr",
+)
+
+
+def classificar_fonte_qualidade(
+    texto: str,
+    metadados: Optional[Dict[str, object]] = None,
+) -> str:
+    """
+    Classifica a procedencia de um chunk para ranqueamento e citacao.
+
+    A classificacao e estrutural: detecta o separador das tabelas auxiliares
+    mescladas na indexacao e o cabecalho injetado pelo enriquecimento OCR.
+    Nao usa listas de parametros ou assuntos regulatorios.
+
+    Args:
+        texto: Conteudo do chunk (com ou sem prefixo contextual).
+        metadados: Metadados opcionais; se ja houver `fonte_qualidade`, ela e
+            respeitada.
+
+    Returns:
+        "estruturada", "ocr" ou "documento".
+    """
+    metadados = metadados or {}
+    gravada = str(metadados.get("fonte_qualidade") or "").strip().lower()
+    if gravada in ("estruturada", "ocr", "documento"):
+        return gravada
+
+    secao = normalizar_para_busca(str(metadados.get("secao", "")))
+    conteudo = normalizar_para_busca(texto or "")
+
+    if any(m in conteudo for m in _MARCADORES_ESTRUTURADA):
+        return "estruturada"
+    # Secao herdada de um anexo estruturado mesclado (sem o separador em cada
+    # subchunk): o titulo do auxiliar costuma abrir com "Anexo - ...".
+    if "anexo -" in secao and "ocr" not in secao and chunk_tem_tabela(
+        Document(page_content=texto or "", metadata={})
+    ):
+        # Distingue anexos tipograficos limpos do corpo legal: so promove a
+        # estruturada quando ha tabela markdown tipica das transcrições.
+        if "| ---" in (texto or "") or "|---|" in (texto or "").replace(" ", ""):
+            return "estruturada"
+
+    if any(m in secao or m in conteudo for m in _MARCADORES_OCR):
+        return "ocr"
+
+    return "documento"
+
+
+def _chave_norma(documento: Document) -> str:
+    """Agrupa chunks da mesma norma (caminho, ou tipo+numero+ano)."""
+    metadados = documento.metadata or {}
+    caminho = str(metadados.get("caminho", "")).strip()
+    if caminho:
+        return caminho
+    return "|".join(
+        [
+            str(metadados.get("tipo_documento", "")),
+            str(metadados.get("numero", "")),
+            str(metadados.get("ano", "")),
+        ]
+    )
+
+
+def priorizar_fontes_estruturadas(
+    documentos: Sequence[Document],
+) -> List[Document]:
+    """
+    Reordena o contexto para que tabelas auxiliares vençam o OCR da mesma norma.
+
+    Quando uma norma tem chunks estruturados e chunks de OCR bruto, os
+    estruturados sobem e os de OCR descem. Isso evita que o modelo preencha
+    fases a partir de grades OCR ruidosas quando ja existe transcricao limpa.
+    Chunks de outras normas e texto legal ("documento") mantem a ordem relativa.
+
+    Args:
+        documentos: Lista ja ranqueada.
+
+    Returns:
+        Nova lista com a mesma cardinalidade, reordenada por qualidade de fonte
+        dentro de cada norma, com `fonte_qualidade` preenchida nos metadados.
+    """
+    if not documentos:
+        return []
+
+    anotados: List[Document] = []
+    for documento in documentos:
+        copia = _copiar_documento(documento)
+        fonte = classificar_fonte_qualidade(copia.page_content, copia.metadata)
+        copia.metadata["fonte_qualidade"] = fonte
+        anotados.append(copia)
+
+    normas_com_estruturada = {
+        _chave_norma(doc)
+        for doc in anotados
+        if doc.metadata.get("fonte_qualidade") == "estruturada"
+    }
+
+    def chave_ordem(indice_e_doc: Tuple[int, Document]) -> Tuple[int, int, int]:
+        indice, documento = indice_e_doc
+        fonte = str(documento.metadata.get("fonte_qualidade", "documento"))
+        norma = _chave_norma(documento)
+        # Dentro da mesma norma: estruturada (0) < documento (1) < ocr (2) se
+        # houver estruturada; caso contrario ocr nao e penalizado alem do
+        # empate com documento.
+        if fonte == "estruturada":
+            prioridade_fonte = 0
+        elif fonte == "ocr" and norma in normas_com_estruturada:
+            prioridade_fonte = 2
+        else:
+            prioridade_fonte = 1
+        return (prioridade_fonte, indice, 0)
+
+    reordenados = [
+        doc for _, doc in sorted(enumerate(anotados), key=chave_ordem)
+    ]
+
+    n_estruturada = sum(
+        1 for d in reordenados if d.metadata.get("fonte_qualidade") == "estruturada"
+    )
+    n_ocr_rebaixado = sum(
+        1
+        for d in reordenados
+        if d.metadata.get("fonte_qualidade") == "ocr"
+        and _chave_norma(d) in normas_com_estruturada
+    )
+    if n_estruturada and n_ocr_rebaixado:
+        logger.info(
+            f"Preferencia de fonte: {n_estruturada} chunk(s) estruturado(s) "
+            f"acima de {n_ocr_rebaixado} chunk(s) OCR da mesma norma"
+        )
+
+    return reordenados
 
 
 def expandir_com_irmaos_tabulares(

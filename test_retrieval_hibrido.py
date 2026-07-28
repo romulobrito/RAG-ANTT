@@ -22,10 +22,12 @@ from retrieval_hibrido import (
     IndiceLexical,
     chave_documento,
     chunk_tem_tabela,
+    classificar_fonte_qualidade,
     contextualizar_chunks,
     expandir_com_irmaos_tabulares,
     fundir_rrf,
     normalizar_para_busca,
+    priorizar_fontes_estruturadas,
     tokenizar,
 )
 
@@ -365,3 +367,56 @@ def test_busca_lexical_com_consulta_sem_tokens_uteis():
     """Consulta formada apenas por stopwords nao deve gerar excecao."""
     indice = IndiceLexical([_documento("a.md", 1, CHUNK_TABELA)])
     assert indice.buscar("os de para a", k=5) == []
+
+
+# ---------------------------------------------------------------------------
+# Preferencia de fonte estruturada sobre OCR
+# ---------------------------------------------------------------------------
+
+
+def test_classifica_tabela_auxiliar_como_estruturada():
+    """O separador de mesclagem e o sinal canonico de transcricao limpa."""
+    texto = (
+        "## Tabelas auxiliares estruturadas (transcricao) - INM-34\n\n"
+        "| Pista | Limite |\n| --- | --- |\n| Principal | 3,5 |"
+    )
+    assert classificar_fonte_qualidade(texto, {}) == "estruturada"
+
+
+def test_classifica_anexo_ocr_como_ocr():
+    """Cabecalhos injetados pelo enriquecimento de imagem sao OCR."""
+    texto = "## Anexo OCR - 1871662.png\n\nPrincipal 12mm 7mm"
+    assert classificar_fonte_qualidade(
+        texto, {"secao": "Anexo OCR - 1871662.png"}
+    ) == "ocr"
+
+
+def test_priorizar_sobe_estruturada_e_rebaixa_ocr_da_mesma_norma():
+    """
+    Na mesma norma, a tabela auxiliar deve preceder o OCR no contexto.
+
+    E a defesa contra o modelo preencher fases a partir de grades OCR
+    ruidosas quando ja existe transcricao limpa.
+    """
+    caminho = "dados_antt/INM/2024/INM-00000034-2024.md"
+    ocr = Document(
+        page_content="## Anexo OCR - 1.png\n12mm 7mm",
+        metadata={"caminho": caminho, "chunk": 1, "secao": "Anexo OCR - 1.png"},
+    )
+    estruturada = Document(
+        page_content=(
+            "## Tabelas auxiliares estruturadas (transcricao)\n\n"
+            "| Pista | Limite |\n| --- | --- |\n| Principal | 12 mm |"
+        ),
+        metadata={"caminho": caminho, "chunk": 2},
+    )
+    legal = Document(
+        page_content="Art. 2 Definicões.",
+        metadata={"caminho": caminho, "chunk": 3},
+    )
+
+    ordenados = priorizar_fontes_estruturadas([ocr, legal, estruturada])
+
+    assert ordenados[0].metadata["fonte_qualidade"] == "estruturada"
+    assert ordenados[-1].metadata["fonte_qualidade"] == "ocr"
+    assert "12 mm" in ordenados[0].page_content

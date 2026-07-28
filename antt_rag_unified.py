@@ -61,11 +61,13 @@ from retrieval_hibrido import (
     BM25_DISPONIVEL,
     chave_documento,
     chunk_tem_tabela,
+    classificar_fonte_qualidade,
     contextualizar_chunks,
     expandir_com_irmaos_tabulares,
     fundir_rrf,
     limpar_cache_indice_lexical,
     obter_indice_lexical,
+    priorizar_fontes_estruturadas,
 )
 
 from ui.theme import (
@@ -419,33 +421,35 @@ TEMPLATE_PARAMETROS_TECNICOS_DEEPSEEK = """
 ANALISE TECNICA: "{question}"
 
 OBJETIVO: Responder com os limites/valores normativos presentes no contexto, em qualquer
-disciplina (pavimento, sinalizacao, estruturas, seguranca, etc.).
+disciplina coberta pelos documentos fornecidos.
 
 REGRAS DE FUNDAMENTACAO (OBRIGATORIAS):
 - Resposta direta primeiro: se o contexto tiver limites ou tabelas, apresente-os no inicio.
 - NUNCA diga que nao ha valores/limites se o contexto contiver esses dados.
-- Pergunta por equipamento ou metodo de ensaio: identifique o parametro normativo correspondente
-  (ex: FWD -> Dadm; perfilometro -> IRI) e responda com os limites desse parametro.
+- Pergunta por equipamento, metodo ou sigla: identifique no contexto o parametro normativo
+  correspondente e responda com os limites desse parametro (sem inventar a correspondencia).
 - Lacuna PONTUAL apenas para campos especificos ausentes; entregue o que existir no contexto.
 - NAO fabrique numeros, unidades, espacamentos, exclusoes ou frequencias sem evidencia textual.
 - Omita secoes do template sem evidencia; nao preencha com suposicoes.
+- Nao atribua escopo por inferencia; so declare restricoes enunciadas no contexto.
 
 ATENCAO A TABELAS:
 - Os documentos podem conter TABELAS em formato markdown (linhas delimitadas por |) ou blocos
-  tabulares em texto (OCR). Extraia TODOS os valores numericos: limites, faixas, percentuais,
-  unidades (m/km, mm, %, etc.). Preserve dimensoes (fase, pista, faixa, categoria, VDM).
+  tabulares em texto (OCR). Extraia TODOS os valores numericos: limites, faixas, percentuais
+  e unidades. Preserve as dimensoes que o contexto usar (fase, categoria, faixa, periodo, etc.).
 - Inclua na resposta os valores exatos como aparecem no contexto.
+- Prefira valores de tabelas auxiliares/transcricoes estruturadas quando houver conflito com OCR.
 
 ESTRUTURA DA RESPOSTA:
 0. **RESPOSTA DIRETA** - limites/valores solicitados (tabela ou lista)
 1. **PARAMETROS IDENTIFICADOS** (somente com evidencia no contexto)
    Para cada parametro:
    - Nome do parametro
-   - Valor/limite numerico exato (ex: 2,7 m/km, 7mm, >0,2)
+   - Valor/limite numerico exato
    - Unidade de medida
-   - Condicoes de aplicacao (ex: pista principal vs marginal, faixa de VDM)
+   - Condicoes de aplicacao (dimensoes e escopo que constarem no contexto)
    - Periodicidade (se constar no contexto)
-   - Fonte: [DOC] [NUM]/[ANO], Art./Anexo
+   - Fonte: tipo, numero/ano e Art./Anexo (sem nome de arquivo OCR)
 
 2. **METODOLOGIAS DE VERIFICACAO** (somente se constar no contexto)
    - Equipamento ou metodo
@@ -1536,6 +1540,9 @@ def criar_vectorstore_local(embeddings, destino: str = "vectorstore_local"):
                 meta["chunk"] = idx + 1
                 meta["total_chunks"] = total
                 meta.update(meta_extra)
+                meta["fonte_qualidade"] = classificar_fonte_qualidade(
+                    chunk_txt, meta
+                )
                 splits.append(Document(page_content=chunk_txt, metadata=meta))
 
         logger.info(f"Criados {len(splits)} chunks estruturais")
@@ -1629,11 +1636,11 @@ REGRAS DE FOCO, FUNDAMENTACAO E COMPLETUDE (OBRIGATORIAS - TODOS OS DOCUMENTOS):
   "lacuna" se o contexto contiver esses dados (mesmo em tabela markdown, texto OCR ou anexo).
 
 2) EQUIVALENCIA TERMINOLOGICA (GERAL)
-- A pergunta pode citar equipamento (ex: FWD, perfilometro), metodo de ensaio, sigla ou nome
-  coloquial. Identifique o PARAMETRO NORMATIVO correspondente no contexto (ex: Dadm, IRI, IFI)
-  e responda com os LIMITES/VALORES desse parametro.
-- Deixe claro a relacao quando util: "O ensaio FWD verifica a deflexao; os limites sao dados
-  pela Deflexao Admissivel (Dadm), conforme tabela abaixo."
+- A pergunta pode citar equipamento, metodo de ensaio, sigla ou nome coloquial. Identifique no
+  contexto o PARAMETRO NORMATIVO correspondente e responda com os LIMITES/VALORES desse
+  parametro (nao invente a correspondencia fora do contexto).
+- Quando util, deixe a relacao explicita: ensaio/metodo citado na pergunta -> parametro e
+  limites que o contexto atribui a ele.
 
 3) LACUNAS PONTUAIS (NAO GLOBAIS)
 - Declare lacuna SOMENTE para campos especificos ausentes no contexto (ex: "periodicidade nao
@@ -1641,24 +1648,46 @@ REGRAS DE FOCO, FUNDAMENTACAO E COMPLETUDE (OBRIGATORIAS - TODOS OS DOCUMENTOS):
 - Se parte da resposta existir no contexto, entregue essa parte com confianca. Nao invalide
   a resposta inteira por campos secundarios faltantes.
 - NUNCA contradiga a propria resposta (ex: dizer que nao ha dados e em seguida listar tabela).
+- Se uma fase, coluna ou criterio estiver marcado como "nao especificado" no contexto, diga
+  isso explicitamente. NAO invente o valor por analogia com outra fase.
 
 4) FIDELIDADE AO CONTEXTO
 - Preencha SOMENTE campos com evidencia textual explicita nos documentos fornecidos.
 - NAO invente detalhes operacionais (espacamento, exclusoes, equipamentos auxiliares,
   frequencias, tolerancias) sem trecho correspondente no contexto.
 - Omita secoes do template quando nao houver evidencia; nao preencha com suposicoes.
+- Nao atribua escopo (tipo de obra, modalidade, publico-alvo) por inferencia: so declare
+  restricoes que o proprio contexto enuncie.
 
 5) TABELAS E VALORES NUMERICOS
 - Tabelas markdown (linhas com |) e blocos tabulares em texto: extraia TODOS os valores,
-  limites, faixas, unidades e criterios; preserve dimensoes (fase, pista, VDM, categoria, etc.).
-- Quando a norma define valores por fase, pista, faixa, classe ou periodo, apresente CADA
+  limites, faixas, unidades e criterios; preserve dimensoes (fase, categoria, faixa, periodo,
+  classe, etc.).
+- Quando a norma define valores por fase, categoria, faixa, classe ou periodo, apresente CADA
   combinacao separadamente.
-- Nao generalize multiplos valores em um unico limite (ex: nao dizer "3,5 para todos" se o
-  contexto traz 2,7, 3,0 e 3,5 em contextos distintos).
+- Nao generalize multiplos valores em um unico limite quando o contexto traz valores distintos
+  em contextos distintos.
+- Na tabela-resumo inicial, inclua os LIMITES NUMERICOS (nao apenas a periodicidade ou o
+  metodo de levantamento).
 
-6) ESCOPO DA PERGUNTA
+6) COMPLETUDE QUANDO A PERGUNTA PEDE O CONJUNTO
+- Se a pergunta pedir "parametros", "limites", "valores", "criterios", "prazos", "indicadores"
+  ou o conjunto de regras de um tema, liste TODOS os itens desse tema presentes no contexto
+  (incluindo itens qualitativos), nao apenas um subconjunto.
+- Se o contexto trouxer metodologias de verificacao/levantamento (equipamento, extensao,
+  segmento, frequencia), inclua-as apos os limites, de forma resumida.
+- Se uma definicao do corpo da norma restringir o escopo de um item, declare esse escopo
+  junto ao valor.
+
+7) PRIORIDADE DE FONTE E CITACAO
+- Quando o mesmo documento aparecer em versao estruturada (tabela auxiliar / transcricao)
+  e em versao OCR de imagem, PREFIRA os valores da versao estruturada.
+- Cite a norma de forma legivel: tipo, numero e ano (ex.: "INM 18/2023, Anexo I").
+  NUNCA cite nomes de arquivo de imagem OCR como fonte principal ao usuario.
+- Use OCR apenas para complementar campos que a versao estruturada nao cobrir.
+
+8) ESCOPO DA PERGUNTA
 - Responda exatamente o que foi perguntado; contexto complementar so depois da resposta direta.
-- Nao inclua parametros, processos ou assuntos nao solicitados.
 - Demandas ou processos distintos nos trechos: apresente separadamente; nao funda em narrativa unica.
 """
 
@@ -1740,6 +1769,52 @@ def _dividir_por_estrutura(texto, chunk_max=1500, chunk_overlap=200):
             resultado.extend(sub_chunks)
 
     return resultado
+
+
+def _aplicar_limite_preferindo_qualidade(documentos, k):
+    """
+    Limita a k chunks preservando prioritarios e fontes estruturadas.
+
+    Ordem de preservacao: prioritarios, depois fonte_qualidade=estruturada,
+    depois os demais na ordem corrente. Evita que a injecao de tabelas
+    auxiliares seja descartada pelo teto do LLM em favor de OCR ruidoso.
+
+    Args:
+        documentos: Lista ja reordenada.
+        k: Limite maximo de chunks.
+
+    Returns:
+        Sublista com no maximo k documentos.
+    """
+    if not documentos or len(documentos) <= k:
+        return list(documentos)
+
+    prioritarios = []
+    estruturados = []
+    demais = []
+    vistos = set()
+
+    for doc in documentos:
+        chave = chave_documento(doc)
+        if chave in vistos:
+            continue
+        vistos.add(chave)
+        fonte = classificar_fonte_qualidade(doc.page_content, doc.metadata)
+        if doc.metadata.get("prioritario"):
+            prioritarios.append(doc)
+        elif fonte == "estruturada" or doc.metadata.get("injetado_auxiliar"):
+            estruturados.append(doc)
+        else:
+            demais.append(doc)
+
+    selecionados = prioritarios + estruturados
+    if len(selecionados) >= k:
+        # Ainda assim cabe algum contexto legal/OCR: reserva 20% do orcamento.
+        reserva = max(2, k // 5)
+        base = selecionados[: max(0, k - reserva)]
+        return base + demais[: k - len(base)]
+
+    return selecionados + demais[: k - len(selecionados)]
 
 
 def _aplicar_limite_k_preservando_prioritarios(documentos, k):
@@ -2047,6 +2122,9 @@ def _carregar_documento_markdown(caminho, tipo, nome_tipo, numero, ano):
             }
         )
         metadados.update(meta_extra)
+        metadados["fonte_qualidade"] = classificar_fonte_qualidade(
+            texto_chunk, metadados
+        )
         documentos.append(Document(page_content=texto_chunk, metadata=metadados))
 
     return documentos
@@ -3549,6 +3627,13 @@ def reranking_documentos(query, documentos, scores_base=None):
         if chunk_tem_tabela(doc):
             score += 3.0
 
+        # Preferencia estrutural: tabela auxiliar limpa vence OCR da mesma norma.
+        fonte = classificar_fonte_qualidade(doc.page_content, metadados)
+        if fonte == "estruturada":
+            score += 5.0
+        elif fonte == "ocr":
+            score -= 2.0
+
         # Boost forte para documentos priorizados (referencia explicita na query)
         caminho = metadados.get("caminho", "")
         if caminho in caminhos_prioritarios or metadados.get("prioritario"):
@@ -3746,7 +3831,130 @@ def pesquisar_documentos(query, vectorstore, k=16, tipo_documento=None, ano=None
                 max_total=min(_MAX_IRMAOS_EXPANSAO, folga),
             )
 
+        # Tabelas auxiliares do disco (versao atual) entram sem exigir reindex.
+        resultados_finais = _injetar_tabelas_auxiliares_do_disco(resultados_finais)
+
+        # Depois da expansao: se a mesma norma trouxe tabela auxiliar limpa e
+        # OCR bruto, a estruturada sobe no contexto enviado ao modelo.
+        resultados_finais = priorizar_fontes_estruturadas(resultados_finais)
+
+        # Respeita o teto do LLM apos injecao, preservando estruturadas.
+        if len(resultados_finais) > _MAX_CHUNKS_LLM:
+            resultados_finais = _aplicar_limite_preferindo_qualidade(
+                resultados_finais, _MAX_CHUNKS_LLM
+            )
+
     return resultados_finais
+
+def _injetar_tabelas_auxiliares_do_disco(
+    documentos: list,
+    max_normas: int = 3,
+    max_chunks_por_norma: int = 12,
+) -> list:
+    """
+    Injeta do disco as tabelas auxiliares das normas ja presentes no resultado.
+
+    Permite que uma transcricao atualizada em dados_antt/tabelas_auxiliares/
+    entre no contexto sem reindexar o FAISS inteiro. Os chunks injetados sao
+    marcados como fonte_qualidade=estruturada e injetado_auxiliar=True.
+
+    Args:
+        documentos: Resultado da busca/expansao.
+        max_normas: Quantas normas distintas do topo podem receber injecao.
+        max_chunks_por_norma: Teto de chunks auxiliares por norma.
+
+    Returns:
+        Lista com os auxiliares no inicio, seguida dos documentos originais
+        (sem deduplicar por conteudo; a priorizacao posterior reordena).
+    """
+    if not documentos:
+        return []
+
+    normas_ordenadas = []
+    for doc in documentos:
+        meta = doc.metadata or {}
+        tipo = str(meta.get("tipo_documento") or "")
+        numero = str(meta.get("numero") or "")
+        ano = str(meta.get("ano") or "")
+        if not (tipo and numero and ano):
+            continue
+        chave = (tipo, numero.lstrip("0") or numero, ano)
+        if chave not in normas_ordenadas:
+            normas_ordenadas.append(chave)
+
+    injetados = []
+    for tipo, numero, ano in normas_ordenadas[:max_normas]:
+        caminhos = _listar_tabelas_auxiliares(tipo, numero, ano)
+        if not caminhos:
+            continue
+
+        # Reconstroi o bloco auxiliar como se tivesse sido mesclado na indexacao.
+        blocos = []
+        for caminho_aux in caminhos:
+            try:
+                with open(caminho_aux, "r", encoding="utf-8") as f:
+                    texto_aux = _remover_frontmatter_yaml(f.read()).strip()
+            except OSError as exc:
+                logger.warning(f"Falha ao injetar auxiliar {caminho_aux}: {exc}")
+                continue
+            if not texto_aux:
+                continue
+            nome_slug = os.path.basename(caminho_aux).replace(".md", "")
+            blocos.append(
+                f"{_SEPARADOR_TABELAS_AUX} - {nome_slug}\n\n{texto_aux}"
+            )
+
+        if not blocos:
+            continue
+
+        caminho_pai = ""
+        for doc in documentos:
+            meta = doc.metadata or {}
+            if (
+                str(meta.get("tipo_documento") or "") == tipo
+                and str(meta.get("numero") or "").lstrip("0") == numero.lstrip("0")
+                and str(meta.get("ano") or "") == ano
+            ):
+                caminho_pai = str(meta.get("caminho") or "")
+                break
+
+        meta_base = {
+            "tipo_documento": tipo,
+            "nome_tipo": tipo,
+            "numero": str(numero).zfill(8),
+            "ano": ano,
+            "caminho": caminho_pai or caminhos[0],
+            "injetado_auxiliar": True,
+        }
+        chunks = _dividir_por_estrutura("\n\n".join(blocos))
+        contextualizados = contextualizar_chunks(chunks, meta_base)
+        for idx, (texto, meta_extra) in enumerate(
+            contextualizados[:max_chunks_por_norma]
+        ):
+            meta = meta_base.copy()
+            meta.update(meta_extra)
+            meta["chunk"] = idx + 1
+            meta["total_chunks"] = len(contextualizados)
+            meta["fonte_qualidade"] = "estruturada"
+            injetados.append(Document(page_content=texto, metadata=meta))
+
+        if injetados:
+            logger.info(
+                f"Injetados {len(contextualizados[:max_chunks_por_norma])} "
+                f"chunk(s) auxiliar(es) de {tipo} {numero}/{ano} a partir do disco"
+            )
+
+    if not injetados:
+        return list(documentos)
+
+    # Deduplica por conteudo aproximado: se o indice ja tinha o mesmo texto
+    # auxiliar, mantem a versao injetada (mais atual) e remove a antiga.
+    textos_injetados = {d.page_content for d in injetados}
+    restantes = [
+        d for d in documentos if d.page_content not in textos_injetados
+    ]
+    return injetados + restantes
+
 
 def busca_fallback_sem_embeddings(query, k=12, tipo_documento=None, ano=None, numero=None):
     """Busca de fallback que não usa embeddings - busca por texto simples."""
@@ -3940,6 +4148,9 @@ def _resumo_chunk_para_log(indice, documento):
         marcadores.append("expandido")
     if chunk_tem_tabela(documento):
         marcadores.append("tabela")
+    fonte = classificar_fonte_qualidade(texto, metadados)
+    if fonte != "documento":
+        marcadores.append(fonte)
 
     secao = str(metadados.get("secao", "")) or "-"
     sufixo = f" [{', '.join(marcadores)}]" if marcadores else ""
@@ -4110,9 +4321,9 @@ Conteudo:
     
     keywords_technical = [
         "parametro", "tecnico", "valor", "valores", "limite", "limites", "medida",
-        "metodologia", "pavimento", "deflexao", "dadm", "iri", "ifi", "atrito",
-        "indice", "fwd", "ensaio", "equipamento", "tolerancia", "faixa", "vdm",
-        "maximo", "minimo", "conformidade", "desempenho",
+        "metodologia", "ensaio", "equipamento", "tolerancia", "faixa", "indice",
+        "maximo", "minimo", "conformidade", "desempenho", "criterio", "criterios",
+        "indicador", "indicadores", "especificacao", "especificacoes",
     ]
     
     keywords_normative = [
@@ -4224,7 +4435,7 @@ Conteudo:
                 # Criar LLM DeepSeek para fallback
                 from llm_providers import create_llm_manager
                 deepseek_manager = create_llm_manager("deepseek")
-                deepseek_llm = deepseek_manager.get_llm(temperature=0.1, max_tokens=2048)
+                deepseek_llm = deepseek_manager.get_llm(temperature=0.1, max_tokens=4096)
                 
                 logger.info("✅ DeepSeek configurado com sucesso para fallback")
                 
@@ -4275,7 +4486,7 @@ Conteudo:
                 try:
                     from llm_providers import create_llm_manager
                     deepseek_manager = create_llm_manager("deepseek")
-                    deepseek_llm = deepseek_manager.get_llm(temperature=0.1, max_tokens=2048)
+                    deepseek_llm = deepseek_manager.get_llm(temperature=0.1, max_tokens=4096)
 
                     # Usar template adaptativo correto com contexto truncado
                     _EMERGENCIA_MAX_CHARS = 8000
@@ -4383,9 +4594,9 @@ def _preparar_contexto_resposta(pergunta, documentos, modelo_usado="gpt-4"):
 
     keywords_technical = [
         "parametro", "tecnico", "valor", "valores", "limite", "limites", "medida",
-        "metodologia", "pavimento", "deflexao", "dadm", "iri", "ifi", "atrito",
-        "indice", "fwd", "ensaio", "equipamento", "tolerancia", "faixa", "vdm",
-        "maximo", "minimo", "conformidade", "desempenho",
+        "metodologia", "ensaio", "equipamento", "tolerancia", "faixa", "indice",
+        "maximo", "minimo", "conformidade", "desempenho", "criterio", "criterios",
+        "indicador", "indicadores", "especificacao", "especificacoes",
     ]
     keywords_normative = [
         "resolucao", "instrucao normativa", "deliberacao", "portaria", "regulamento",
@@ -4925,6 +5136,8 @@ def interface_usuario_unificada():
                 st.session_state.chat_history = []
                 if "mensagens_chat" in st.session_state:
                     st.session_state.mensagens_chat = []
+                st.session_state.pop("pergunta_exemplo", None)
+                st.session_state.pop("processar_automatico", None)
                 st.rerun()
 
         with btn_col_b:
@@ -4988,9 +5201,9 @@ def interface_usuario_unificada():
             "Tamanho máximo da resposta:",
             min_value=500,
             max_value=4096,
-            value=2048,
+            value=4096,
             step=256,
-            help="Limita o comprimento da resposta. Recomendado: 2048 a 3072."
+            help="Limita o comprimento da resposta. Padrao: o maximo permitido (4096)."
         )
         
         num_documentos = st.slider(
@@ -5168,12 +5381,6 @@ divergência de texto corrido, use Atualizar base.
             if msg.get("provider"):
                 st.caption(f"Resposta via {msg['provider']}")
 
-    # Sugestoes de consulta so aparecem enquanto a conversa esta vazia, para
-    # nao competir com o historico depois que o dialogo comeca.
-    exemplos = False
-    if not st.session_state.mensagens_chat:
-        exemplos = True
-    
     # Campo de pergunta. O Streamlit fixa o st.chat_input no rodape da
     # pagina, de modo que ele acompanha o fim da conversa em vez de ficar
     # acima da ultima resposta. Altura e largura sao ajustaveis pelo
@@ -5183,28 +5390,70 @@ divergência de texto corrido, use Atualizar base.
         disabled=not vectorstore_loaded,
     )
 
+    # Sugestoes sempre montadas no script (mesmo apos a primeira resposta).
+    # Se os botoes so existirem com a conversa vazia, o segundo clique se
+    # perde: no rerun o chat ja tem mensagens, o widget nao e recriado e o
+    # Streamlit descarta o evento antes de gravar processar_automatico.
+    _EXEMPLOS_CONSULTA = (
+        "Quais são os parâmetros técnicos para pavimentos rodoviários?",
+        "Como funciona o processo de fiscalização da ANTT?",
+        "Quais são as penalidades por descumprimento das normas?",
+        "Resolução 6057 de 2024 - principais pontos",
+        "Instrução Normativa 34 de 2024 sobre parâmetros de desempenho",
+        "Critérios de segurança para transporte rodoviário",
+        "Procedimentos para licenciamento de transportadoras",
+        "Normas sobre tempo de direção e descanso",
+    )
+
+    def _agendar_exemplo(texto_exemplo: str) -> None:
+        """Agenda uma sugestao para processamento no proximo ciclo."""
+        st.session_state.pergunta_exemplo = texto_exemplo
+        st.session_state.processar_automatico = True
+
+    conversa_vazia = not st.session_state.mensagens_chat
+    with st.expander(
+        "Sugestões de consulta",
+        expanded=conversa_vazia,
+    ):
+        if conversa_vazia:
+            st.caption("Escolha uma sugestão ou escreva sua pergunta abaixo.")
+        else:
+            st.caption(
+                "Escolha outra sugestão para enviar uma nova pergunta "
+                "nesta conversa."
+            )
+        col_ex1, col_ex2 = st.columns(2)
+        for i, exemplo in enumerate(_EXEMPLOS_CONSULTA):
+            col = col_ex1 if i % 2 == 0 else col_ex2
+            with col:
+                st.button(
+                    f"{exemplo[:60]}{'...' if len(exemplo) > 60 else ''}",
+                    key=f"btn_exemplo_{i}",
+                    use_container_width=True,
+                    help=exemplo,
+                    on_click=_agendar_exemplo,
+                    args=(exemplo,),
+                    disabled=not vectorstore_loaded,
+                )
+
     # Verificar se deve processar automaticamente um exemplo
     processar_exemplo_automatico = False
-    if "processar_automatico" in st.session_state and st.session_state.processar_automatico:
+    if st.session_state.get("processar_automatico"):
         processar_exemplo_automatico = True
-        # Limpar o flag após usar
-        del st.session_state.processar_automatico
+        st.session_state.processar_automatico = False
 
     # Processamento da consulta
     if vectorstore_loaded and (pergunta or processar_exemplo_automatico):
-        # Para processamento automático, usar a pergunta do session_state se disponível
+        # Para processamento automatico, usar a pergunta do session_state
         pergunta_para_processar = pergunta
-        if processar_exemplo_automatico and "pergunta_exemplo" in st.session_state:
-            pergunta_para_processar = st.session_state.pergunta_exemplo
+        if processar_exemplo_automatico:
+            pergunta_para_processar = st.session_state.get("pergunta_exemplo", "")
+            st.session_state.pop("pergunta_exemplo", None)
         
         # Verificar se temos uma pergunta válida
         if not pergunta_para_processar or pergunta_para_processar.strip() == "":
             st.error("Nenhuma pergunta fornecida para processamento.")
         else:
-            # Limpar a pergunta do exemplo após usar
-            if "pergunta_exemplo" in st.session_state:
-                del st.session_state.pergunta_exemplo
-            
             with st.spinner("Processando consulta..."):
                 try:
                     # Tentar criar LLM manager com o provedor selecionado
@@ -5600,41 +5849,6 @@ divergência de texto corrido, use Atualizar base.
                     st.caption(f"Detalhe técnico: {str(e)}")
                     logger.error(f"Erro na consulta: {str(e)}")
         
-    # Sugestoes de consulta, exibidas apenas quando a conversa esta vazia
-    if exemplos:
-        st.subheader("Sugestões de consulta")
-
-        st.caption("Escolha uma sugestão ou escreva sua pergunta abaixo.")
-
-        exemplos_consultas = [
-            "Quais são os parâmetros técnicos para pavimentos rodoviários?",
-            "Como funciona o processo de fiscalização da ANTT?",
-            "Quais são as penalidades por descumprimento das normas?",
-            "Resolução 6057 de 2024 - principais pontos",
-            "Instrução Normativa 34 de 2024 sobre parâmetros de desempenho",
-            "Critérios de segurança para transporte rodoviário",
-            "Procedimentos para licenciamento de transportadoras",
-            "Normas sobre tempo de direção e descanso"
-        ]
-        
-        col_ex1, col_ex2 = st.columns(2)
-
-        for i, exemplo in enumerate(exemplos_consultas):
-            col = col_ex1 if i % 2 == 0 else col_ex2
-
-            with col:
-                # A sugestao e enviada assim que selecionada: o campo de
-                # pergunta do rodape nao aceita texto pre-preenchido.
-                if st.button(
-                    f"{exemplo[:60]}{'...' if len(exemplo) > 60 else ''}",
-                    key=f"btn_exemplo_{i}",
-                    use_container_width=True,
-                    help=exemplo,
-                ):
-                    st.session_state.pergunta_exemplo = exemplo
-                    st.session_state.processar_automatico = True
-                    st.rerun()
-    
     # Inclusao de documento: acao de operacao, nao de consulta. Fica na barra
     # lateral para nao se interpor entre a ultima resposta e o campo de
     # pergunta, que o Streamlit fixa no rodape da area principal.
