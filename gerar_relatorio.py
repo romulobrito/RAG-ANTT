@@ -86,6 +86,8 @@ def _varrer_filesystem(diretorio: str) -> dict:
     """
     resultado: dict = {}
     for dirpath, _dirs, filenames in os.walk(diretorio):
+        if "tabelas_auxiliares" in dirpath.replace("\\", "/").split("/"):
+            continue
         for fname in filenames:
             if fname.endswith(".md") and fname not in resultado:
                 resultado[fname] = os.path.join(dirpath, fname)

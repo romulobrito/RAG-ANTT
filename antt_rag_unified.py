@@ -33,6 +33,9 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 import multiprocessing
 import json
 import re
+import html
+import unicodedata
+from typing import Dict, Tuple
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -53,6 +56,32 @@ from config import (
 )
 
 from llm_providers import LLMManager, get_available_providers, create_llm_manager, get_available_embedding_providers
+
+from retrieval_hibrido import (
+    BM25_DISPONIVEL,
+    chave_documento,
+    chunk_tem_tabela,
+    contextualizar_chunks,
+    expandir_com_irmaos_tabulares,
+    fundir_rrf,
+    limpar_cache_indice_lexical,
+    obter_indice_lexical,
+)
+
+from ui.theme import (
+    ALTURA_CAMPO_PADRAO,
+    CHAVE_ALTURA_CAMPO,
+    AZUL_ESCURO,
+    AZUL_HOVER,
+    AZUL_INSTITUCIONAL,
+    AZUL_MEDIO,
+    AZUL_PRIMARIO,
+    CINZA_SECUNDARIO,
+    aplicar_estilo_institucional,
+    renderizar_cabecalho,
+    resolver_altura_campo_pergunta,
+    rotulos_altura_campo_pergunta,
+)
 
 # Inicializa o logger globalmente
 logger = setup_logging()
@@ -1118,10 +1147,31 @@ def carregar_vectorstore_com_provider(embedding_provider="local"):
     vectorstore._vectorstore_path = vectorstore_path
     return vectorstore
 
+def _caminho_em_tabelas_auxiliares(caminho: str) -> bool:
+    """
+    Indica se o caminho esta dentro de dados_antt/tabelas_auxiliares/.
+
+    Esses arquivos nao sao documentos autonomos: sao anexados ao documento
+    pai na indexacao. O catalogo (gerar_relatorio) ja os ignora; a deteccao
+    de pendencias precisa fazer o mesmo para nao gerar falso positivo.
+
+    Args:
+        caminho: Caminho absoluto ou relativo a inspecionar.
+
+    Returns:
+        True se algum segmento do caminho for "tabelas_auxiliares".
+    """
+    partes = caminho.replace("\\", "/").split("/")
+    return "tabelas_auxiliares" in partes
+
+
 def _listar_md_em_dados_antt(diretorio: str = "dados_antt") -> dict:
     """
     Varre dados_antt/ e retorna um dict {nome_arquivo: caminho_completo}
     contendo todos os .md encontrados (ja deduplicados por nome).
+
+    Ignora dados_antt/tabelas_auxiliares/: esses .md nao entram no catalogo
+    como documentos proprios.
 
     Args:
         diretorio: Raiz da pasta de documentos.
@@ -1133,6 +1183,8 @@ def _listar_md_em_dados_antt(diretorio: str = "dados_antt") -> dict:
     if not os.path.isdir(diretorio):
         return resultado
     for dirpath, _dirnames, filenames in os.walk(diretorio):
+        if _caminho_em_tabelas_auxiliares(dirpath):
+            continue
         for fname in filenames:
             if fname.endswith(".md") and fname not in resultado:
                 resultado[fname] = os.path.join(dirpath, fname)
@@ -1143,6 +1195,8 @@ def _listar_pdfs_sem_md(diretorio: str = "dados_antt") -> list:
     """
     Retorna lista de nomes de PDFs que nao possuem .md correspondente.
 
+    Ignora a pasta tabelas_auxiliares/, que nao recebe PDF autonomo.
+
     Args:
         diretorio: Raiz da pasta de documentos.
 
@@ -1151,6 +1205,8 @@ def _listar_pdfs_sem_md(diretorio: str = "dados_antt") -> list:
     """
     pdfs_pendentes: list = []
     for dirpath, _dirs, filenames in os.walk(diretorio):
+        if _caminho_em_tabelas_auxiliares(dirpath):
+            continue
         for fname in filenames:
             if not fname.lower().endswith(".pdf"):
                 continue
@@ -1271,6 +1327,44 @@ def reindexar_base_completa(embedding_provider: str = "local") -> tuple:
         _liberar_lock_reindexacao()
 
 
+def _substituir_vectorstore(origem: str, destino: str) -> None:
+    """
+    Coloca em producao o indice recem-criado, preservando o anterior ate o fim.
+
+    A troca e feita por renomeacao de diretorios, operacao praticamente
+    instantanea. Se ela falhar, o indice anterior e restaurado, de modo que a
+    base nunca fica sem uma versao consultavel.
+
+    Args:
+        origem: Diretorio do indice recem-construido.
+        destino: Diretorio do indice em uso pela aplicacao.
+
+    Raises:
+        OSError: Se a substituicao falhar mesmo apos a tentativa de restauro.
+    """
+    import shutil
+
+    backup = f"{destino}.anterior"
+    shutil.rmtree(backup, ignore_errors=True)
+
+    havia_indice = os.path.isdir(destino)
+    if havia_indice:
+        os.rename(destino, backup)
+
+    try:
+        os.rename(origem, destino)
+    except OSError:
+        if havia_indice and not os.path.isdir(destino):
+            os.rename(backup, destino)
+            logger.error(
+                "Falha ao substituir o indice; a versao anterior foi restaurada"
+            )
+        raise
+
+    shutil.rmtree(backup, ignore_errors=True)
+    logger.info(f"Indice substituido: {origem} -> {destino}")
+
+
 def _reindexar_base_impl(embedding_provider: str) -> tuple:
     """Implementacao interna do pipeline de reindexacao (protegida por lock)."""
     import shutil
@@ -1295,11 +1389,12 @@ def _reindexar_base_impl(embedding_provider: str) -> tuple:
         logger.error(msg)
         return False, msg
 
-    # 3) Remover vectorstore antigo
+    # 3) Reconstruir o indice em diretorio temporario. Apagar o indice em uso
+    # antes de ter o novo pronto deixaria a base indisponivel durante toda a
+    # reindexacao e sem nenhuma versao consultavel caso ela falhasse.
     vpath = "vectorstore_local"
-    if os.path.isdir(vpath):
-        shutil.rmtree(vpath)
-        logger.info(f"Vectorstore antigo removido: {vpath}")
+    vpath_temporario = f"{vpath}.novo"
+    shutil.rmtree(vpath_temporario, ignore_errors=True)
 
     # 4) Criar embeddings e reconstruir vectorstore
     try:
@@ -1312,21 +1407,39 @@ def _reindexar_base_impl(embedding_provider: str) -> tuple:
                 "'pip install -U sentence-transformers accelerate' e use "
                 "'Limpar Cache OCR e Reindexar'."
             )
-        sucesso = criar_vectorstore_local(embeddings)
-        if sucesso:
-            msg_final = f"Reindexação concluída: {len(docs)} documentos catalogados"
-            if n_pdfs > 0:
-                msg_final += f" ({n_pdfs} PDF(s) convertido(s))"
-            return True, msg_final
-        return False, "Falha ao criar vectorstore"
+        sucesso = criar_vectorstore_local(embeddings, destino=vpath_temporario)
+        if not sucesso:
+            shutil.rmtree(vpath_temporario, ignore_errors=True)
+            return False, "Falha ao criar vectorstore"
+
+        _substituir_vectorstore(vpath_temporario, vpath)
+
+        # O indice lexical em memoria referencia os chunks da versao anterior.
+        limpar_cache_indice_lexical()
+        msg_final = f"Reindexação concluída: {len(docs)} documentos catalogados"
+        if n_pdfs > 0:
+            msg_final += f" ({n_pdfs} PDF(s) convertido(s))"
+        return True, msg_final
     except Exception as exc:
+        shutil.rmtree(vpath_temporario, ignore_errors=True)
         msg = f"Erro ao reconstruir vectorstore: {exc}"
         logger.error(msg)
         return False, msg
 
 
-def criar_vectorstore_local(embeddings):
-    """Cria vectorstore local usando embeddings locais"""
+def criar_vectorstore_local(embeddings, destino: str = "vectorstore_local"):
+    """
+    Cria o vectorstore local a partir do catalogo de documentos.
+
+    Args:
+        embeddings: Objeto de embeddings ja inicializado.
+        destino: Diretorio onde o indice sera gravado. A reindexacao grava em
+            um diretorio temporario para so substituir a base em uso apos o
+            sucesso.
+
+    Returns:
+        True se o indice foi criado e gravado, False em caso de falha.
+    """
     try:
         import json
         from langchain.text_splitter import RecursiveCharacterTextSplitter
@@ -1361,6 +1474,14 @@ def criar_vectorstore_local(embeddings):
             try:
                 with open(arquivo_md, "r", encoding="utf-8") as f:
                     conteudo = f.read()
+
+                tipo_doc = doc_info.get("tipo", "")
+                numero_doc = doc_info.get("numero", "")
+                ano_doc = doc_info.get("ano", "")
+                if tipo_doc and numero_doc and ano_doc:
+                    conteudo = _mesclar_tabelas_auxiliares(
+                        conteudo, tipo_doc, numero_doc, ano_doc
+                    )
 
                 conteudo = _enriquecer_imagens_documento(conteudo)
 
@@ -1403,25 +1524,38 @@ def criar_vectorstore_local(embeddings):
                 chunk_overlap=CHUNK_OVERLAP,
             )
 
-            total = len(chunks_texto)
-            for idx, chunk_txt in enumerate(chunks_texto):
+            # Contextualizar: cada chunk recebe a trilha estrutural do
+            # documento (norma, assunto, anexo/secao, cabecalho da tabela).
+            # Sem isso, blocos tabulares formados apenas por rotulos curtos e
+            # numeros ficam invisiveis para perguntas em linguagem natural.
+            chunks_contextualizados = contextualizar_chunks(chunks_texto, meta_base)
+
+            total = len(chunks_contextualizados)
+            for idx, (chunk_txt, meta_extra) in enumerate(chunks_contextualizados):
                 meta = meta_base.copy()
                 meta["chunk"] = idx + 1
                 meta["total_chunks"] = total
+                meta.update(meta_extra)
                 splits.append(Document(page_content=chunk_txt, metadata=meta))
 
         logger.info(f"Criados {len(splits)} chunks estruturais")
+        total_tabulares = sum(
+            1 for d in splits if d.metadata.get("contem_tabelas") == "Sim"
+        )
+        logger.info(
+            f"Chunks com tabela: {total_tabulares} "
+            f"({100.0 * total_tabulares / max(1, len(splits)):.1f}% do total)"
+        )
         
         # Criar vectorstore
         logger.info("🔍 Criando vectorstore com embeddings locais...")
         vectorstore = FAISS.from_documents(documents=splits, embedding=embeddings)
         
         # Salvar vectorstore
-        vectorstore_path = "vectorstore_local"
-        os.makedirs(vectorstore_path, exist_ok=True)
-        vectorstore.save_local(vectorstore_path)
-        
-        logger.info(f"✅ Vectorstore local salvo em {vectorstore_path}")
+        os.makedirs(destino, exist_ok=True)
+        vectorstore.save_local(destino)
+
+        logger.info(f"✅ Vectorstore local salvo em {destino}")
         return True
         
     except Exception as e:
@@ -1785,6 +1919,82 @@ def _resolver_caminho_documento(tipo, numero, ano):
     return candidatos, nome_tipo
 
 
+_DIRETORIO_TABELAS_AUX = "dados_antt/tabelas_auxiliares"
+_SEPARADOR_TABELAS_AUX = "## Tabelas auxiliares estruturadas (transcricao)"
+
+
+def _id_documento_regulatorio(tipo, numero, ano):
+    """Retorna identificador padrao TIPO-000000NN-AAAA."""
+    return f"{tipo}-{str(numero).zfill(8)}-{ano}"
+
+
+def _remover_frontmatter_yaml(conteudo):
+    """Remove bloco YAML inicial (--- ... ---) se presente."""
+    if not conteudo.startswith("---"):
+        return conteudo
+    fim = conteudo.find("---", 3)
+    if fim == -1:
+        return conteudo
+    return conteudo[fim + 3 :].lstrip("\n")
+
+
+def _listar_tabelas_auxiliares(tipo, numero, ano):
+    """
+    Lista arquivos .md auxiliares vinculados a um documento regulatorio.
+
+    Convencao de nome: {TIPO}-{NUM}-{ANO}-{slug}.md em tabelas_auxiliares/.
+    """
+    doc_id = _id_documento_regulatorio(tipo, numero, ano)
+    prefixo = doc_id + "-"
+    base_dir = os.path.join(
+        os.path.dirname(os.path.abspath(__file__)),
+        _DIRETORIO_TABELAS_AUX,
+    )
+    if not os.path.isdir(base_dir):
+        return []
+
+    encontrados = []
+    for dirpath, _dirs, filenames in os.walk(base_dir):
+        for fname in filenames:
+            if fname.endswith(".md") and fname.startswith(prefixo):
+                encontrados.append(os.path.join(dirpath, fname))
+    return sorted(encontrados)
+
+
+def _mesclar_tabelas_auxiliares(conteudo, tipo, numero, ano):
+    """
+    Anexa tabelas auxiliares estruturadas ao documento pai antes do OCR/chunking.
+
+    Fallback quando anexos estao apenas em imagem ou markdown nativo esta corrompido.
+    """
+    caminhos_aux = _listar_tabelas_auxiliares(tipo, numero, ano)
+    if not caminhos_aux:
+        return conteudo
+
+    blocos = [conteudo.rstrip()]
+    for caminho_aux in caminhos_aux:
+        try:
+            with open(caminho_aux, "r", encoding="utf-8") as f:
+                texto_aux = _remover_frontmatter_yaml(f.read()).strip()
+            if not texto_aux:
+                continue
+            nome_slug = os.path.basename(caminho_aux).replace(".md", "")
+            blocos.append(
+                f"\n\n{_SEPARADOR_TABELAS_AUX} - {nome_slug}\n\n{texto_aux}"
+            )
+        except Exception as exc:
+            logger.warning(f"Falha ao ler tabela auxiliar {caminho_aux}: {exc}")
+
+    if len(blocos) == 1:
+        return conteudo
+
+    logger.info(
+        f"Mescladas {len(caminhos_aux)} tabela(s) auxiliar(es) em "
+        f"{_id_documento_regulatorio(tipo, numero, ano)}"
+    )
+    return "\n".join(blocos)
+
+
 def _carregar_documento_markdown(caminho, tipo, nome_tipo, numero, ano):
     """
     Carrega um documento markdown e retorna uma lista de Document chunks
@@ -1810,25 +2020,34 @@ def _carregar_documento_markdown(caminho, tipo, nome_tipo, numero, ano):
     if not conteudo.strip():
         return []
 
+    conteudo = _mesclar_tabelas_auxiliares(conteudo, tipo, numero, ano)
     conteudo = _enriquecer_imagens_documento(conteudo)
     chunks = _dividir_por_estrutura(conteudo)
 
+    metadados_base = {
+        "tipo_documento": tipo,
+        "nome_tipo": nome_tipo,
+        "numero": numero.zfill(8),
+        "ano": ano,
+        "caminho": caminho,
+    }
+
+    # Mesma contextualizacao aplicada na indexacao, para que o carregamento
+    # direto do markdown produza chunks equivalentes aos do vectorstore.
+    chunks_contextualizados = contextualizar_chunks(chunks, metadados_base)
+
     documentos = []
-    for idx, texto_chunk in enumerate(chunks):
-        doc = Document(
-            page_content=texto_chunk,
-            metadata={
-                "tipo_documento": tipo,
-                "nome_tipo": nome_tipo,
-                "numero": numero.zfill(8),
-                "ano": ano,
-                "caminho": caminho,
+    for idx, (texto_chunk, meta_extra) in enumerate(chunks_contextualizados):
+        metadados = metadados_base.copy()
+        metadados.update(
+            {
                 "chunk": idx + 1,
-                "total_chunks": len(chunks),
+                "total_chunks": len(chunks_contextualizados),
                 "prioritario": True,
-            },
+            }
         )
-        documentos.append(doc)
+        metadados.update(meta_extra)
+        documentos.append(Document(page_content=texto_chunk, metadata=metadados))
 
     return documentos
 
@@ -2340,7 +2559,7 @@ def _corrigir_decimais_ocr(texto: str) -> str:
     return resultado
 
 
-_OCR_PIPELINE_VERSION = "3"
+_OCR_PIPELINE_VERSION = "4"
 _OCR_QUALIDADE_MINIMA = 0.55
 _OCR_QUALIDADE_ALTA = 0.85
 
@@ -2504,7 +2723,367 @@ def _calcular_score_qualidade_ocr(texto: str) -> float:
         ratio_ruim = celulas_ruins / total_celulas
         score -= ratio_ruim * 0.75
 
+    score_estrutural = _calcular_score_estrutural_ocr(texto)
+    return max(0.0, min(1.0, min(score, score_estrutural)))
+
+
+_RE_SPLIT_MKM_PERCENT = re.compile(
+    r"([\d,]+)\s*m/km\s*em\s*(\d+)\s*%\s*(?:da\s*)?(?:rodovia\s*)?"
+    r".{0,120}?"
+    r"([\d,]+)\s*m/km\s*em\s*(\d+)\s*%",
+    re.IGNORECASE | re.DOTALL,
+)
+
+_RE_FASES_SIMPLES_MKM = re.compile(
+    r"([\d,]+)\s*m/km\s*rodovia;\s*e\s*([\d,]+)\s*([\d,]+)\s*m/km\s*([\d,]+)\s*m/km",
+    re.IGNORECASE,
+)
+
+_RE_IFI_VALORES = re.compile(r"(>[0-9,]+)")
+
+
+def _detectar_matriz_wide_fragmentada(texto: str) -> bool:
+    """
+    Detecta OCR de matriz wide (pista x fase) fragmentado sem markdown valido.
+    """
+    if not texto or "| ---" in texto:
+        return False
+
+    texto_lower = texto.lower()
+    sinais_matriz = (
+        "m/km" in texto_lower
+        and (
+            "principal" in texto_lower
+            or "marginal" in texto_lower
+            or "trabalhos" in texto_lower
+            or "recupera" in texto_lower
+        )
+    )
+    if not sinais_matriz:
+        return False
+
+    compacto = re.sub(r"\s+", " ", texto)
+    if _RE_SPLIT_MKM_PERCENT.search(compacto):
+        if re.search(
+            r"\d,\d\s*m/km\s*em\s*\n\s*\d+\s*%",
+            texto,
+            re.IGNORECASE,
+        ):
+            return True
+        if re.search(
+            r"(iri|icp|ifi|irregularidade longitudinal)",
+            compacto,
+            re.IGNORECASE,
+        ) and re.search(r"\d,\d\s*m/km", compacto, re.IGNORECASE):
+            if re.search(
+                r"\d,\d\s*m/km.{0,80}(iri|irregularidade)",
+                compacto,
+                re.IGNORECASE,
+            ):
+                return True
+    return False
+
+
+def _calcular_score_estrutural_ocr(texto: str) -> float:
+    """
+    Score estrutural (0.0 a 1.0) complementar ao score de celulas/lixo.
+
+    Penaliza matrizes wide fragmentadas; bonifica markdown tabular coerente
+    com dimensoes pista/fase ou VDM.
+    """
+    if not texto or not texto.strip():
+        return 0.0
+
+    score = 1.0
+
+    if _detectar_matriz_wide_fragmentada(texto):
+        score -= 0.45
+
+    if "| ---" in texto:
+        headers = " ".join(
+            linha.lower()
+            for linha in texto.splitlines()
+            if linha.strip().startswith("|") and "| ---" not in linha
+        )[:500]
+        if any(k in headers for k in ("principal", "marginal", "pista", "fase")):
+            score += 0.05
+        if "vdm" in headers or "dadm" in headers:
+            score += 0.05
+
+    texto_lower = texto.lower()
+    if "iri" in texto_lower or "irregularidade longitudinal" in texto_lower:
+        tem_principal = "principal" in texto_lower
+        tem_marginal = "marginal" in texto_lower
+        if tem_principal and not tem_marginal and _detectar_matriz_wide_fragmentada(texto):
+            score -= 0.15
+        if "| ---" in texto and tem_principal and tem_marginal:
+            score += 0.05
+
     return max(0.0, min(1.0, score))
+
+
+def _formatar_split_recuperacao(texto_bloco: str) -> str:
+    """Extrai par de valores m/km com percentuais (ex.: 60%/40%) em notacao legivel."""
+    compacto = re.sub(r"\s+", " ", texto_bloco)
+
+    match = _RE_SPLIT_MKM_PERCENT.search(compacto)
+    if match:
+        return (
+            f"{match.group(1)} m/km ({match.group(2)}%); "
+            f"{match.group(3)} m/km ({match.group(4)}%)"
+        )
+
+    pares = re.findall(
+        r"([\d,]+)\s*m/km\s*em\s*(\d+)\s*%",
+        compacto,
+        re.IGNORECASE,
+    )
+    if len(pares) >= 2:
+        return (
+            f"{pares[0][0]} m/km ({pares[0][1]}%); "
+            f"{pares[1][0]} m/km ({pares[1][1]}%)"
+        )
+
+    match_40 = re.search(
+        r"([\d,]+)\s*m/km\s*(?:rodovia[^%]{0,40})?m/km\s*em\s*(\d+)\s*%",
+        compacto,
+        re.IGNORECASE,
+    )
+    if pares and match_40:
+        return (
+            f"{pares[0][0]} m/km ({pares[0][1]}%); "
+            f"{match_40.group(1)} m/km ({match_40.group(2)}%)"
+        )
+
+    percentuais = re.findall(r"(\d+)\s*%\s*(?:da\s*)?(?:rodovia)?", compacto)
+    valores_mkm = re.findall(r"([\d,]+)\s*m/km", compacto, re.IGNORECASE)
+    if len(percentuais) >= 2 and len(valores_mkm) >= 2:
+        return (
+            f"{valores_mkm[0]} m/km ({percentuais[0]}%); "
+            f"{valores_mkm[1]} m/km ({percentuais[1]}%)"
+        )
+
+    return ""
+
+
+def _extrair_fases_simples_mkm(texto_bloco: str) -> dict:
+    """
+    Extrai valores de Trabalhos Iniciais, Manutencao e Recebimento Final
+    a partir de padrao OCR comum em tabelas ANTT.
+    """
+    compacto = re.sub(r"\s+", " ", texto_bloco)
+    match = _RE_FASES_SIMPLES_MKM.search(compacto)
+    if not match:
+        return {}
+    return {
+        "trabalhos_iniciais": f"{match.group(1)} m/km",
+        "manutencao": f"{match.group(3)} m/km",
+        "recebimento_final": f"{match.group(4)} m/km",
+    }
+
+
+def _montar_linha_fases_pista(nome_pista: str, bloco: str) -> str:
+    """Monta uma linha markdown com fases de concessao para uma pista."""
+    fases = _extrair_fases_simples_mkm(bloco)
+    recuperacao = _formatar_split_recuperacao(bloco)
+    if not fases and not recuperacao:
+        return ""
+
+    cols = [
+        nome_pista,
+        fases.get("trabalhos_iniciais", "-"),
+        recuperacao or "-",
+        fases.get("manutencao", "-"),
+        fases.get("recebimento_final", "-"),
+    ]
+    return "| " + " | ".join(cols) + " |"
+
+
+def _reconstruir_bloco_ifi(texto: str) -> str:
+    """Reconstroi tabela IFI quando valores >0,X aparecem no OCR."""
+    match_ifi = re.search(
+        r"IFI\s*\(International Friction Index\)(.*)",
+        texto,
+        re.IGNORECASE | re.DOTALL,
+    )
+    trecho = match_ifi.group(1) if match_ifi else texto
+    partes = re.split(r"\bMarginal\b", trecho, maxsplit=1, flags=re.IGNORECASE)
+    bloco_principal = partes[0]
+    bloco_marginal = partes[1] if len(partes) > 1 else ""
+
+    vals_p = _RE_IFI_VALORES.findall(bloco_principal)
+    vals_m = _RE_IFI_VALORES.findall(bloco_marginal)
+
+    if len(vals_p) < 2 and len(vals_m) < 2:
+        return ""
+
+    header = (
+        "| Pista | Trabalhos Iniciais | Manutencao | Recebimento Final |\n"
+        "| --- | --- | --- | --- |"
+    )
+    linhas = [header]
+    if len(vals_p) >= 2:
+        while len(vals_p) < 3:
+            vals_p.append(vals_p[-1])
+        linhas.append(
+            "| Principal | "
+            + " | ".join(vals_p[:3])
+            + " |"
+        )
+    if len(vals_m) >= 2:
+        while len(vals_m) < 3:
+            vals_m.append(vals_m[-1])
+        linhas.append(
+            "| Marginal | "
+            + " | ".join(vals_m[:3])
+            + " |"
+        )
+    return "\n".join(linhas)
+
+
+def _split_blocos_pista_matriz(texto: str) -> tuple:
+    """
+    Separa blocos Principal e Marginal em OCR de matriz wide.
+
+    Prioriza ancora pelo rotulo IRI (valores podem vir antes do rotulo no OCR).
+    Fallback: split pelo primeiro 'Marginal'.
+    """
+    match_iri = re.search(
+        r"Irregularidade Longitudinal Maxima\s*-\s*IRI",
+        texto,
+        re.IGNORECASE,
+    )
+    if match_iri:
+        antes = texto[: match_iri.start()]
+        depois = texto[match_iri.end() :]
+        bloco_principal = antes
+        match_prox = re.search(
+            r"IFI|International Friction|ICP|Deflex",
+            depois,
+            re.IGNORECASE,
+        )
+        bloco_marginal = depois[: match_prox.start()] if match_prox else depois
+        return bloco_principal, bloco_marginal
+
+    partes = re.split(r"\bMarginal\b", texto, maxsplit=1, flags=re.IGNORECASE)
+    return partes[0], partes[1] if len(partes) > 1 else ""
+
+
+def _reconstruir_matriz_fase_pavimento(texto: str) -> str:
+    """
+    Tenta reconstruir matriz wide (pista x fase) em markdown a partir de OCR fragmentado.
+
+    Aplica-se a anexos com limites por fase (IRI, etc.) sem depender de documento especifico.
+    """
+    if not texto or "| ---" in texto:
+        return texto
+
+    texto_lower = texto.lower()
+    if not (
+        "m/km" in texto_lower
+        or "valores limites" in texto_lower
+        or "fase de concess" in texto_lower
+    ):
+        return texto
+
+    bloco_principal, bloco_marginal = _split_blocos_pista_matriz(texto)
+
+    linha_p = _montar_linha_fases_pista("Principal", bloco_principal)
+    linha_m = _montar_linha_fases_pista("Marginal", bloco_marginal)
+
+    if not linha_p and not linha_m:
+        return texto
+
+    header = (
+        "| Pista | Trabalhos Iniciais | Recuperacao | Manutencao | Recebimento Final |\n"
+        "| --- | --- | --- | --- | --- |"
+    )
+    linhas = [
+        "## Tabela OCR estruturada - Parametros por fase de concessao",
+        "",
+        "### Irregularidade Longitudinal Maxima (IRI)",
+        "",
+        header,
+    ]
+    if linha_p:
+        linhas.append(linha_p)
+    if linha_m:
+        linhas.append(linha_m)
+
+    if "ifi" in texto_lower or "friction index" in texto_lower:
+        tabela_ifi = _reconstruir_bloco_ifi(texto)
+        if tabela_ifi:
+            linhas.extend(["", "### IFI (International Friction Index)", "", tabela_ifi])
+
+    return "\n".join(linhas)
+
+
+def _reconstruir_tabela_vdm_linear(texto: str) -> str:
+    """Estrutura tabelas VDM/Dadm em texto linear (uma linha por faixa)."""
+    if "| ---" in texto:
+        return texto
+
+    linhas_dados = []
+    for linha in texto.splitlines():
+        nums = re.findall(
+            r"(\d+(?:,\d+)?(?:E\+\d+)?|\d+)",
+            linha,
+            re.IGNORECASE,
+        )
+        if len(nums) >= 4 and re.search(r"E\+", linha, re.IGNORECASE):
+            linhas_dados.append(
+                f"| {nums[0]} | {nums[1]} | {nums[2]} | {nums[3]} |"
+            )
+        elif len(nums) == 4 and nums[-1].isdigit() and int(nums[-1]) <= 100:
+            linhas_dados.append(
+                f"| {nums[0]} | {nums[1]} | {nums[2]} | {nums[3]} |"
+            )
+
+    if len(linhas_dados) < 2:
+        return texto
+
+    header = (
+        "## Tabela OCR estruturada - VDM e Deflexao Admissivel (Dadm)\n\n"
+        "| VDM min | VDM max | Nestimado (5 anos) | Dadm (0,01 mm) |\n"
+        "| --- | --- | --- | --- |"
+    )
+    return header + "\n" + "\n".join(linhas_dados)
+
+
+def _tentar_estruturar_matriz_wide_ocr(texto: str) -> str:
+    """
+    Pos-processamento estrutural: converte OCR fragmentado de matriz wide em markdown.
+
+    So substitui o texto se o score estrutural melhorar (evita regressao).
+    """
+    if not texto:
+        return texto
+
+    score_antes = _calcular_score_estrutural_ocr(texto)
+    candidatos = [texto]
+
+    texto_lower = texto.lower()
+    if _detectar_matriz_wide_fragmentada(texto) or (
+        "valores limites" in texto_lower and "m/km" in texto_lower
+    ):
+        candidatos.append(_reconstruir_matriz_fase_pavimento(texto))
+
+    if re.search(r"\d+[,.]?\d*E\+\d+", texto, re.IGNORECASE) and re.search(
+        r"\b\d{2,3}\b", texto
+    ):
+        candidatos.append(_reconstruir_tabela_vdm_linear(texto))
+
+    melhor = texto
+    melhor_score = score_antes
+    for cand in candidatos[1:]:
+        if not cand or cand == texto:
+            continue
+        score_cand = _calcular_score_estrutural_ocr(cand)
+        if score_cand > melhor_score + 0.05:
+            melhor = cand
+            melhor_score = score_cand
+
+    return melhor
 
 
 def _tentar_corrigir_notacao_cientifica_celula(celula: str) -> str:
@@ -2575,6 +3154,7 @@ def _pos_processar_tabela_ocr(texto: str) -> str:
     linhas = [_corrigir_celulas_tabela_markdown(l) for l in texto.splitlines()]
     texto = "\n".join(linhas)
     texto = _corrigir_decimais_ocr(texto)
+    texto = _tentar_estruturar_matriz_wide_ocr(texto)
     return texto
 
 
@@ -2878,7 +3458,10 @@ def _enriquecer_imagens_documento(conteudo_md):
         texto_extraido = resultados_ocr.get(url_hash)
 
         if texto_extraido and texto_extraido.strip():
-            bloco = f"\n{texto_extraido}\n"
+            nome_anexo = url.rsplit("/", 1)[-1]
+            bloco = (
+                f"\n## Anexo OCR - {nome_anexo}\n\n{texto_extraido}\n"
+            )
             resultado = resultado[:match.start()] + bloco + resultado[match.end():]
             substituicoes += 1
 
@@ -2888,8 +3471,33 @@ def _enriquecer_imagens_documento(conteudo_md):
     return resultado
 
 
-def reranking_documentos(query, documentos):
-    """Reordena os documentos com base na relevancia para a consulta."""
+# Piso de candidatos por consulta. O corte para k acontece somente depois da
+# fusao e do rerank; recall baixo nesta etapa nao e recuperavel adiante.
+_MIN_CANDIDATOS_BUSCA = 45
+
+# Pesos das listas fundidas por RRF, na ordem: densa por similaridade, densa por
+# MMR e lexical BM25. A lista MMR recebe peso menor porque sacrifica relevancia
+# em favor de diversidade.
+_PESOS_FUSAO_HIBRIDA = (1.0, 0.7, 1.0)
+
+# Teto de chunks anexados pela expansao por documento-pai.
+_MAX_IRMAOS_EXPANSAO = 8
+
+
+def reranking_documentos(query, documentos, scores_base=None):
+    """
+    Reordena os documentos com base na relevancia para a consulta.
+
+    Args:
+        query: Pergunta original do usuario.
+        documentos: Candidatos recuperados.
+        scores_base: Mapa opcional de chave de chunk para score da fusao
+            hibrida (RRF). Quando informado, o consenso entre a busca densa e a
+            lexical entra como componente do score final.
+
+    Returns:
+        Lista de documentos ordenada por relevancia decrescente.
+    """
     if not documentos:
         return []
     
@@ -2938,13 +3546,19 @@ def reranking_documentos(query, documentos):
             score += min(len(artigos_encontrados) * 0.3, 2.0)
 
         # Boost para chunks com tabelas markdown (dados numericos extraidos por OCR)
-        if "| --- |" in doc.page_content:
+        if chunk_tem_tabela(doc):
             score += 3.0
 
         # Boost forte para documentos priorizados (referencia explicita na query)
         caminho = metadados.get("caminho", "")
         if caminho in caminhos_prioritarios or metadados.get("prioritario"):
             score += 10.0
+
+        # Consenso da fusao hibrida: chunks recuperados tanto pela busca densa
+        # quanto pela lexical recebem score RRF mais alto. O fator de escala
+        # aproxima a faixa do RRF (cerca de 0.01 a 0.05) da faixa dos boosts.
+        if scores_base:
+            score += scores_base.get(chave_documento(doc), 0.0) * 100.0
 
         return score
     
@@ -2997,34 +3611,52 @@ def pesquisar_documentos(query, vectorstore, k=16, tipo_documento=None, ano=None
     except Exception as e:
         logger.warning(f"Deteccao de referencia de documento falhou: {e}")
 
+    scores_fusao = {}
+    indice_lexical = None
+
     try:
-        keywords = extrair_keywords(query)
-        logger.info(f"Executando busca semantica com MMR...")
-        docs_semantic = vectorstore.max_marginal_relevance_search(
-            query,
-            k=k,
-            fetch_k=k*3,
-            lambda_mult=0.7,
-            filter=filtro
+        # Recall ampliado: a geracao de candidatos e desacoplada do corte final.
+        # Recuperar poucos chunks aqui inviabiliza qualquer reordenacao adiante,
+        # porque o rerank so reordena o que ja entrou.
+        k_candidatos = max(k * 3, _MIN_CANDIDATOS_BUSCA)
+
+        logger.info(
+            f"Gerando candidatos (k={k}, candidatos={k_candidatos}): "
+            f"densa por similaridade, densa por MMR e lexical"
         )
-        resultados.extend(docs_semantic)
-        logger.info(f"Busca semantica: {len(docs_semantic)} resultados")
-        if keywords and len(keywords) > 1:
-            keyword_query = " ".join(keywords)
-            logger.info(f"Executando busca adicional por keywords: '{keyword_query}'")
-            docs_keywords = vectorstore.similarity_search(
-                keyword_query,
-                k=max(3, k//2),
-                filter=filtro
-            )
-            docs_ids = set(doc.metadata.get('caminho', '') + str(doc.metadata.get('chunk', '')) 
-                           for doc in resultados)
-            for doc in docs_keywords:
-                doc_id = doc.metadata.get('caminho', '') + str(doc.metadata.get('chunk', ''))
-                if doc_id not in docs_ids:
-                    resultados.append(doc)
-                    docs_ids.add(doc_id)
-            logger.info(f"Apos busca por keywords: {len(resultados)} resultados")
+
+        # Lista 1: similaridade pura, prioriza relevancia.
+        docs_similaridade = vectorstore.similarity_search(
+            query, k=k_candidatos, filter=filtro
+        )
+        logger.info(f"Busca densa por similaridade: {len(docs_similaridade)} chunks")
+
+        # Lista 2: MMR, cobre subtemas distintos de perguntas amplas.
+        docs_mmr = vectorstore.max_marginal_relevance_search(
+            query,
+            k=k_candidatos,
+            fetch_k=k_candidatos * 3,
+            lambda_mult=0.7,
+            filter=filtro,
+        )
+        logger.info(f"Busca densa por MMR: {len(docs_mmr)} chunks")
+
+        # Lista 3: BM25. A busca densa erra em siglas, numeros e referencias
+        # normativas, justamente o vocabulario das tabelas de parametros.
+        docs_lexical = []
+        indice_lexical = obter_indice_lexical(vectorstore)
+        if indice_lexical is not None:
+            docs_lexical = indice_lexical.buscar(query, k=k_candidatos, filtro=filtro)
+            logger.info(f"Busca lexical BM25: {len(docs_lexical)} chunks")
+        elif not BM25_DISPONIVEL:
+            logger.info("Busca lexical indisponivel: rank_bm25 nao instalado")
+
+        listas = [docs_similaridade, docs_mmr, docs_lexical]
+        docs_fundidos, scores_fusao = fundir_rrf(
+            listas, pesos=_PESOS_FUSAO_HIBRIDA
+        )
+        resultados.extend(docs_fundidos)
+        logger.info(f"Fusao RRF: {len(docs_fundidos)} chunks unicos")
     except Exception as e:
         error_msg = str(e).lower()
         if any(keyword in error_msg for keyword in ["insufficient_quota", "429", "quota", "exceeded"]):
@@ -3088,7 +3720,9 @@ def pesquisar_documentos(query, vectorstore, k=16, tipo_documento=None, ano=None
         resultados = resultados_unicos
 
     if resultados:
-        resultados_finais = reranking_documentos(query_original, resultados)
+        resultados_finais = reranking_documentos(
+            query_original, resultados, scores_base=scores_fusao
+        )
         if len(resultados_finais) > k:
             logger.info(
                 f"Reranking produziu {len(resultados_finais)} docs, "
@@ -3098,6 +3732,19 @@ def pesquisar_documentos(query, vectorstore, k=16, tipo_documento=None, ano=None
             resultados_finais, k
         )
         logger.info(f"Apos reranking: {len(resultados_finais)} documentos retornados")
+
+        # Expansao por documento-pai: anexos com limites numericos raramente se
+        # aproximam de uma pergunta generica, mas sao indispensaveis para
+        # responde-la. Se o documento que os contem foi considerado relevante,
+        # seus blocos tabulares entram no contexto. A folga em relacao ao
+        # limite de chunks do LLM garante que nao serao descartados adiante.
+        folga = _MAX_CHUNKS_LLM - len(resultados_finais)
+        if folga > 0:
+            resultados_finais = expandir_com_irmaos_tabulares(
+                resultados_finais,
+                indice_lexical,
+                max_total=min(_MAX_IRMAOS_EXPANSAO, folga),
+            )
 
     return resultados_finais
 
@@ -3260,6 +3907,52 @@ def _normalize_text_ascii_lower(value: str) -> str:
 _MAX_CONTEXT_CHARS = 50000
 _MAX_CHUNKS_LLM = 30
 
+
+def _resumo_chunk_para_log(indice, documento):
+    """
+    Formata uma linha de log descrevendo um chunk enviado ao LLM.
+
+    Serve ao diagnostico de recuperacao: mostra a secao de origem e sinaliza
+    blocos tabulares e chunks trazidos pela expansao por documento-pai.
+
+    Args:
+        indice: Posicao do chunk no contexto.
+        documento: Chunk enviado ao modelo.
+
+    Returns:
+        Linha de log formatada.
+    """
+    metadados = documento.metadata or {}
+    texto = documento.page_content or ""
+
+    # O prefixo de contexto ocuparia todo o preview; mostra-lo em separado
+    # (campo Secao) e mais informativo.
+    linhas = texto.split("\n", 1)
+    if linhas[0].startswith("[") and linhas[0].endswith("]") and len(linhas) > 1:
+        corpo = linhas[1]
+    else:
+        corpo = texto
+
+    marcadores = []
+    if metadados.get("prioritario"):
+        marcadores.append("prioritario")
+    if metadados.get("expandido_por_documento"):
+        marcadores.append("expandido")
+    if chunk_tem_tabela(documento):
+        marcadores.append("tabela")
+
+    secao = str(metadados.get("secao", "")) or "-"
+    sufixo = f" [{', '.join(marcadores)}]" if marcadores else ""
+
+    return (
+        f"  chunk[{indice}] {metadados.get('nome_tipo', '?')} "
+        f"{metadados.get('numero', '?')}/{metadados.get('ano', '?')} "
+        f"parte {metadados.get('chunk', '?')}/{metadados.get('total_chunks', '?')} "
+        f"({len(texto)} chars){sufixo}\n"
+        f"    secao: {secao[:140]}\n"
+        f"    trecho: {corpo[:120].replace(chr(10), ' ')}..."
+    )
+
 _TEMPLATE_REESCRITA = """Reescreva a ULTIMA PERGUNTA como uma pergunta COMPLETA e AUTOCONTIDA
 usando o contexto do historico. Se ja for autocontida, retorne-a sem alteracao.
 
@@ -3408,13 +4101,7 @@ Conteudo:
     for tipo, contagem in contagem_por_tipo.items():
         logger.info(f"  Tipo '{tipo}': {contagem} chunks")
     for i, doc in enumerate(documentos):
-        m = doc.metadata
-        preview = doc.page_content[:120].replace("\n", " ")
-        logger.info(
-            f"  chunk[{i}] {m.get('nome_tipo','?')} {m.get('numero','?')}/{m.get('ano','?')} "
-            f"parte {m.get('chunk','?')}/{m.get('total_chunks','?')} "
-            f"({len(doc.page_content)} chars) >> {preview}..."
-        )
+        logger.info(_resumo_chunk_para_log(i, doc))
     logger.info("=" * 60)
     
     # Determinar o tipo de consulta (normalizando para evitar problemas com acentos/maiusculas)
@@ -3555,7 +4242,11 @@ Conteudo:
                 })
                 
                 logger.info("✅ Resposta gerada com DeepSeek (fallback)")
-                return f"🔄 **Resposta gerada com DeepSeek (OpenAI indisponível por limite de cota)**\n\n{resposta_deepseek.content}", "deepseek"
+                return (
+                    "**Resposta gerada pelo DeepSeek, pois a OpenAI atingiu "
+                    "o limite de uso.**\n\n"
+                    f"{resposta_deepseek.content}"
+                ), "deepseek"
                 
             except Exception as e_deepseek:
                 logger.error(f"❌ Fallback DeepSeek também falhou: {str(e_deepseek)}")
@@ -3613,7 +4304,11 @@ Conteudo:
                 except Exception as e3:
                     logger.error(f"Resposta de emergencia falhou: {e3}")
             
-            return f"❌ Não foi possível gerar uma resposta devido a limitações temporárias da API. Tente novamente em alguns minutos ou use o modo de embeddings locais.", modelo_usado
+            return (
+                "Não foi possível gerar a resposta porque os serviços de "
+                "inteligência artificial estão temporariamente indisponíveis. "
+                "Tente novamente em alguns minutos."
+            ), modelo_usado
 
 def _preparar_contexto_resposta(pergunta, documentos, modelo_usado="gpt-4"):
     """
@@ -3680,13 +4375,7 @@ def _preparar_contexto_resposta(pergunta, documentos, modelo_usado="gpt-4"):
     for tipo, contagem in contagem_por_tipo.items():
         logger.info(f"  Tipo '{tipo}': {contagem} chunks")
     for i, doc in enumerate(documentos):
-        m = doc.metadata
-        preview = doc.page_content[:120].replace("\n", " ")
-        logger.info(
-            f"  chunk[{i}] {m.get('nome_tipo','?')} {m.get('numero','?')}/{m.get('ano','?')} "
-            f"parte {m.get('chunk','?')}/{m.get('total_chunks','?')} "
-            f"({len(doc.page_content)} chars) >> {preview}..."
-        )
+        logger.info(_resumo_chunk_para_log(i, doc))
     logger.info("=" * 60)
 
     normalized_question = _normalize_text_ascii_lower(pergunta)
@@ -3746,6 +4435,132 @@ def _preparar_contexto_resposta(pergunta, documentos, modelo_usado="gpt-4"):
     return prompt_formatado, template_tipo
 
 
+# Marcadores encontrados na excecao do provedor, agrupados por causa. A ordem
+# importa: causas mais especificas vem antes das genericas. Um erro 402 de
+# credito, por exemplo, tambem menciona limite de tokens, e deve ser
+# classificado como falta de credito.
+_MARCADORES_DE_FALHA: Tuple[Tuple[str, Tuple[str, ...]], ...] = (
+    (
+        "credencial",
+        ("401", "unauthorized", "invalid api key", "no auth credentials"),
+    ),
+    (
+        "credito",
+        ("402", "payment required", "more credits", "insufficient credits",
+         "insufficient_quota", "billing"),
+    ),
+    (
+        "limite_de_uso",
+        ("429", "rate limit", "too many requests", "quota exceeded"),
+    ),
+    (
+        "consulta_longa",
+        ("context length", "context_length_exceeded", "maximum context",
+         "prompt tokens limit", "too many tokens"),
+    ),
+    (
+        "comunicacao",
+        ("timeout", "timed out", "connection", "network", "unreachable",
+         "temporarily unavailable", "503", "502"),
+    ),
+)
+
+# Orientacao apresentada ao usuario final para cada causa. As mensagens nunca
+# repassam o texto bruto do provedor, que pode conter identificadores de conta
+# e detalhes de infraestrutura sem utilidade para quem consulta a norma.
+_ORIENTACAO_POR_FALHA: Dict[str, str] = {
+    "credencial": (
+        "A consulta não pôde ser respondida: o serviço de inteligência "
+        "artificial recusou a credencial de acesso. Avise a equipe técnica "
+        "para verificar a configuração do sistema."
+    ),
+    "credito": (
+        "A consulta não pôde ser respondida: o serviço de inteligência "
+        "artificial está sem saldo contratado. Avise a equipe técnica para "
+        "regularizar o acesso e envie a pergunta novamente depois."
+    ),
+    "limite_de_uso": (
+        "A consulta não pôde ser respondida: o serviço de inteligência "
+        "artificial atingiu o limite de uso por minuto. Aguarde cerca de um "
+        "minuto e envie a pergunta novamente."
+    ),
+    "consulta_longa": (
+        "A consulta reuniu mais texto do que o serviço de inteligência "
+        "artificial aceita de uma vez. Use os filtros da barra lateral para "
+        "restringir os documentos ou torne a pergunta mais específica."
+    ),
+    "comunicacao": (
+        "A consulta não pôde ser respondida: falha de comunicação com o "
+        "serviço de inteligência artificial. Verifique a conexão de rede e "
+        "tente novamente em alguns instantes."
+    ),
+    "desconhecida": (
+        "A consulta não pôde ser respondida devido a uma falha no serviço de "
+        "inteligência artificial. Tente novamente em alguns instantes; se o "
+        "problema continuar, avise a equipe técnica."
+    ),
+}
+
+
+def classificar_falha_de_geracao(erro: Exception) -> str:
+    """
+    Classifica a falha de um provedor de IA em uma causa conhecida.
+
+    Args:
+        erro: Excecao capturada durante a chamada ao provedor.
+
+    Returns:
+        Identificador da causa ("credito", "limite_de_uso", "comunicacao",
+        "credencial", "consulta_longa") ou "desconhecida".
+    """
+    texto = str(erro).lower()
+    for causa, marcadores in _MARCADORES_DE_FALHA:
+        if any(marcador in texto for marcador in marcadores):
+            return causa
+    return "desconhecida"
+
+
+def mensagem_de_falha_de_geracao(erro: Exception) -> str:
+    """
+    Traduz a falha de um provedor de IA em orientacao para o usuario final.
+
+    O texto bruto da excecao fica restrito ao log: ele costuma trazer JSON
+    extenso, identificadores de conta e nomes de provedores, que nao ajudam
+    quem consulta a norma e expoem detalhes internos na tela.
+
+    Args:
+        erro: Excecao capturada durante a chamada ao provedor.
+
+    Returns:
+        Mensagem em linguagem clara, sem detalhes tecnicos.
+    """
+    causa = classificar_falha_de_geracao(erro)
+    return _ORIENTACAO_POR_FALHA.get(
+        causa, _ORIENTACAO_POR_FALHA["desconhecida"]
+    )
+
+
+def resposta_indica_falha(resposta: str) -> bool:
+    """
+    Indica se o texto exibido e um aviso de falha, e nao uma resposta.
+
+    Permite que a interface evite confirmar sucesso e evite procurar citacoes
+    em um texto que nao contem conteudo normativo.
+
+    Args:
+        resposta: Texto devolvido pela geracao.
+
+    Returns:
+        True se o texto for um dos avisos de falha conhecidos.
+    """
+    if not resposta or not resposta.strip():
+        return True
+
+    return any(
+        orientacao in resposta for orientacao in _ORIENTACAO_POR_FALHA.values()
+    )
+
+
 def gerar_resposta_streaming(pergunta, documentos, llm, modelo_usado="gpt-4"):
     """
     Gera resposta via streaming (yield de tokens).
@@ -3776,14 +4591,23 @@ def gerar_resposta_streaming(pergunta, documentos, llm, modelo_usado="gpt-4"):
 
     from langchain_core.messages import HumanMessage
 
+    houve_conteudo = False
     try:
         for chunk in llm.stream([HumanMessage(content=prompt_formatado)]):
             token = chunk.content if hasattr(chunk, "content") else str(chunk)
             if token:
+                houve_conteudo = True
                 yield token
     except Exception as exc:
-        logger.error(f"Erro durante streaming: {exc}")
-        yield f"\n\n[Erro durante geracao: {exc}]"
+        causa = classificar_falha_de_geracao(exc)
+        logger.error(f"Falha na geracao via streaming [{causa}]: {exc}")
+        aviso = mensagem_de_falha_de_geracao(exc)
+        # Se parte da resposta ja foi exibida, o aviso entra como continuacao
+        # para deixar claro que o texto acima esta incompleto.
+        if houve_conteudo:
+            yield f"\n\n---\n\nGeração interrompida. {aviso}"
+        else:
+            yield aviso
 
 
 def extrair_citacoes_da_resposta(resposta):
@@ -3842,6 +4666,66 @@ def extrair_citacoes_da_resposta(resposta):
     logger.info(f"Citações encontradas: {citacoes_normalizadas}")
     return citacoes_normalizadas 
 
+# Cores institucionais por tipo documental (tokens do Design System gov.br,
+# definidos em ui/theme.py). Usadas apenas como faixa lateral do badge, nunca
+# como unico portador de significado (requisito de acessibilidade WCAG).
+_CORES_TIPO_DOCUMENTO: Dict[str, str] = {
+    "instrucao normativa": AZUL_PRIMARIO,
+    "resolucao": AZUL_HOVER,
+    "voto": AZUL_MEDIO,
+    "deliberacao": AZUL_INSTITUCIONAL,
+    "portaria": AZUL_ESCURO,
+}
+
+# Tipos nao mapeados recebem o cinza neutro de texto secundario.
+_COR_TIPO_PADRAO: str = CINZA_SECUNDARIO
+
+
+def _normalizar_rotulo_tipo(tipo: str) -> str:
+    """
+    Normaliza o rotulo de tipo documental para busca na tabela de cores.
+
+    Remove acentuacao e caixa, permitindo casar "Instrucao Normativa",
+    "Instrucao normativa" e "INSTRUCAO NORMATIVA" na mesma chave.
+
+    Args:
+        tipo: Rotulo bruto vindo dos metadados do documento.
+
+    Returns:
+        Rotulo em minusculas e sem acentuacao.
+    """
+    if not isinstance(tipo, str):
+        return ""
+    sem_acento = unicodedata.normalize("NFKD", tipo)
+    sem_acento = "".join(c for c in sem_acento if not unicodedata.combining(c))
+    return sem_acento.strip().lower()
+
+
+def badge_tipo_documento(tipo: str) -> str:
+    """
+    Gera o HTML de um badge institucional para o tipo de documento.
+
+    Substitui os marcadores coloridos (bolinhas) por um rotulo textual com
+    faixa lateral colorida, mantendo o significado legivel sem depender de
+    cor ou icone.
+
+    Args:
+        tipo: Tipo documental (ex.: "Instrucao Normativa", "Resolucao").
+
+    Returns:
+        Fragmento HTML pronto para st.markdown(..., unsafe_allow_html=True).
+    """
+    rotulo = tipo.strip() if isinstance(tipo, str) and tipo.strip() else "Documento"
+    cor = _CORES_TIPO_DOCUMENTO.get(
+        _normalizar_rotulo_tipo(rotulo), _COR_TIPO_PADRAO
+    )
+    rotulo_seguro = html.escape(rotulo)
+    return (
+        f'<span class="badge-tipo" style="border-left:3px solid {cor};">'
+        f"{rotulo_seguro}</span>"
+    )
+
+
 def interface_usuario_unificada():
     """Interface principal do sistema RAG unificado."""
     st.set_page_config(
@@ -3859,61 +4743,32 @@ def interface_usuario_unificada():
     if "mensagens_chat" not in st.session_state:
         st.session_state.mensagens_chat = []
     
-    # CSS personalizado
-    st.markdown("""
-    <style>
-    .main-header {
-        background: linear-gradient(90deg, #1e3c72 0%, #2a5298 100%);
-        padding: 1rem;
-        border-radius: 10px;
-        margin-bottom: 2rem;
-        color: white;
-        text-align: center;
-    }
-    .provider-status {
-        padding: 0.5rem;
-        border-radius: 5px;
-        margin: 0.5rem 0;
-        font-weight: bold;
-    }
-    .status-ok { background-color: #d4edda; color: #155724; }
-    .status-error { background-color: #f8d7da; color: #721c24; }
-    .status-warning { background-color: #fff3cd; color: #856404; }
-    .metric-card {
-        background: #f8f9fa;
-        padding: 1rem;
-        border-radius: 8px;
-        border-left: 4px solid #007bff;
-        margin: 0.5rem 0;
-    }
-    .citation-box {
-        background: #e9ecef;
-        padding: 1rem;
-        border-radius: 8px;
-        border-left: 4px solid #28a745;
-        margin: 1rem 0;
-    }
-    </style>
-    """, unsafe_allow_html=True)
-    
-    # Header principal
-    st.markdown("""
-    <div class="main-header">
-        <h1>🚛 Sistema RAG Unificado - ANTT</h1>
-        <p>Consulte regulamentações da ANTT com múltiplos provedores de IA</p>
-    </div>
-    """, unsafe_allow_html=True)
+    # Identidade visual gov.br centralizada em ui/theme.py. A altura do
+    # campo de pergunta vem do preset escolhido na barra lateral.
+    if CHAVE_ALTURA_CAMPO not in st.session_state:
+        st.session_state[CHAVE_ALTURA_CAMPO] = ALTURA_CAMPO_PADRAO
+    aplicar_estilo_institucional(
+        altura_campo_rem=resolver_altura_campo_pergunta(
+            st.session_state[CHAVE_ALTURA_CAMPO]
+        )
+    )
+
+    renderizar_cabecalho(
+        "Sistema de Consulta Normativa - ANTT",
+        "Consulta assistida a resoluções, instruções normativas e "
+        "deliberações",
+    )
     
     # Sidebar para configurações
     with st.sidebar:
-        st.header("⚙️ Configurações")
+        st.header("Configurações")
         
         # Seleção do provedor
-        st.subheader("🤖 Provedor de IA")
+        st.subheader("Serviço de IA")
         providers = get_available_providers()
         provider_names = {
-            "openai": "⚠️ OpenAI (GPT-4) - Limitado por Cota",
-            "deepseek": "✅ DeepSeek (Recomendado)"
+            "openai": "OpenAI (GPT-4)",
+            "deepseek": "DeepSeek"
         }
         
         # Tornar DeepSeek padrão
@@ -3922,11 +4777,11 @@ def interface_usuario_unificada():
             default_index = list(providers.keys()).index("deepseek")
         
         selected_provider = st.selectbox(
-            "Escolha o provedor:",
+            "Serviço:",
             options=list(providers.keys()),
             format_func=lambda x: provider_names.get(x, x),
             index=default_index,
-            help="DeepSeek é recomendado por não ter limitações de cota"
+            help="Serviço de IA que redige a resposta."
         )
         
         # Seleção do modelo
@@ -3942,41 +4797,68 @@ def interface_usuario_unificada():
         
         # Informação sobre fallback automático
         if selected_provider == "openai":
-            st.warning("⚠️ **Fallback Automático Ativo**: Se OpenAI exceder cota, DeepSeek será usado automaticamente")
-        elif selected_provider == "deepseek":
-            st.success("✅ **Provedor Confiável**: DeepSeek não possui limitações de cota")
+            st.caption(
+                "Se a OpenAI atingir o limite de uso, o DeepSeek assume "
+                "automaticamente e a consulta continua."
+            )
         
         # Status das APIs
-        st.subheader("🔑 Status das APIs")
+        st.subheader("Situação dos serviços")
         
         # Verificar status do OpenAI
         try:
             openai_manager = create_llm_manager("openai")
-            st.markdown('<div class="provider-status status-ok">✅ OpenAI: Conectado</div>', unsafe_allow_html=True)
+            st.markdown(
+                '<div class="provider-status status-ok">OpenAI: conectado</div>',
+                unsafe_allow_html=True,
+            )
         except Exception as e:
-            st.markdown(f'<div class="provider-status status-error">❌ OpenAI: {str(e)[:50]}...</div>', unsafe_allow_html=True)
+            st.markdown(
+                f'<div class="provider-status status-error">'
+                f"OpenAI: indisponível ({str(e)[:50]})</div>",
+                unsafe_allow_html=True,
+            )
         
         # Verificar status do DeepSeek
         try:
             deepseek_manager = create_llm_manager("deepseek")
-            st.markdown('<div class="provider-status status-ok">✅ DeepSeek: Conectado</div>', unsafe_allow_html=True)
+            st.markdown(
+                '<div class="provider-status status-ok">DeepSeek: conectado</div>',
+                unsafe_allow_html=True,
+            )
         except Exception as e:
-            st.markdown(f'<div class="provider-status status-error">❌ DeepSeek: {str(e)[:50]}...</div>', unsafe_allow_html=True)
+            st.markdown(
+                f'<div class="provider-status status-error">'
+                f"DeepSeek: indisponível ({str(e)[:50]})</div>",
+                unsafe_allow_html=True,
+            )
         
         # Configurações avançadas
-        st.subheader("🔧 Configurações Avançadas")
+        st.subheader("Configurações avançadas")
         
         temperatura = st.slider(
-            "Temperatura:",
+            "Liberdade de redação:",
             min_value=0.0,
             max_value=1.0,
             value=0.1,
             step=0.1,
-            help="Controla a criatividade das respostas"
+            help="Valores baixos deixam a resposta mais objetiva e fiel "
+                 "ao texto das normas."
+        )
+
+        rotulos_altura = rotulos_altura_campo_pergunta()
+        st.radio(
+            "Tamanho do campo de pergunta:",
+            options=list(rotulos_altura.keys()),
+            format_func=lambda chave: rotulos_altura[chave],
+            horizontal=True,
+            key=CHAVE_ALTURA_CAMPO,
+            help="Define a altura do campo no rodape. Depois, arraste a "
+                 "borda inferior para refinar.",
         )
         
         # Seleção do provedor de embeddings
-        st.markdown("**🔤 Provedor de Embeddings**")
+        st.markdown("**Localização dos documentos**")
         embedding_providers = get_available_embedding_providers()
         
         # Criar lista de opções com descrições claras
@@ -3984,68 +4866,80 @@ def interface_usuario_unificada():
         embedding_labels = [embedding_providers[key]["name"] for key in embedding_options]
         
         selected_embedding_provider = st.selectbox(
-            "Escolha o provedor de embeddings:",
+            "Como localizar os trechos:",
             options=embedding_options,
             format_func=lambda x: embedding_providers[x]["name"],
-            index=0,  # Padrão é local (realmente gratuito)
-            help="⚠️ IMPORTANTE: Local é 100% gratuito, OpenAI consome créditos pagos"
+            index=0,  # Padrão é processamento local
+            help="Local funciona sem internet. OpenAI usa serviço externo."
         )
         
         # Mostrar descrição detalhada da opção selecionada
         selected_info = embedding_providers[selected_embedding_provider]
         
         if selected_embedding_provider == "local":
-            st.success(f"✅ **{selected_info['name']}**")
-            st.info("🎉 **100% GRATUITO** - Usa sentence-transformers offline")
+            st.caption(
+                f"{selected_info['name']}: a busca é feita na própria "
+                "máquina, sem enviar dados para fora."
+            )
         elif selected_embedding_provider == "openai":
-            st.warning(f"💰 **{selected_info['name']}**")
-            st.warning("⚠️ **CONSOME CRÉDITOS** - Cada busca usa tokens pagos da OpenAI")
+            st.caption(
+                f"{selected_info['name']}: a busca utiliza o serviço "
+                "externo da OpenAI."
+            )
         elif selected_embedding_provider == "free":
-            st.info(f"⚡ **{selected_info['name']}**")
-            st.info("🔄 Tenta local primeiro (gratuito), fallback para OpenAI se necessário")
+            st.caption(
+                f"{selected_info['name']}: tenta a busca local primeiro e "
+                "recorre à OpenAI apenas se necessário."
+            )
         
         # Mostrar status da dependência
         if selected_embedding_provider == "local":
             try:
                 import sentence_transformers
-                st.success("🔑 sentence-transformers instalado - Pronto para uso gratuito!")
+                st.caption("Componente de busca local instalado.")
             except ImportError:
-                st.error("❌ sentence-transformers não encontrado - Execute: pip install sentence-transformers")
+                st.error(
+                    "Componente de busca local ausente. Peça à equipe "
+                    "técnica para instalar o pacote sentence-transformers."
+                )
         elif selected_embedding_provider == "openai":
             try:
                 if get_openai_api_key():
-                    st.success("🔑 Chave OpenAI configurada")
-                    st.warning("💸 Lembre-se: cada consulta consome créditos!")
+                    st.caption("Credencial da OpenAI configurada.")
                 else:
-                    st.error("❌ Chave OpenAI não encontrada")
-            except:
-                st.warning("⚠️ Verificação de chave OpenAI falhou")
+                    st.error(
+                        "Credencial da OpenAI não encontrada. "
+                        "Use a opção local ou solicite a configuração."
+                    )
+            except Exception:
+                st.warning(
+                    "Não foi possível verificar a credencial da OpenAI."
+                )
         
         st.divider()
 
         btn_col_a, btn_col_b = st.columns(2)
         with btn_col_a:
-            if st.button("Nova Conversa", use_container_width=True,
-                          help="Limpa o histórico de conversa para iniciar um novo tema"):
+            if st.button("Nova conversa", use_container_width=True,
+                          help="Apaga as perguntas e respostas desta sessão."):
                 st.session_state.chat_history = []
                 if "mensagens_chat" in st.session_state:
                     st.session_state.mensagens_chat = []
                 st.rerun()
 
         with btn_col_b:
-            if st.button("Reindexar Base", use_container_width=True,
-                          help="Regenera o catálogo e reconstrói o vectorstore com todos os documentos de dados_antt/"):
+            if st.button("Atualizar base", use_container_width=True,
+                          help="Inclui na consulta os documentos novos ou "
+                               "alterados. Leva alguns minutos."):
                 st.session_state["_reindexando"] = True
                 st.rerun()
 
         if st.button(
-            "Limpar Cache OCR e Reindexar",
+            "Reprocessar tabelas em imagem",
             use_container_width=True,
             help=(
-                "Remove todo o cache de OCR e forca a re-extracao "
-                "das imagens com o pipeline v3 (multi-estrategia, "
-                "validacao de qualidade, correcao de tabelas). "
-                "Usar quando tabelas tiverem dados numericos incorretos."
+                "Relê as tabelas que estão em imagem. Use quando um número "
+                "da resposta estiver errado. Veja a seção Ajuda."
             ),
         ):
             st.session_state["_limpar_ocr_e_reindexar"] = True
@@ -4064,15 +4958,18 @@ def interface_usuario_unificada():
                 except OSError:
                     pass
             st.info(
-                f"Cache OCR limpo ({len(cache_files)} arquivo(s) removidos). "
-                "Reindexando com re-extração..."
+                f"Leitura anterior das tabelas em imagem descartada "
+                f"({len(cache_files)} arquivo(s)). Atualizando a base..."
             )
             st.session_state["_reindexando"] = True
 
         # Executar reindexacao (precisa estar fora do button para manter o spinner)
         if st.session_state.get("_reindexando"):
             del st.session_state["_reindexando"]
-            with st.spinner("Reindexando base de conhecimento... (pode levar alguns minutos, dependendo da quantidade de documentos)"):
+            with st.spinner(
+                "Atualizando a base de documentos. "
+                "Isso pode levar alguns minutos."
+            ):
                 sucesso, msg = reindexar_base_completa(
                     embedding_provider=selected_embedding_provider
                 )
@@ -4082,62 +4979,105 @@ def interface_usuario_unificada():
                 st.session_state.pop("_docs_novos_checado", None)
                 st.session_state.pop("_docs_novos_lista", None)
                 st.session_state.pop("_vectorstore_desatualizado", None)
-                st.balloons()
             else:
                 st.error(msg)
 
         st.divider()
 
         max_tokens = st.number_input(
-            "Maximo de tokens:",
+            "Tamanho máximo da resposta:",
             min_value=500,
             max_value=4096,
             value=2048,
             step=256,
-            help="Limite de tokens para a resposta gerada pelo LLM. "
-                 "Valores altos consomem mais creditos no OpenRouter. "
-                 "Recomendado: 2048-3072 para respostas detalhadas."
+            help="Limita o comprimento da resposta. Recomendado: 2048 a 3072."
         )
         
         num_documentos = st.slider(
-            "Documentos para busca:",
+            "Trechos consultados por pergunta:",
             min_value=5,
             max_value=40,
             value=20,
-            help="Numero de chunks recuperados da base. Valores maiores trazem "
-                 "mais contexto, mas podem diluir a relevancia."
+            help="Quantos trechos o sistema lê antes de responder. "
+                 "Recomendado: 20."
         )
         
         # Filtros de busca
-        st.subheader("🔍 Filtros de Busca")
+        st.subheader("Filtros de busca")
         
         tipo_documento = st.selectbox(
             "Tipo de documento:",
             options=["Todos", "RES", "INM", "DLB", "POR", "INC"],
-            help="Filtrar por tipo de documento"
+            help="Restringe a busca a um tipo de ato normativo."
         )
         
         ano_filtro = st.selectbox(
             "Ano:",
             options=["Todos"] + [str(year) for year in range(2024, 2019, -1)],
-            help="Filtrar por ano do documento"
+            help="Restringe a busca ao ano escolhido."
         )
         
         numero_filtro = st.text_input(
             "Número do documento:",
             placeholder="Ex: 6057",
-            help="Filtrar por número específico"
+            help="Busca um documento pelo número. Exemplo: 6057."
         )
+
+        st.divider()
+
+        # Orientacao detalhada fica aqui, e nao nos tooltips: o balao de
+        # ajuda do Streamlit e estreito e corta textos longos.
+        with st.expander("Ajuda"):
+            st.markdown(
+                """
+**Como perguntar**
+
+Escreva a dúvida em linguagem natural, como faria a um colega.
+Se souber o documento, cite-o na pergunta para melhorar a precisão.
+
+**Quando usar Atualizar base**
+
+- Documentos foram incluídos, substituídos ou removidos da pasta de dados
+- Aparece o aviso de documentos pendentes no topo da tela
+- Uma norma que você sabe que existe não é encontrada
+- O modelo de localização dos trechos (embeddings) foi alterado
+
+Reconstrói o índice a partir dos textos já convertidos e reaproveita o
+cache de OCR quando ele estiver válido. Use esta opção após trocar o
+embedding local. Leva alguns minutos.
+
+**Quando usar Reprocessar tabelas em imagem**
+
+Parte das tabelas das normas (parâmetros de IRI, deflexão, prazos) está
+nos documentos como imagem. O sistema converte essas imagens em texto e
+guarda o resultado para não refazer o trabalho a cada consulta.
+
+Use este botão quando **um valor numérico da resposta estiver errado**
+em relação ao documento original. Por exemplo:
+
+- Valores trocados entre colunas ou entre fases
+- Casa decimal deslocada (60 no lugar de 6,0)
+- Uma coluna ou linha da tabela ausente na resposta
+
+Não é uma rotina de manutenção. É bem mais demorado que Atualizar base
+e só deve ser acionado diante de erro observado em tabela. Para
+divergência de texto corrido, use Atualizar base.
+
+**Se a resposta parecer incompleta**
+
+- Aumente Trechos consultados por pergunta nas configurações avançadas
+- Verifique se algum filtro na barra lateral está restringindo a busca
+- Reformule a pergunta com os termos usados na norma
+                """
+            )
     
     # Carregar vectorstore primeiro (fora dos containers)
     try:
         vectorstore = carregar_vectorstore_com_provider(selected_embedding_provider)
-        vectorstore_status = "Sistema Pronto"
         vectorstore_loaded = True
     except Exception as e:
         logger.error(f"Erro ao carregar vectorstore: {str(e)}")
         vectorstore = None
-        vectorstore_status = "Sistema Indisponivel"
         vectorstore_loaded = False
 
     # Verificacao automatica de documentos novos na inicializacao
@@ -4175,107 +5115,74 @@ def interface_usuario_unificada():
 
     if docs_novos:
         st.warning(
-            f"Detectados **{len(docs_novos)}** documento(s) novo(s) em `dados_antt/` "
-            f"que ainda não foram indexados na base de conhecimento. "
-            f"Clique em **Reindexar Base** na barra lateral para atualizar."
+            f"Há **{len(docs_novos)}** documento(s) ainda não incluído(s) na "
+            f"base de consulta. Enquanto isso, eles não aparecerão nas "
+            f"respostas. Use **Atualizar base** na barra lateral para incluí-los."
         )
         with st.expander(f"Ver {len(docs_novos)} documento(s) pendente(s)"):
             for nome in docs_novos:
                 st.text(nome)
     elif vectorstore_desatualizado:
         st.warning(
-            "O vectorstore parece estar desatualizado em relação ao catálogo de documentos. "
-            "Clique em **Reindexar Base** na barra lateral para reconstruir."
+            "A base de consulta está desatualizada em relação aos documentos "
+            "disponíveis. Use **Atualizar base** na barra lateral para atualizá-la."
         )
 
-    # Layout principal em duas colunas
-    col_main, col_info = st.columns([2, 1])
-    
-    with col_main:
-        # Exibir historico visual do chat
-        if st.session_state.mensagens_chat:
-            chat_container = st.container()
-            with chat_container:
-                for msg in st.session_state.mensagens_chat:
-                    with st.chat_message("user"):
-                        st.markdown(msg["pergunta"])
-                    with st.chat_message("assistant"):
-                        st.markdown(msg["resposta"])
-                        if msg.get("provider"):
-                            st.caption(f"Resposta via {msg['provider']}")
-            st.divider()
+    # Situacao da consulta em linha unica, acima da conversa. Antes ocupava
+    # uma coluna lateral de um terco da largura, que repetia dados da barra
+    # lateral e estreitava a leitura da resposta.
+    if vectorstore_loaded:
+        origem_dos_trechos = "Base de documentos carregada"
+        if hasattr(vectorstore, "_embedding_provider"):
+            provider = vectorstore._embedding_provider
+            if provider == "local":
+                origem_dos_trechos = "Base de documentos (busca local)"
+            elif provider == "openai":
+                origem_dos_trechos = "Base de documentos (busca via OpenAI)"
 
-        # Verificar se ha um exemplo selecionado no session_state
-        valor_inicial = ""
-        if "pergunta_exemplo" in st.session_state:
-            valor_inicial = st.session_state.pergunta_exemplo
-
-        # Campo de pergunta principal
-        pergunta = st.text_area(
-            "Digite sua pergunta sobre documentos da ANTT:",
-            value=valor_inicial,
-            height=100,
-            help="Digite sua consulta sobre regulamentações, normas ou procedimentos da ANTT"
+        nome_provedor_ia = provider_names.get(
+            selected_provider, selected_provider
         )
-        
-        # Botões de ação
-        btn_col1, btn_col2, btn_col3, btn_col4 = st.columns([2, 2, 2, 2])
-        
-        with btn_col1:
-            consultar = st.button("🔍 Consultar", type="primary", use_container_width=True)
-        
-        with btn_col2:
-            limpar = st.button("🗑️ Limpar", use_container_width=True)
-        
-        with btn_col3:
-            exemplos = st.button("💡 Exemplos", use_container_width=True)
-        
-        with btn_col4:
-            if vectorstore_loaded:
-                st.success(vectorstore_status)
-            else:
-                st.error(vectorstore_status)
+        nome_embeddings = embedding_providers.get(
+            selected_embedding_provider, {}
+        ).get("name", selected_embedding_provider)
 
-    with col_info:
-        st.subheader("📊 Informações")
-        
-        # Mostrar aviso se usando embeddings gratuitos
-        if selected_embedding_provider == "local":
-            st.success("🎉 **Modo 100% Gratuito Ativo**: Sistema usando embeddings locais offline - sem custos!")
-        elif selected_embedding_provider == "free":
-            st.info("⚡ **Modo Automático**: Sistema tentará usar embeddings locais primeiro, com fallback para OpenAI se necessário")
-        elif selected_embedding_provider == "openai":
-            st.warning("💰 **Modo Pago Ativo**: Sistema usando embeddings OpenAI - consome créditos a cada consulta")
-        
-        # Estatísticas básicas
-        if vectorstore_loaded:
-            # Verificar qual vectorstore foi carregado
-            vectorstore_info = "📚 Base de Conhecimento Carregada"
-            if hasattr(vectorstore, '_embedding_provider'):
-                provider = vectorstore._embedding_provider
-                path = getattr(vectorstore, '_vectorstore_path', 'N/A')
-                
-                if provider == "local":
-                    vectorstore_info = "🆓 **Vectorstore Local** (Gratuito)"
-                    st.success("✅ Usando base de conhecimento com embeddings locais")
-                elif provider == "openai":
-                    vectorstore_info = "💰 **Vectorstore OpenAI** (Pago)"
-                    st.warning("⚠️ Usando base de conhecimento com embeddings pagos")
-                else:
-                    vectorstore_info = f"📚 **Vectorstore {provider.title()}**"
-            
-            st.markdown(f"""
-            <div class="metric-card">
-                <h4>{vectorstore_info}</h4>
-                <p>✅ Sistema operacional</p>
-                <p>🔍 Busca semântica ativa</p>
-                <p>🤖 IA: """ + provider_names.get(selected_provider, selected_provider) + """</p>
-                <p>🔤 Embeddings: """ + embedding_providers.get(selected_embedding_provider, {}).get("name", selected_embedding_provider) + """</p>
-            </div>
-            """, unsafe_allow_html=True)
-        else:
-            st.error("❌ Erro ao carregar base de conhecimento")
+        st.caption(
+            f"{origem_dos_trechos}. Serviço de IA: {nome_provedor_ia}. "
+            f"Localização dos trechos: {nome_embeddings}."
+        )
+    else:
+        st.error(
+            "A base de documentos não pôde ser carregada. "
+            "Use Atualizar base na barra lateral ou contate a "
+            "equipe técnica."
+        )
+
+    # A conversa ocupa a largura total e cresce para baixo; o campo de
+    # pergunta fica fixo no rodape, logo abaixo da ultima resposta.
+    for msg in st.session_state.mensagens_chat:
+        with st.chat_message("user"):
+            st.markdown(msg["pergunta"])
+        with st.chat_message("assistant"):
+            st.markdown(msg["resposta"])
+            if msg.get("provider"):
+                st.caption(f"Resposta via {msg['provider']}")
+
+    # Sugestoes de consulta so aparecem enquanto a conversa esta vazia, para
+    # nao competir com o historico depois que o dialogo comeca.
+    exemplos = False
+    if not st.session_state.mensagens_chat:
+        exemplos = True
     
+    # Campo de pergunta. O Streamlit fixa o st.chat_input no rodape da
+    # pagina, de modo que ele acompanha o fim da conversa em vez de ficar
+    # acima da ultima resposta. Altura e largura sao ajustaveis pelo
+    # usuario (alca no canto inferior direito; ver ui/theme.py).
+    pergunta = st.chat_input(
+        "Digite sua pergunta sobre documentos da ANTT",
+        disabled=not vectorstore_loaded,
+    )
+
     # Verificar se deve processar automaticamente um exemplo
     processar_exemplo_automatico = False
     if "processar_automatico" in st.session_state and st.session_state.processar_automatico:
@@ -4284,7 +5191,7 @@ def interface_usuario_unificada():
         del st.session_state.processar_automatico
 
     # Processamento da consulta
-    if (consultar and pergunta and vectorstore_loaded) or (processar_exemplo_automatico and vectorstore_loaded):
+    if vectorstore_loaded and (pergunta or processar_exemplo_automatico):
         # Para processamento automático, usar a pergunta do session_state se disponível
         pergunta_para_processar = pergunta
         if processar_exemplo_automatico and "pergunta_exemplo" in st.session_state:
@@ -4292,18 +5199,13 @@ def interface_usuario_unificada():
         
         # Verificar se temos uma pergunta válida
         if not pergunta_para_processar or pergunta_para_processar.strip() == "":
-            st.error("❌ Nenhuma pergunta fornecida para processamento")
+            st.error("Nenhuma pergunta fornecida para processamento.")
         else:
-            # Mostrar indicação se é processamento automático
-            if processar_exemplo_automatico:
-                st.info(f"🚀 **Processamento Automático**: Executando exemplo selecionado")
-                st.markdown(f"**Pergunta:** {pergunta_para_processar}")
-            
             # Limpar a pergunta do exemplo após usar
             if "pergunta_exemplo" in st.session_state:
                 del st.session_state.pergunta_exemplo
             
-            with st.spinner("🔍 Processando consulta..."):
+            with st.spinner("Processando consulta..."):
                 try:
                     # Tentar criar LLM manager com o provedor selecionado
                     llm_manager = None
@@ -4313,27 +5215,44 @@ def interface_usuario_unificada():
                     try:
                         llm_manager = create_llm_manager(selected_provider, selected_model)
                         llm = llm_manager.get_llm(temperature=temperatura, max_tokens=max_tokens)
-                        st.info(f"✅ Usando {provider_names.get(selected_provider, selected_provider)}")
+                        st.caption(
+                            f"Serviço em uso: "
+                            f"{provider_names.get(selected_provider, selected_provider)}"
+                        )
                     except Exception as e:
                         error_msg = str(e).lower()
                         if any(keyword in error_msg for keyword in ["insufficient_quota", "429", "quota", "exceeded"]):
-                            st.warning(f"⚠️ {provider_names.get(selected_provider, selected_provider)} com problema de cota. Tentando DeepSeek...")
+                            st.warning(
+                                f"{provider_names.get(selected_provider, selected_provider)} "
+                                "atingiu o limite de uso. Acionando o DeepSeek."
+                            )
                             
                             # Fallback para DeepSeek
                             try:
                                 llm_manager = create_llm_manager("deepseek")
                                 llm = llm_manager.get_llm(temperature=temperatura, max_tokens=max_tokens)
                                 provider_usado = "deepseek"
-                                st.success("✅ Usando DeepSeek como alternativa")
+                                st.caption(
+                                    "Serviço em uso: DeepSeek "
+                                    "(acionado automaticamente)."
+                                )
                             except Exception as e2:
-                                st.error(f"❌ Erro ao usar DeepSeek: {str(e2)}")
+                                st.error(f"Falha ao acionar o DeepSeek: {str(e2)}")
                                 raise e2
                         else:
-                            st.error(f"❌ Erro ao configurar {provider_names.get(selected_provider, selected_provider)}: {str(e)}")
+                            st.error(
+                                f"Falha ao configurar "
+                                f"{provider_names.get(selected_provider, selected_provider)}: "
+                                f"{str(e)}"
+                            )
                             raise e
                     
                     if llm is None:
-                        st.error("❌ Não foi possível configurar nenhum provedor de IA")
+                        st.error(
+                            "Nenhum serviço de inteligência artificial está "
+                            "disponível no momento. Verifique a configuração "
+                            "na barra lateral."
+                        )
                         return
                     
                     # Aplicar filtros
@@ -4391,18 +5310,23 @@ def interface_usuario_unificada():
                             with st.chat_message("assistant"):
                                 st.markdown(resposta)
 
+                        houve_falha = resposta_indica_falha(resposta)
                         logger.info(
-                            f"DEBUG: Resposta gerada - Tamanho: "
+                            f"DEBUG: Resposta {'nao ' if houve_falha else ''}"
+                            f"gerada - Tamanho: "
                             f"{len(resposta) if resposta else 0} caracteres"
                         )
 
-                        # Salvar no historico de conversa para reescrita (max 5 turnos)
-                        st.session_state.chat_history.append({
-                            "pergunta": pergunta_original,
-                            "resposta": resposta if resposta else "",
-                        })
-                        if len(st.session_state.chat_history) > 5:
-                            st.session_state.chat_history = st.session_state.chat_history[-5:]
+                        # Um aviso de falha nao pode entrar no historico de
+                        # conversa: ele seria reaproveitado como contexto na
+                        # reescrita da proxima pergunta.
+                        if not houve_falha:
+                            st.session_state.chat_history.append({
+                                "pergunta": pergunta_original,
+                                "resposta": resposta if resposta else "",
+                            })
+                            if len(st.session_state.chat_history) > 5:
+                                st.session_state.chat_history = st.session_state.chat_history[-5:]
 
                         # Salvar no historico visual do chat
                         st.session_state.mensagens_chat.append({
@@ -4411,24 +5335,30 @@ def interface_usuario_unificada():
                             "provider": provider_label,
                         })
 
-                        # Mostrar qual provedor foi usado
-                        st.success(f"Resposta gerada com {provider_label}")
-                        
+                        if houve_falha:
+                            st.caption(
+                                "A consulta não foi respondida. Os trechos "
+                                "localizados na base continuam listados "
+                                "abaixo."
+                            )
+                        else:
+                            st.caption(f"Resposta gerada com {provider_label}")
+
                         # Extrair e exibir citações
                         citacoes = extrair_citacoes_da_resposta(resposta)
                         if citacoes:
                             st.markdown("""
                             <div class="citation-box">
-                                <h4>📚 Documentos Citados</h4>
+                                <h4>Documentos citados</h4>
                             </div>
                             """, unsafe_allow_html=True)
                             
-                            for citacao in citacoes:
-                                st.markdown(f"• {citacao}")
+                            for indice, citacao in enumerate(citacoes, start=1):
+                                st.markdown(f"{indice}. {citacao}")
                         
                         # Exibir trechos dos documentos citados
                         st.markdown("---")
-                        st.markdown("### 📄 Trechos dos Documentos Citados")
+                        st.markdown("### Trechos dos documentos citados")
                         
                         # Extrair citações de documentos da resposta
                         documentos_citados = extrair_citacoes_da_resposta(resposta)
@@ -4490,18 +5420,13 @@ def interface_usuario_unificada():
                                             documentos_exibidos.add(doc_display_id)
                                             
                                             with st.container(border=True):
-                                                # Adicionar uma indicação visual da cor
-                                                if "Instrução" in doc_id:
-                                                    st.markdown("🔵 **Instrução Normativa**")
-                                                elif "Resolução" in doc_id:
-                                                    st.markdown("🟠 **Resolução**")
-                                                elif "Voto" in doc_id:
-                                                    st.markdown("🟣 **Voto**")
-                                                elif "Deliberação" in doc_id:
-                                                    st.markdown("🟡 **Deliberação**")
-                                                else:
-                                                    st.markdown("🟢 **Documento**")
-                                                    
+                                                st.markdown(
+                                                    badge_tipo_documento(
+                                                        meta.get("nome_tipo", "Documento")
+                                                    ),
+                                                    unsafe_allow_html=True,
+                                                )
+
                                                 st.markdown(f"#### {doc_id}")
                                                 st.caption(f"Parte {meta.get('chunk', 'N/A')}/{meta.get('total_chunks', 'N/A')} • Fonte: `{meta.get('caminho', 'Não especificado')}`")
                                                 st.text_area(
@@ -4518,7 +5443,11 @@ def interface_usuario_unificada():
                         
                         # Se não encontramos citações explícitas ou os documentos citados
                         if not documentos_citados or not documentos_encontrados:
-                            st.info("⚠️ Não foram encontradas citações de documentos específicos na resposta, ou os documentos citados não estão entre os recuperados. Exibindo os documentos mais relevantes:")
+                            st.info(
+                                "A resposta não citou documentos de forma explícita. "
+                                "Veja abaixo os documentos mais relacionados à "
+                                "sua pergunta."
+                            )
                             
                             # Mostrar os 3 documentos mais relevantes
                             with st.container(border=True):
@@ -4529,18 +5458,11 @@ def interface_usuario_unificada():
                                     ano = meta.get('ano', 'N/A')
                                     doc_id = f"{tipo} {numero}/{ano}"
                                     
-                                    # Adicionar indicação visual do tipo de documento
-                                    if "Instrução" in tipo:
-                                        st.markdown("🔵 **Instrução Normativa**")
-                                    elif "Resolução" in tipo:
-                                        st.markdown("🟠 **Resolução**")
-                                    elif "Voto" in tipo:
-                                        st.markdown("🟣 **Voto**")
-                                    elif "Deliberação" in tipo:
-                                        st.markdown("🟡 **Deliberação**")
-                                    else:
-                                        st.markdown("🟢 **Documento**")
-                                    
+                                    st.markdown(
+                                        badge_tipo_documento(tipo),
+                                        unsafe_allow_html=True,
+                                    )
+
                                     st.markdown(f"**{doc_id}** - Parte {meta.get('chunk', 'N/A')}/{meta.get('total_chunks', 'N/A')}")
                                     st.caption(f"Fonte: `{meta.get('caminho', 'Não especificado')}`")
                                     st.text_area(
@@ -4555,26 +5477,31 @@ def interface_usuario_unificada():
                                         st.divider()
                         
                         # Informações sobre a busca
-                        with st.expander("🔍 Detalhes da Busca"):
+                        with st.expander("Detalhes da busca"):
                             st.write(f"**Documentos encontrados:** {len(documentos)}")
                             
                             # Mostrar provedor que foi realmente usado
                             if modelo_usado_final != provider_usado:
-                                st.write(f"**Provedor selecionado:** {provider_names.get(selected_provider, selected_provider)}")
-                                st.write(f"**Provedor usado (fallback):** {provider_names.get(modelo_usado_final, modelo_usado_final)}")
+                                st.write(f"**Serviço escolhido:** {provider_names.get(selected_provider, selected_provider)}")
+                                st.write(
+                                    f"**Serviço efetivamente usado:** "
+                                    f"{provider_names.get(modelo_usado_final, modelo_usado_final)} "
+                                    "(acionado automaticamente porque o escolhido "
+                                    "estava indisponível)"
+                                )
                             else:
-                                st.write(f"**Provedor usado:** {provider_names.get(modelo_usado_final, modelo_usado_final)}")
+                                st.write(f"**Serviço usado:** {provider_names.get(modelo_usado_final, modelo_usado_final)}")
                                 
                             st.write(f"**Modelo:** {selected_model}")
-                            st.write(f"**Temperatura:** {temperatura}")
+                            st.write(f"**Liberdade de redação:** {temperatura}")
                             
                             # Mostrar informações sobre template adaptativo
                             if "gpt-4" in selected_model.lower() or modelo_usado_final == "openai":
-                                template_info = "🧠 **Template GPT-4/OpenAI:** Estruturado e detalhado"
+                                template_info = "**Estilo da resposta:** estruturado e detalhado"
                             elif "deepseek" in selected_model.lower() or modelo_usado_final == "deepseek":
-                                template_info = "⚡ **Template DeepSeek:** Direto e conciso"
+                                template_info = "**Estilo da resposta:** direto e conciso"
                             else:
-                                template_info = "📝 **Template Padrão:** Balanceado"
+                                template_info = "**Estilo da resposta:** balanceado"
                             
                             st.markdown(template_info)
                             
@@ -4584,7 +5511,7 @@ def interface_usuario_unificada():
                                 st.write(f"**Doc {i+1}:** {metadata.get('nome_tipo', 'N/A')} {metadata.get('numero', 'N/A')}/{metadata.get('ano', 'N/A')}")
                         
                         # Seção para mostrar todas as fontes consultadas (FORA do expander anterior)
-                        with st.expander("📚 Todas as Fontes Consultadas"):
+                        with st.expander("Todas as fontes consultadas"):
                             # Agrupar documentos por tipo/número/ano
                             documentos_agrupados = {}
                             for doc in documentos:
@@ -4611,24 +5538,18 @@ def interface_usuario_unificada():
                             
                             # Exibir documentos agrupados
                             for i, (doc_id, info) in enumerate(documentos_agrupados.items()):
-                                # Criar um ícone baseado no tipo de documento
-                                icone = "📄"
-                                if "Resolução" in info['tipo']:
-                                    icone = "📜"
-                                elif "Instrução" in info['tipo']:
-                                    icone = "📝"
-                                elif "Deliberação" in info['tipo']:
-                                    icone = "📋"
-                                elif "Voto" in info['tipo']:
-                                    icone = "✅"
-                                
-                                # Destacar documentos mais relevantes
-                                destaque = " 🌟" if i < 3 else ""
+                                # Destacar documentos mais relevantes por rotulo textual,
+                                # nao por icone ou apenas cor (acessibilidade).
+                                destaque = " (mais relevante)" if i < 3 else ""
                                 
                                 # Usar container em vez de expander aninhado
-                                st.markdown(f"### {icone} {doc_id}{destaque}")
+                                st.markdown(f"### {doc_id}{destaque}")
                                 
                                 with st.container(border=True):
+                                    st.markdown(
+                                        badge_tipo_documento(info['tipo']),
+                                        unsafe_allow_html=True,
+                                    )
                                     # Mostrar metadados do documento
                                     col1, col2, col3 = st.columns(3)
                                     with col1:
@@ -4665,29 +5586,26 @@ def interface_usuario_unificada():
                                         )
                     
                     else:
-                        st.warning("Nenhum documento relevante encontrado. Tente reformular sua pergunta.")
+                        st.warning(
+                            "Nenhum documento relacionado à pergunta foi "
+                            "encontrado. Tente reformulá-la com outros termos "
+                            "ou remova os filtros da barra lateral."
+                        )
                         
                 except Exception as e:
-                    st.error(f"Erro ao processar consulta: {str(e)}")
+                    st.error(
+                        "Não foi possível concluir a consulta. "
+                        "Tente novamente em alguns instantes."
+                    )
+                    st.caption(f"Detalhe técnico: {str(e)}")
                     logger.error(f"Erro na consulta: {str(e)}")
         
-    # Limpar campos
-    if limpar:
-        # Limpar session_state
-        for key in list(st.session_state.keys()):
-            if key.startswith(('pergunta_exemplo', 'processar_automatico')):
-                del st.session_state[key]
-        st.rerun()
-    
-    # Separador visual
-    st.markdown("---")
-    
-    # Mostrar exemplos
+    # Sugestoes de consulta, exibidas apenas quando a conversa esta vazia
     if exemplos:
-        st.subheader("💡 Exemplos de Consultas")
-        
-        st.markdown("**Clique diretamente em um dos exemplos abaixo:**")
-        
+        st.subheader("Sugestões de consulta")
+
+        st.caption("Escolha uma sugestão ou escreva sua pergunta abaixo.")
+
         exemplos_consultas = [
             "Quais são os parâmetros técnicos para pavimentos rodoviários?",
             "Como funciona o processo de fiscalização da ANTT?",
@@ -4699,72 +5617,50 @@ def interface_usuario_unificada():
             "Normas sobre tempo de direção e descanso"
         ]
         
-        # Opção para processamento automático
-        processar_automatico_exemplos = st.checkbox(
-            "🚀 Processar automaticamente ao selecionar exemplo",
-            value=True,
-            help="Quando ativado, o exemplo será processado automaticamente após seleção",
-            key="processar_auto_exemplos"
-        )
-        
-        # Organizar exemplos em duas colunas
         col_ex1, col_ex2 = st.columns(2)
-        
+
         for i, exemplo in enumerate(exemplos_consultas):
-            # Alternar entre as colunas
             col = col_ex1 if i % 2 == 0 else col_ex2
-            
+
             with col:
-                # Criar um botão para cada exemplo
+                # A sugestao e enviada assim que selecionada: o campo de
+                # pergunta do rodape nao aceita texto pre-preenchido.
                 if st.button(
-                    f"📋 {exemplo[:60]}{'...' if len(exemplo) > 60 else ''}", 
+                    f"{exemplo[:60]}{'...' if len(exemplo) > 60 else ''}",
                     key=f"btn_exemplo_{i}",
                     use_container_width=True,
-                    help=exemplo  # Tooltip com o texto completo
+                    help=exemplo,
                 ):
-                    # Salvar o exemplo selecionado
                     st.session_state.pergunta_exemplo = exemplo
-                    
-                    if processar_automatico_exemplos and vectorstore_loaded:
-                        # Marcar para processamento automático
-                        st.session_state.processar_automatico = True
-                        st.success(f"✅ Processando: {exemplo[:50]}...")
-                        # Forçar rerun para processar imediatamente
-                        st.rerun()
-                    else:
-                        st.success(f"✅ Exemplo selecionado: {exemplo[:50]}...")
-                        st.info("👆 Role para cima e clique em 'Consultar' para processar")
-        
-        # Botão para limpar seleção
-        if st.button("🔄 Limpar Seleção de Exemplo", use_container_width=True):
-            if "pergunta_exemplo" in st.session_state:
-                del st.session_state.pergunta_exemplo
-            if "processar_automatico" in st.session_state:
-                del st.session_state.processar_automatico
-            st.success("✅ Seleção limpa")
+                    st.session_state.processar_automatico = True
+                    st.rerun()
     
-    # Upload de PDF
-    st.subheader("📄 Processar Novo Documento")
-    
-    upload_col1, upload_col2 = st.columns([3, 1])
-    
-    with upload_col1:
-        uploaded_file = st.file_uploader(
-            "Envie um PDF para adicionar à base de conhecimento:",
-            type=['pdf'],
-            help="O documento será processado e adicionado ao vectorstore"
-        )
-    
-    with upload_col2:
-        if uploaded_file:
-            if st.button("🔄 Processar PDF", use_container_width=True):
+    # Inclusao de documento: acao de operacao, nao de consulta. Fica na barra
+    # lateral para nao se interpor entre a ultima resposta e o campo de
+    # pergunta, que o Streamlit fixa no rodape da area principal.
+    with st.sidebar:
+        with st.expander("Processar novo documento"):
+            uploaded_file = st.file_uploader(
+                "Envie um PDF para adicionar à base de conhecimento:",
+                type=["pdf"],
+                help="O arquivo passará a ser considerado nas próximas consultas."
+            )
+
+            if uploaded_file and st.button(
+                "Processar PDF", use_container_width=True
+            ):
                 try:
                     vectorstore_novo, tabelas = process_pdf(uploaded_file)
                     if vectorstore_novo:
-                        st.success(f"PDF processado com sucesso! {len(tabelas)} tabelas analisadas.")
+                        st.caption(
+                            f"PDF incluído na base. {len(tabelas)} tabela(s) "
+                            "analisada(s)."
+                        )
                         st.rerun()
                     else:
-                        st.warning("Nenhuma tabela relevante encontrada no PDF.")
+                        st.warning(
+                            "Nenhuma tabela relevante encontrada no PDF."
+                        )
                 except Exception as e:
                     st.error(f"Erro ao processar PDF: {str(e)}")
 

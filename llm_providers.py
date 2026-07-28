@@ -10,12 +10,20 @@ import time
 
 from langchain_openai import ChatOpenAI, OpenAIEmbeddings
 from langchain_community.embeddings import OpenAIEmbeddings as CommunityOpenAIEmbeddings
-from config import LLM_PROVIDERS, logger
+from config import LLM_PROVIDERS, LOCAL_EMBEDDING_MODEL, logger
 
 os.environ.setdefault("TOKENIZERS_PARALLELISM", "false")
 
 _LOCAL_EMBEDDINGS_LOCK = threading.Lock()
 _LOADED_SENTENCE_MODELS: dict = {}
+
+# Modelos E5 exigem prefixos distintos para consulta e documento.
+# Sem eles a qualidade de recuperacao cai fortemente.
+_PREFIXOS_POR_MODELO: dict = {
+    "intfloat/multilingual-e5-small": ("query: ", "passage: "),
+    "intfloat/multilingual-e5-base": ("query: ", "passage: "),
+    "intfloat/multilingual-e5-large": ("query: ", "passage: "),
+}
 
 
 def _preparar_ambiente_cpu_embeddings() -> None:
@@ -31,6 +39,21 @@ def _preparar_ambiente_cpu_embeddings() -> None:
         pass
 
 
+def _repo_ids_candidatos(model_name: str) -> list:
+    """
+    Monta a lista de repo_ids HuggingFace a tentar para um modelo.
+
+    Aceita tanto o id curto legado (paraphrase-multilingual-MiniLM-L12-v2)
+    quanto o id completo (intfloat/multilingual-e5-small).
+    """
+    nome = (model_name or "").strip()
+    if not nome:
+        return []
+    if "/" in nome:
+        return [nome]
+    return [f"sentence-transformers/{nome}", nome]
+
+
 def _resolver_snapshot_local(model_name: str):
     """
     Resolve caminho local do snapshot HuggingFace do modelo, se existir.
@@ -38,31 +61,36 @@ def _resolver_snapshot_local(model_name: str):
     Returns:
         str | None: Caminho do snapshot ou None.
     """
-    repo_id = f"sentence-transformers/{model_name}"
     try:
         from huggingface_hub import snapshot_download
-
-        return snapshot_download(repo_id, local_files_only=True)
     except Exception:
-        pass
+        snapshot_download = None
 
     hub_root = os.path.expanduser("~/.cache/huggingface/hub")
-    slug = f"models--sentence-transformers--{model_name.replace('/', '--')}"
-    snapshots_dir = os.path.join(hub_root, slug, "snapshots")
-    if not os.path.isdir(snapshots_dir):
-        return None
 
-    candidatos = []
-    for entry in os.listdir(snapshots_dir):
-        path = os.path.join(snapshots_dir, entry)
-        if os.path.isdir(path):
-            candidatos.append(path)
+    for repo_id in _repo_ids_candidatos(model_name):
+        if snapshot_download is not None:
+            try:
+                return snapshot_download(repo_id, local_files_only=True)
+            except Exception:
+                pass
 
-    if not candidatos:
-        return None
+        slug = f"models--{repo_id.replace('/', '--')}"
+        snapshots_dir = os.path.join(hub_root, slug, "snapshots")
+        if not os.path.isdir(snapshots_dir):
+            continue
 
-    candidatos.sort(key=lambda p: os.path.getmtime(p), reverse=True)
-    return candidatos[0]
+        candidatos = []
+        for entry in os.listdir(snapshots_dir):
+            path = os.path.join(snapshots_dir, entry)
+            if os.path.isdir(path):
+                candidatos.append(path)
+
+        if candidatos:
+            candidatos.sort(key=lambda p: os.path.getmtime(p), reverse=True)
+            return candidatos[0]
+
+    return None
 
 
 def _kwargs_seguros_sentence_transformer():
@@ -78,14 +106,25 @@ def _kwargs_seguros_sentence_transformer():
 
 
 class LocalEmbeddings:
-    """Classe para embeddings locais usando sentence-transformers - 100% GRATUITO.
-    Modelo padrao: paraphrase-multilingual-MiniLM-L12-v2 (50+ idiomas, 384 dims).
+    """
+    Embeddings locais via sentence-transformers.
+
+    Padrao: intfloat/multilingual-e5-small (escolhido no A/B em CPU).
+    Modelos da familia E5 aplicam automaticamente os prefixos query:/passage:
+    e normalizam os vetores (compativel com FAISS por distancia L2).
     """
 
-    def __init__(self, model_name="paraphrase-multilingual-MiniLM-L12-v2"):
-        self.model_name = model_name
+    def __init__(self, model_name=None):
+        """
+        Args:
+            model_name: Id HuggingFace do modelo. None usa LOCAL_EMBEDDING_MODEL.
+        """
+        self.model_name = model_name or LOCAL_EMBEDDING_MODEL
         self.model = None
-        logger.info(f"Carregando modelo local de embeddings: {model_name}")
+        prefixos = _PREFIXOS_POR_MODELO.get(self.model_name, ("", ""))
+        self.query_prefix = prefixos[0]
+        self.doc_prefix = prefixos[1]
+        logger.info(f"Carregando modelo local de embeddings: {self.model_name}")
 
         try:
             self._load_model()
@@ -275,63 +314,71 @@ class LocalEmbeddings:
     
     def embed_query(self, text):
         """
-        Gera embedding para uma única query
-        
+        Gera embedding para uma unica consulta.
+
         Args:
-            text (str): Texto para gerar embedding
-            
+            text (str): Texto da consulta.
+
         Returns:
-            List[float]: Lista de embeddings
+            List[float]: Vetor de embedding.
         """
         if self.model is None:
             self._load_model()
-        
+
+        preparado = f"{self.query_prefix}{text}" if self.query_prefix else text
         try:
-            embedding = self.model.encode([text])
+            embedding = self.model.encode(
+                [preparado],
+                show_progress_bar=False,
+                normalize_embeddings=True,
+            )
             return embedding[0].tolist()
         except Exception as e:
             logger.error(f"Erro ao gerar embedding para query: {e}")
             raise
-    
+
     def embed_documents(self, texts):
         """
-        Gera embeddings para múltiplos documentos
-        
+        Gera embeddings para multiplos documentos.
+
         Args:
-            texts (List[str]): Lista de textos para gerar embeddings
-            
+            texts (List[str]): Textos a indexar.
+
         Returns:
-            List[List[float]]: Lista de embeddings
+            List[List[float]]: Vetores de embedding.
         """
         if self.model is None:
             self._load_model()
-        
+
         try:
-            logger.info(f"🔄 Processando {len(texts)} documentos com embeddings locais...")
+            logger.info(
+                f"Processando {len(texts)} documentos com embeddings locais "
+                f"({self.model_name})..."
+            )
             batch_size = 32
             all_embeddings = []
             for i in range(0, len(texts), batch_size):
                 batch = texts[i:i + batch_size]
-                batch_embeddings = self.model.encode(batch, show_progress_bar=False)
+                preparados = [
+                    f"{self.doc_prefix}{item}" if self.doc_prefix else item
+                    for item in batch
+                ]
+                batch_embeddings = self.model.encode(
+                    preparados,
+                    show_progress_bar=False,
+                    normalize_embeddings=True,
+                )
                 all_embeddings.extend([emb.tolist() for emb in batch_embeddings])
                 processed = min(i + batch_size, len(texts))
-                logger.info(f"📊 Processados {processed}/{len(texts)} documentos")
-            logger.info("✅ Todos os documentos processados com embeddings locais")
+                logger.info(f"Processados {processed}/{len(texts)} documentos")
+            logger.info("Documentos processados com embeddings locais")
             return all_embeddings
         except Exception as e:
             logger.error(f"Erro ao gerar embeddings para documentos: {e}")
             raise
-    
+
     def __call__(self, text):
-        """
-        Torna a classe callable para compatibilidade com FAISS
-        
-        Args:
-            text (str): Texto para gerar embedding
-            
-        Returns:
-            List[float]: Lista de embeddings
-        """
+        """Compatibilidade com FAISS: trata chamada como consulta."""
         return self.embed_query(text)
 
 class LLMManager:
@@ -430,23 +477,25 @@ class LLMManager:
             )
             
         elif self.embedding_provider == "local":
-            # Usar embeddings locais REALMENTE GRATUITOS
-            logger.info("🆓 Inicializando embeddings locais (100% GRATUITO)")
-            
+            logger.info(
+                f"Inicializando embeddings locais: {LOCAL_EMBEDDING_MODEL}"
+            )
             try:
-                return LocalEmbeddings(model_name="paraphrase-multilingual-MiniLM-L12-v2")
+                return LocalEmbeddings(model_name=LOCAL_EMBEDDING_MODEL)
             except Exception as e:
                 logger.error(f"Erro ao inicializar embeddings locais: {e}")
                 raise ValueError(f"Falha ao configurar embeddings locais: {str(e)}")
-            
+
         elif self.embedding_provider == "free":
             # Tentar embeddings locais primeiro, fallback para OpenAI
             try:
-                logger.info("🔄 Tentando embeddings locais gratuitos...")
-                return LocalEmbeddings(model_name="paraphrase-multilingual-MiniLM-L12-v2")
-                
+                logger.info(
+                    f"Tentando embeddings locais ({LOCAL_EMBEDDING_MODEL})..."
+                )
+                return LocalEmbeddings(model_name=LOCAL_EMBEDDING_MODEL)
+
             except Exception as e:
-                logger.warning(f"⚠️ Embeddings locais falharam: {e}")
+                logger.warning(f"Embeddings locais falharam: {e}")
                 
                 # Fallback para OpenAI com configuração muito conservadora
                 logger.info("🔄 Tentando fallback para OpenAI...")
@@ -533,20 +582,22 @@ def get_available_embedding_providers():
     except ImportError:
         local_available = False
     
+    # Os rotulos em "name" sao exibidos diretamente na interface, portanto
+    # seguem o padrao institucional: sem icones e sem referencia a custo.
     providers = {
         "local": {
-            "name": "🆓 Local (100% Gratuito)",
-            "description": "Embeddings locais com sentence-transformers - totalmente offline e gratuito",
+            "name": "Local (offline)",
+            "description": "Busca processada na própria máquina, sem envio de dados para fora.",
             "status": "available" if local_available else "needs_install"
         },
         "openai": {
-            "name": "💰 OpenAI (Pago - Alta Qualidade)",
-            "description": "Embeddings de alta qualidade da OpenAI",
+            "name": "OpenAI (serviço externo)",
+            "description": "Busca processada pelo serviço da OpenAI.",
             "status": "available" if LLM_PROVIDERS["openai"]["get_api_key"]() else "no_key"
         },
         "free": {
-            "name": "⚡ Automático (Local Primeiro)",
-            "description": "Tenta embeddings locais primeiro, fallback para OpenAI se necessário",
+            "name": "Automático (local primeiro)",
+            "description": "Tenta a busca local e recorre à OpenAI apenas se necessário.",
             "status": "available"
         }
     }

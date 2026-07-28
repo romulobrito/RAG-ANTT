@@ -1,0 +1,33 @@
+# Tema nativo do Streamlit alinhado ao Design System do gov.br (DSGov).
+#
+# Os valores abaixo sao tokens oficiais extraidos de
+# @govbr-ds/core@3.7.0/dist/core-tokens.css. Mantenha-os sincronizados com
+# ui/theme.py, que injeta o CSS complementar dos componentes proprios.
+#
+# Referencia: https://www.gov.br/ds/fundamentos-visuais/cor
+
+[theme]
+# --blue-warm-vivid-70: cor primaria de acao (botoes, foco, links).
+primaryColor = "#1351B4"
+# --pure-0: fundo da area de conteudo.
+backgroundColor = "#FFFFFF"
+# --gray-2: fundo da barra lateral e de blocos secundarios.
+secondaryBackgroundColor = "#F8F8F8"
+# --gray-80: texto corrente, contraste 12.6:1 sobre branco (WCAG AAA).
+textColor = "#333333"
+# Fonte de sistema: evita dependencia de rede, exigencia do ambiente da ANTT.
+font = "sans serif"
+
+[server]
+# Habilita a pasta static/ para servir o brasao institucional quando o uso
+# da marca for autorizado pela ANTT.
+enableStaticServing = true
+
+[browser]
+# Ambiente interno da ANTT nao deve enviar estatisticas de uso para terceiros.
+gatherUsageStats = false
+
+[client]
+# Oculta o botao "Deploy" e as opcoes de desenvolvedor da barra superior,
+# que nao fazem sentido para quem consulta a norma.
+toolbarMode = "minimal"

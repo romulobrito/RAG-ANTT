@@ -74,6 +74,9 @@ output/
 *.json
 *.csv
 
+# Relatórios gerados pela comparação de modelos
+relatorios_comparacao/
+
 # Arquivos sensíveis
 secrets.toml
 *.env
@@ -85,6 +88,9 @@ config.json
 
 # Arquivos de configuração
 *.toml
+# O tema institucional precisa ser versionado para reproduzir a identidade
+# visual em qualquer ambiente (dev, homologação e produção).
+!.streamlit/config.toml
 
 # Arquivos de configuração com informações sensíveis
 .env.local

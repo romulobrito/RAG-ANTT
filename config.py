@@ -4,6 +4,7 @@ Gerencia variáveis de ambiente e configurações do aplicativo.
 """
 
 import os
+from typing import Optional
 from dotenv import load_dotenv
 import logging
 
@@ -73,9 +74,20 @@ LLM_PROVIDERS = {
     "deepseek": {
         "name": "DeepSeek (via OpenRouter)",
         "base_url": "https://openrouter.ai/api/v1",
+        # A primeira chave e usada como padrao quando nenhum modelo e
+        # informado. Slugs verificados no catalogo do OpenRouter.
         "models": {
+            # V4 Flash: 1M de contexto e custo menor que o V3 antigo.
+            "deepseek-v4-flash": "deepseek/deepseek-v4-flash",
+            # V4 Pro: maior capacidade, para consultas mais exigentes.
+            "deepseek-v4-pro": "deepseek/deepseek-v4-pro",
+            # V3.2: geracao intermediaria, mantida para comparacao.
+            "deepseek-v3.2": "deepseek/deepseek-v3.2",
+            # V3: modelo usado ate entao, mantido para regressao.
             "deepseek-chat": "deepseek/deepseek-chat",
-            "deepseek-r1": "deepseek/deepseek-r1:free"
+            # R1: raciocinio explicito. O slug ":free" foi descontinuado
+            # pelo OpenRouter; usar a variante paga.
+            "deepseek-r1": "deepseek/deepseek-r1"
         },
         "embedding_model": "text-embedding-ada-002",  # Ainda usa OpenAI para embeddings
         "get_api_key": get_openrouter_api_key,
@@ -92,13 +104,21 @@ CHUNK_SIZE = 1500
 CHUNK_OVERLAP = 200
 
 # Configurações padrão (pode ser alterado via interface)
-DEFAULT_LLM_PROVIDER = "deepseek"  # Mudando para DeepSeek como padrão
-DEFAULT_LLM_MODEL = "deepseek-chat"  # Usar deepseek-chat que funciona
+DEFAULT_LLM_PROVIDER = "deepseek"
+# V4 Flash e o padrao: contexto de 1M de tokens e custo menor que o V3.
+DEFAULT_LLM_MODEL = "deepseek-v4-flash"
+# Embedding OpenAI (quando o provedor de embeddings e "openai").
 DEFAULT_EMBEDDING_MODEL = "text-embedding-ada-002"
+# Embedding local open source. Escolhido pelo A/B em CPU
+# (comparar_embeddings.py): ganho de ~50 p.p. vs MiniLM nas perguntas
+# de IRI/prazos. Trocar este valor exige reindexacao completa.
+LOCAL_EMBEDDING_MODEL = "intfloat/multilingual-e5-small"
 
 # Configurações do Streamlit
-STREAMLIT_PAGE_TITLE = "RAG ANTT - Sistema de Consulta a Documentos"
-STREAMLIT_PAGE_ICON = "🚆"
+STREAMLIT_PAGE_TITLE = "Sistema de Consulta Normativa - ANTT"
+# Caminho para o favicon institucional. None usa o icone padrao do Streamlit.
+# Substituir por "static/favicon.png" quando o logo autorizado estiver disponivel.
+STREAMLIT_PAGE_ICON: Optional[str] = None
 STREAMLIT_LAYOUT = "wide"
 
 # Exportar constantes para uso na aplicação
@@ -112,6 +132,7 @@ __all__ = [
     'DEFAULT_LLM_PROVIDER',
     'DEFAULT_LLM_MODEL',
     'DEFAULT_EMBEDDING_MODEL',
+    'LOCAL_EMBEDDING_MODEL',
     'STREAMLIT_PAGE_TITLE',
     'STREAMLIT_PAGE_ICON',
     'STREAMLIT_LAYOUT',
