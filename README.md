@@ -13,6 +13,7 @@ Este projeto implementa um sistema RAG (Retrieval-Augmented Generation) para con
   - [Arquitetura da Solução](#arquitetura-da-solução)
     - [Fluxo de Dados](#fluxo-de-dados)
     - [Componentes e Responsabilidades](#componentes-e-responsabilidades)
+  - [Avaliacao de Qualidade](#avaliacao-de-qualidade)
   - [Pré-requisitos](#pré-requisitos)
     - [Sistema Operacional](#sistema-operacional)
     - [Software](#software)
@@ -43,88 +44,122 @@ Este projeto implementa um sistema RAG (Retrieval-Augmented Generation) para con
 
 ```
 RAG-ANTT/
-├── antt_rag_unified.py     # Sistema principal RAG
-├── config.py              # Configurações do sistema
-├── llm_providers.py       # Gerenciamento de provedores de IA
-├── requirements.txt       # Dependências Python
-├── criar_vectorstore_deepseek.py  # Script para criar vectorstore
-├── gerar_relatorio.py     # Geração de relatórios
-├── relatorio_documentos.json  # Relatório de documentos
-├── vectorstore/          # Vectorstore OpenAI
-├── vectorstore_local/    # Vectorstore local
-└── dados_antt/          # Documentos ANTT
+├── antt_rag_unified.py          # App Streamlit + pipeline RAG
+├── retrieval_hibrido.py         # FAISS + BM25 + RRF + prioridade estruturada
+├── llm_providers.py             # LLM (DeepSeek/OpenAI) e embeddings locais
+├── config.py                    # Constantes e provedores
+├── avaliar_retrieval.py         # Harness: latencia, completude, precisao, RAGAS
+├── test_avaliar_retrieval.py
+├── test_retrieval_hibrido.py
+├── requirements.txt
+├── docs/
+│   ├── arquitetura_rag_api.tex  # Arquitetura de referencia (API + K8s)
+│   └── avaliacao_rag.md         # Guia do harness e metricas
+├── dados_antt/
+│   ├── ...                      # Normas indexadas (INM, RES, etc.)
+│   └── tabelas_auxiliares/      # Transcricoes estruturadas (preferidas ao OCR)
+├── vectorstore_local/           # Indice FAISS (embeddings locais)
+├── relatorios_avaliacao/        # Saida do harness (md/json)
+└── planning/                    # Notas de planejamento (nao operacional)
 ```
+
+Embedding padrao: `intfloat/multilingual-e5-small` (`LOCAL_EMBEDDING_MODEL` em `config.py`).
+Trocar o modelo exige reindexacao completa.
 
 ## Arquitetura da Solução
 
 ```mermaid
 graph TB
     subgraph "Sistema RAG-ANTT"
-        A[Interface Web :8501] --> B[Sistema RAG]
+        A[Interface Web :8501] --> B[antt_rag_unified]
         B --> C[Provedores de IA]
-        C --> D[OpenAI GPT-4]
-        C --> E[DeepSeek]
-        B --> F[Embeddings]
-        F --> G[OpenAI Embeddings]
-        F --> H[Embeddings Locais]
-        B --> I[Vectorstore]
-        I --> J[FAISS Index]
+        C --> D[OpenAI]
+        C --> E[DeepSeek via OpenRouter]
+        B --> F[Embeddings locais e5-small]
+        B --> G[retrieval_hibrido]
+        G --> H[FAISS semantico]
+        G --> I[BM25 lexical]
+        G --> J[RRF + rerank + tabelas auxiliares]
+        B --> K[gerar_resposta]
     end
 
-    subgraph "Processamento"
-        K[Processador PDF] --> L[Extrator de Tabelas]
-        L --> M[OCR]
-        K --> N[Divisor de Texto]
-        N --> I
+    subgraph "Qualidade offline"
+        L[avaliar_retrieval] --> G
+        L --> K
+        L --> M[RAGAS juiz]
+        L --> N[relatorios_avaliacao]
     end
 
-    style A fill:#f9f,stroke:#333,stroke-width:2px
-    style B fill:#bbf,stroke:#333,stroke-width:2px
-    style C fill:#bfb,stroke:#333,stroke-width:2px
-    style F fill:#bfb,stroke:#333,stroke-width:2px
-    style I fill:#fbb,stroke:#333,stroke-width:2px
+    subgraph "Ingestao"
+        O[PDF / Markdown] --> P[OCR e tabelas]
+        O --> Q[tabelas_auxiliares]
+        P --> R[vectorstore_local]
+        Q --> R
+        Q --> G
+    end
 ```
+
+Documentacao de deploy futuro (API FastAPI + Ollama + Rancher): `docs/arquitetura_rag_api.tex`.
 
 ### Fluxo de Dados
 
 ```mermaid
 sequenceDiagram
-    participant User as Usuário
-    participant UI as Interface Web
-    participant RAG as Sistema RAG
-    participant LLM as Provedor de IA
-    participant VS as Vectorstore
+    participant User as Usuario
+    participant UI as Streamlit
+    participant RAG as antt_rag_unified
+    participant Ret as retrieval_hibrido
+    participant VS as FAISS + BM25
+    participant LLM as DeepSeek / OpenAI
 
-    User->>UI: Faz pergunta
+    User->>UI: Pergunta
     UI->>RAG: Processa consulta
-    RAG->>VS: Busca documentos relevantes
-    VS-->>RAG: Retorna documentos
-    RAG->>LLM: Gera resposta
-    LLM-->>RAG: Resposta gerada
-    RAG-->>UI: Resposta + citações
-    UI-->>User: Exibe resultado
+    RAG->>Ret: pesquisar_documentos
+    Ret->>VS: Semantico + lexical (RRF)
+    Ret-->>RAG: Chunks (prioriza auxiliar estruturada)
+    RAG->>LLM: gerar_resposta + contexto
+    LLM-->>RAG: Resposta
+    RAG-->>UI: Resposta + citacoes
+    UI-->>User: Resultado
 ```
 
 ### Componentes e Responsabilidades
 
-```mermaid
-graph TB
-    subgraph "Componentes do Sistema"
-        A[Interface Web] -->|Streamlit| B[Visualização]
-        C[Sistema RAG] -->|Processamento| D[Consultas]
-        E[Provedores] -->|IA| F[Respostas]
-        G[Vectorstore] -->|Busca| H[Documentos]
-    end
+| Componente | Responsabilidade |
+|---|---|
+| `antt_rag_unified.py` | UI Streamlit, ingestao, OCR, prompts, orquestracao |
+| `retrieval_hibrido.py` | Busca hibrida, RRF, expansao por documento-pai, boost de fonte estruturada |
+| `llm_providers.py` | ChatOpenAI (OpenRouter/OpenAI) e `LocalEmbeddings` |
+| `avaliar_retrieval.py` | Metricas offline (gabarito + latencia + RAGAS opcional) |
+| `dados_antt/tabelas_auxiliares/` | Tabelas normativas em Markdown (preferidas ao OCR) |
 
-    subgraph "Responsabilidades"
-        I[Interface] -->|"Porta 8501"| J[Streamlit]
-        K[RAG] -->|"Interno"| L[Processamento]
-        M[Storage] -->|"Local"| N[FAISS]
-    end
+## Avaliacao de Qualidade
 
-    style A fill:#f9f,stroke:#333,stroke-width:2px
-    style C fill:#bfb,stroke:#333,stroke-width:2px
-    style G fill:#fbb,stroke:#333,stroke-width:2px
+O harness `avaliar_retrieval.py` mede qualidade sem depender da UI.
+
+| Modo | O que mede |
+|---|---|
+| Padrao | Cobertura do gabarito no retrieval, hit do documento, estruturado vs OCR, latencia |
+| `--com-geracao` | + completude factual da resposta e latencia de geracao |
+| `--com-ragas` | + faithfulness, answer_relevancy, context_precision, context_recall (RAGAS 0.1.21) |
+
+```bash
+# Apenas retrieval (rapido, sem custo de LLM juiz)
+python avaliar_retrieval.py --casos iri_principal
+
+# Retrieval + geracao
+python avaliar_retrieval.py --com-geracao --casos iri_principal
+
+# Completo com RAGAS (gasta tokens do juiz)
+python avaliar_retrieval.py --com-ragas --casos iri_principal,dadm_vdm
+```
+
+Detalhes, interpretacao das metricas e pin de dependencia: [`docs/avaliacao_rag.md`](docs/avaliacao_rag.md).
+
+Testes unitarios (sem FAISS/LLM):
+
+```bash
+python -m pytest test_avaliar_retrieval.py test_retrieval_hibrido.py -q
 ```
 
 ## Pré-requisitos
@@ -319,4 +354,4 @@ Este projeto é proprietário da DEEPFEED SOLUTION e seu uso é restrito à cons
 Para suporte, entre em contato:
 - Email: romulobrito@deepfeedsolutions.com
 - Issues: GitHub Issues
-- Documentação: `/docs` 
+- Documentação: `/docs` (`arquitetura_rag_api.tex`, `avaliacao_rag.md`) 

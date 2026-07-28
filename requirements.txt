@@ -21,3 +21,8 @@ requests
 rank_bm25==0.2.2
 sentence-transformers
 torch
+# RAGAS 0.1.x e compativel com langchain 0.2.x do projeto.
+# Nao atualizar para 0.2+/0.3 sem subir o langchain (quebra Streamlit).
+ragas==0.1.21
+datasets>=2.14.0,<3.0.0
+pysbd==0.3.4

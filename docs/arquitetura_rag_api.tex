@@ -1,0 +1,1281 @@
+% =============================================================================
+% Documento de Arquitetura --- Sistema RAG-ANTT
+% Deploy como API REST com LLM Local em Ambiente Kubernetes (Rancher)
+% =============================================================================
+\documentclass[12pt, a4paper]{article}
+
+% --- Codificação e idioma ---
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage[brazil]{babel}
+
+% --- Tipografia e layout ---
+\usepackage{lmodern}
+\usepackage[top=2.5cm, bottom=2.5cm, left=3cm, right=2.5cm]{geometry}
+\usepackage{setspace}
+\onehalfspacing
+\usepackage{indentfirst}
+\setlength{\parindent}{1.25cm}
+\usepackage{float}
+
+% --- Tabelas ---
+\usepackage{booktabs}
+\usepackage{array}
+\usepackage{longtable}
+\usepackage{tabularx}
+\usepackage{multirow}
+
+% --- Figuras ---
+\usepackage[dvipsnames]{xcolor}
+\usepackage{graphicx}
+\graphicspath{{figs/}}
+\usepackage{tikz}
+\usetikzlibrary{arrows.meta,positioning,fit}
+
+% --- Cores e links ---
+\usepackage[colorlinks=true, linkcolor=NavyBlue, citecolor=NavyBlue, urlcolor=NavyBlue]{hyperref}
+
+% --- Listas ---
+\usepackage{enumitem}
+
+% --- Cabeçalho e rodapé ---
+\usepackage{fancyhdr}
+\pagestyle{fancy}
+\fancyhf{}
+\fancyhead[L]{\small\textit{Arquitetura RAG-ANTT --- Deploy como API REST com LLM Local}}
+\fancyhead[R]{\small\thepage}
+\fancyfoot[C]{\small\textit{Documento de Arquitetura --- DeepFeed}}
+\renewcommand{\headrulewidth}{0.4pt}
+\renewcommand{\footrulewidth}{0.4pt}
+
+% --- Matemática ---
+\usepackage{amsmath}
+\usepackage{amssymb}
+
+% --- Citação em bloco ---
+\usepackage{csquotes}
+
+% --- Listagens de código e diagramas ASCII ---
+\usepackage{listings}
+\lstset{
+  basicstyle=\ttfamily\small,
+  frame=single,
+  breaklines=true,
+  breakatwhitespace=false,
+  columns=fullflexible,
+  keepspaces=true,
+  xleftmargin=0.5cm,
+  framexleftmargin=0.5cm,
+  backgroundcolor=\color{gray!5},
+  rulecolor=\color{gray!50},
+  literate={---}{{\textemdash}}1
+           {-->}{{$\rightarrow$}}3
+           {<--}{{$\leftarrow$}}3,
+}
+
+% --- Título ---
+\title{%
+  \vspace{-1cm}
+  \textbf{Documento de Arquitetura}\\[0.5cm]
+  \Large Sistema RAG-ANTT --- Deploy como API REST\\
+  com LLM Local em Ambiente Kubernetes (Rancher)\\[0.3cm]
+  \large Agência Nacional de Transportes Terrestres (ANTT)
+}
+
+\author{%
+  DeepFeed\\
+}
+
+\date{Fevereiro de 2026}
+
+% =============================================================================
+\begin{document}
+
+\maketitle
+\thispagestyle{empty}
+
+\vspace{1cm}
+
+\begin{center}
+  \fbox{\parbox{0.85\textwidth}{
+    \centering
+    \vspace{0.3cm}
+    \textbf{Classificação:} Documento de Arquitetura --- Projeto Técnico\\[0.2cm]
+    \small Descreve a arquitetura de referência para deploy do Sistema RAG-ANTT\\
+    como API REST, com interface Streamlit para testes, LLM local via Ollama\\
+    e integração com o sistema SIGESCANTT em ambiente Kubernetes gerenciado pelo Rancher.
+    \vspace{0.3cm}
+  }}
+\end{center}
+
+\newpage
+\tableofcontents
+\newpage
+
+% =============================================================================
+\section{Introdução e Contexto}
+% =============================================================================
+
+O Sistema RAG-ANTT (Retrieval-Augmented Generation) foi desenvolvido para permitir consultas inteligentes a documentos regulatórios da Agência Nacional de Transportes Terrestres. Atualmente, o sistema opera como uma aplicação monolítica Streamlit que integra interface de usuário, \textbf{recuperação híbrida} (FAISS semântico + BM25 lexical fundidos por RRF, com priorização de tabelas auxiliares estruturadas sobre OCR), embeddings locais \texttt{intfloat/multilingual-e5-small} e geração de respostas via provedores de LLM em nuvem (DeepSeek via OpenRouter, OpenAI). A qualidade é aferida offline pelo harness \texttt{avaliar\_retrieval.py} (gabarito normativo + métricas RAGAS opcionais).
+
+O presente documento descreve a \textbf{arquitetura de referência} para a evolução deste sistema rumo a um ambiente de produção, contemplando:
+
+\begin{enumerate}[label=\textbf{\arabic*.}]
+  \item \textbf{Separação de responsabilidades:} O RAG passa a expor uma API REST (FastAPI), desacoplada de qualquer interface gráfica;
+  \item \textbf{Manutenção da interface Streamlit:} O Streamlit permanece como ferramenta de testes e demonstrações, consumindo a mesma lógica central;
+  \item \textbf{LLM local:} Um modelo de linguagem é executado localmente via Ollama, eliminando dependência de APIs externas e custos por chamada;
+  \item \textbf{Integração com SIGESCANTT:} O sistema externo SIGESCANTT consome a API REST do RAG para oferecer funcionalidades de consulta inteligente aos seus usuários;
+  \item \textbf{Orquestração via Kubernetes (Rancher):} Todos os componentes são implantados como pods em um cluster Kubernetes gerenciado pelo Rancher.
+\end{enumerate}
+
+\subsection{Princípios de Arquitetura}
+
+A arquitetura proposta segue princípios fundamentais para ambientes regulatórios:
+
+\begin{itemize}
+  \item \textbf{Desacoplamento:} Cada componente possui responsabilidade única e comunica-se via interfaces bem definidas (HTTP/REST);
+  \item \textbf{Auditabilidade:} Toda consulta é rastreável --- a API retorna fontes, trechos e metadados que fundamentam cada resposta;
+  \item \textbf{Resiliência:} Falhas em componentes individuais (LLM, vectorstore) não comprometem o sistema inteiro;
+  \item \textbf{Independência tecnológica:} O SIGESCANTT não precisa conhecer detalhes de IA, FAISS ou LLM --- consome apenas JSON via HTTP;
+  \item \textbf{Custo previsível:} Com LLM e embeddings locais, não há cobrança por chamada a APIs externas.
+\end{itemize}
+
+% =============================================================================
+\section{Visão Geral da Arquitetura}
+% =============================================================================
+
+A arquitetura é composta por quatro pods principais, implantados em um único namespace Kubernetes (\texttt{rag-antt}), mais um volume persistente compartilhado para o índice vetorial:
+
+\begin{table}[H]
+\centering
+\small
+\caption{Componentes da arquitetura e suas responsabilidades}
+\label{tab:componentes}
+\begin{tabularx}{\textwidth}{l l c X}
+\toprule
+\textbf{Pod} & \textbf{Tecnologia} & \textbf{Porta} & \textbf{Responsabilidade} \\
+\midrule
+\texttt{sgescantt} & Stack existente & XX & Interface principal do usuário final. Módulo de consulta RAG integrado ao sistema corporativo. \\
+\texttt{rag-api} & FastAPI + Python & 8000 & Núcleo do RAG: recuperação híbrida, orquestração de contexto, chamada ao LLM e formatação de respostas. \\
+\texttt{streamlit} & Streamlit & 8501 & Interface visual para testes, demonstrações e depuração. Reutiliza a lógica central do RAG. \\
+\texttt{ollama} & Ollama & 11434 & Servidor de inferência do LLM local. Expõe API compatível com OpenAI. \\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+\subsection{Diagrama de Componentes}
+
+O diagrama a seguir ilustra a disposição dos componentes e suas interações dentro do cluster Kubernetes. Cada caixa representa um pod isolado, e as setas indicam a direção do fluxo de dados:
+
+
+\begin{figure}[H]
+\centering
+\footnotesize
+\resizebox{\textwidth}{!}{%
+\begin{tikzpicture}[
+  node distance=8mm and 10mm,
+  box/.style={
+    draw,
+    rounded corners,
+    align=center,
+    inner sep=4pt,
+    minimum height=9mm
+  },
+  edge/.style={-Latex, very thick},
+  svc/.style={box, fill=gray!10, text width=8.1cm},
+  pod/.style={box, fill=blue!5, text width=3.2cm},
+  data/.style={box, fill=green!8, text width=3.6cm},
+  llm/.style={box, fill=orange!10, text width=3.4cm}
+]
+
+\node[box, text width=5.6cm] (internet) {INTERNET / REDE CORPORATIVA};
+\node[svc, below=of internet] (ingress) {
+  \textbf{Ingress Controller (NGINX / Traefik)}\\[2pt]
+  \texttt{/sgescantt -> sgescantt-svc}\\
+  \texttt{/rag-teste -> streamlit-svc}\\
+  \texttt{/api/rag -> rag-api-svc}
+};
+
+\node[pod, below left=11mm and 24mm of ingress] (sgescantt) {Pod: SIGESCANTT\\Porta 80};
+\node[pod, below=14mm of ingress] (streamlit) {Pod: Streamlit\\Porta 8501};
+\node[pod, below right=11mm and 24mm of ingress] (ragapi) {Pod: RAG-API\\Porta 8000};
+
+\node[data, below left=12mm and 14mm of ragapi] (faiss) {FAISS Vectorstore\\(PersistentVolume)\\\texttt{vectorstore\_local/}};
+\node[llm, below right=12mm and 14mm of ragapi] (ollama) {Pod: Ollama\\(LLM local)\\Porta 11434};
+
+\draw[edge] (internet) -- (ingress);
+\draw[edge] (ingress) -- (sgescantt);
+\draw[edge] (ingress) -- (streamlit);
+\draw[edge] (ingress) -- (ragapi);
+\draw[edge] (sgescantt.east) to[bend left=14] node[above, font=\scriptsize] {consulta SIGESCANTT} (ragapi.north west);
+\draw[edge] (streamlit.east) to[bend left=6] node[below, font=\scriptsize] {consulta de teste} (ragapi.west);
+\draw[edge] (ragapi) -- (faiss);
+\draw[edge] (ragapi) -- (ollama);
+
+\node[
+  draw,
+  dashed,
+  rounded corners,
+  inner sep=8pt,
+  fit=(sgescantt)(streamlit)(ragapi)(faiss)(ollama),
+  label={[yshift=-5mm]below:\textbf{Namespace: rag-antt (Rancher)}}
+] {};
+\end{tikzpicture}%
+}
+\caption{Diagrama de componentes no cluster Kubernetes (Rancher)}
+\label{fig:diagrama-k8s-rancher}
+\end{figure}
+
+% =============================================================================
+\section{Camada de Entrada --- Ingress Controller}
+% =============================================================================
+
+O \textbf{Ingress Controller} é o único ponto de contato entre a rede externa (internet ou rede corporativa da ANTT) e os componentes internos do cluster. Ele funciona como um \textbf{proxy reverso inteligente} que:
+
+\begin{itemize}
+  \item Recebe \textbf{todo} o tráfego HTTPS em uma única porta (443);
+  \item Inspeciona o \textbf{path} da URL para decidir para qual serviço interno encaminhar;
+  \item Centraliza regras de segurança, autenticação de borda e governança de acesso.
+\end{itemize}
+
+O Ingress também é responsável por \textbf{TLS} (certificados HTTPS), \textbf{CORS} (permitir que o SIGESCANTT chame a API de outro domínio) e \textbf{rate-limiting} (proteger contra uso abusivo). No Rancher, o Ingress Controller já vem pré-configurado --- normalmente NGINX ou Traefik. As regras de roteamento por \textit{path} estão consolidadas na Tabela~\ref{tab:ingress}.
+
+Esse ponto único de entrada garante que \textbf{nenhum componente interno} (API, Ollama, vectorstore) fique exposto diretamente à rede externa. Todo tráfego é filtrado, autenticado e roteado pelo Ingress antes de chegar aos pods.
+
+% =============================================================================
+\section{Componentes Detalhados}
+% =============================================================================
+
+\subsection{Pod RAG-API (FastAPI)}
+
+Este é o \textbf{componente central} da arquitetura. Ele encapsula toda a lógica de recuperação semântica e orquestração, expondo-a como uma API REST padrão. Internamente, o que ele faz a cada requisição é:
+
+\begin{enumerate}[label=\textbf{\arabic*.}]
+  \item Recebe a pergunta via \texttt{POST /api/query};
+  \item Gera o embedding da pergunta usando \texttt{LocalEmbeddings} (em \texttt{llm\_providers.py}, modelo padrão \texttt{intfloat/multilingual-e5-small});
+  \item Recupera trechos com \texttt{pesquisar\_documentos()} --- busca híbrida (FAISS semântico + BM25 lexical fundidos por RRF), expansão por documento-pai, priorização de tabelas auxiliares estruturadas sobre OCR e reranking;
+  \item Monta o contexto com os trechos encontrados (tipo, número, ano, caminho, conteúdo);
+  \item Chama o LLM via \texttt{gerar\_resposta()} --- que usa \texttt{ChatOpenAI} com \texttt{base\_url} apontando para o Ollama;
+  \item Retorna JSON com a resposta, fontes e métricas.
+\end{enumerate}
+
+\subsubsection*{Responsabilidades}
+
+\begin{itemize}
+  \item Carregar e manter em memória o índice vetorial FAISS e o índice lexical BM25;
+  \item Gerar embeddings das consultas utilizando sentence-transformers (local, gratuito);
+  \item Executar recuperação híbrida (semântica + lexical) e reranking;
+  \item Preferir fontes estruturadas (\texttt{dados\_antt/tabelas\_auxiliares/}) quando disponíveis;
+  \item Montar o contexto (prompt + trechos relevantes) e enviar ao LLM;
+  \item Formatar a resposta com citações, fontes e metadados;
+  \item Expor endpoints REST para consulta, status, reindexação e listagem de documentos.
+\end{itemize}
+
+\subsubsection*{Relação com o Código Atual}
+
+O ponto chave é que \textbf{o código já existe}. O pod RAG-API reutiliza as funções já implementadas no projeto. O \texttt{LLMManager} em \texttt{llm\_providers.py} já usa \texttt{ChatOpenAI} com \texttt{base\_url} configurável --- para apontar para o Ollama, basta adicionar um novo provedor em \texttt{config.py} com \texttt{base\_url: "http://ollama-svc:11434/v1"}. A mesma classe \texttt{ChatOpenAI} funciona sem alteração.
+
+\begin{table}[H]
+\centering
+\small
+\caption{Mapeamento entre funções existentes e endpoints da API}
+\label{tab:mapeamento}
+\begin{tabularx}{\textwidth}{l l X}
+\toprule
+\textbf{Função existente} & \textbf{Endpoint} & \textbf{Descrição} \\
+\midrule
+\texttt{carregar\_vectorstore\_com\_provider()} & \texttt{startup} & Carrega o índice FAISS na inicialização do pod \\
+\texttt{pesquisar\_documentos()} / \texttt{retrieval\_hibrido} & \texttt{POST /api/query} & Recuperação híbrida (FAISS + BM25 + RRF) \\
+\texttt{gerar\_resposta()} & \texttt{POST /api/query} & Orquestração LLM com contexto \\
+\texttt{create\_llm\_manager()} & \texttt{startup} & Inicializa o gerenciador de LLM \\
+\texttt{avaliar\_retrieval.py} & CI / homologação & Harness offline (gabarito + RAGAS); não é endpoint de produção \\
+--- & \texttt{GET /api/status} & Status dos componentes \\
+--- & \texttt{GET /api/health} & Health check para Kubernetes \\
+--- & \texttt{POST /api/reindex} & Dispara reindexação \\
+--- & \texttt{GET /api/documents} & Lista documentos indexados \\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+A lógica central (recuperação híbrida, geração de resposta, templates de prompt) \textbf{não precisa ser reescrita}. O FastAPI atua como uma camada fina de exposição HTTP sobre as funções já existentes em \texttt{antt\_rag\_unified.py}, \texttt{retrieval\_hibrido.py} e \texttt{llm\_providers.py}.
+
+\subsubsection*{Configuração do Container}
+
+\begin{table}[H]
+\centering
+\small
+\caption{Especificações do container RAG-API}
+\label{tab:rag_container}
+\begin{tabular}{l l}
+\toprule
+\textbf{Parâmetro} & \textbf{Valor} \\
+\midrule
+Imagem base & \texttt{python:3.10-slim} \\
+Porta exposta & 8000 \\
+Memória mínima & 2 GB \\
+Memória recomendada & 4 GB \\
+CPU mínima & 2 cores \\
+Healthcheck & \texttt{GET /api/health} \\
+Volume montado & \texttt{/app/vectorstore\_local/} (PVC) \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{Pod Streamlit (Testes e Demonstrações)}
+
+O Streamlit permanece como interface visual, executando a mesma aplicação \texttt{antt\_rag\_unified.py} existente. Ele \textbf{não foi removido} da arquitetura --- continua disponível para a equipe técnica testar consultas, visualizar métricas, inspecionar documentos e depurar problemas. Sua função é dupla:
+
+\begin{enumerate}[label=\textbf{\arabic*.}]
+  \item \textbf{Testes internos:} A equipe de desenvolvimento utiliza o Streamlit para validar consultas, inspecionar métricas de busca e depurar o comportamento do RAG;
+  \item \textbf{Demonstrações:} Gestores e \textit{stakeholders} podem visualizar o sistema em funcionamento sem necessidade de integração com o SIGESCANTT.
+\end{enumerate}
+
+A diferença entre o Streamlit e a API é apenas a \textbf{porta de entrada}: o Streamlit chama as funções Python diretamente (como \texttt{pesquisar\_documentos()} e \texttt{gerar\_resposta()}), sem passar pela API HTTP. Já o SIGESCANTT passa pela API. No deploy, o Streamlit roda em \textbf{seu próprio pod}, isolado dos demais.
+
+\subsubsection*{Coexistência com a API}
+
+O Streamlit e a API REST \textbf{coexistem sem conflito}. Ambos compartilham:
+
+\begin{itemize}
+  \item O mesmo volume persistente (vectorstore FAISS);
+  \item O mesmo pod Ollama para geração de respostas;
+  \item A mesma lógica central (funções Python do projeto).
+\end{itemize}
+
+\begin{table}[H]
+\centering
+\small
+\caption{Comparação entre as duas portas de entrada}
+\label{tab:portas}
+\begin{tabularx}{\textwidth}{l l X}
+\toprule
+\textbf{Porta} & \textbf{Interface} & \textbf{Quem usa} \\
+\midrule
+8501 & Streamlit (visual) & Equipe de desenvolvimento, QA, demonstrações \\
+8000 & FastAPI (JSON) & SIGESCANTT, sistemas externos, automações \\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+Por que manter os dois? Porque servem públicos diferentes: o Streamlit é para \textbf{testes visuais, demonstrações para gestores e debug rápido}; a API REST é para \textbf{integração com o SIGESCANTT e qualquer outro sistema}. Se o Streamlit ficar indisponível, a produção (SIGESCANTT via API) não é afetada.
+
+\subsection{Pod Ollama (LLM Local)}
+
+O Ollama é um servidor de inferência que executa modelos de linguagem localmente, expondo uma API \textbf{100\% compatível com o padrão OpenAI} (\texttt{/v1/chat/completions}). Isso significa que o código do RAG --- que já utiliza \texttt{ChatOpenAI} do LangChain --- pode apontar para o Ollama sem alterações estruturais, bastando alterar o parâmetro \texttt{base\_url}.
+
+\subsubsection*{Compatibilidade com o Código Existente}
+
+O \texttt{LLMManager} em \texttt{llm\_providers.py} já utiliza o \texttt{ChatOpenAI} com \texttt{base\_url} configurável. Atualmente, o \texttt{config.py} aponta para o OpenRouter:
+
+\begin{lstlisting}[caption={Configuração atual em config.py --- DeepSeek via OpenRouter}, label=lst:config_atual]
+  "deepseek": {
+      "name": "DeepSeek (via OpenRouter)",
+      "base_url": "https://openrouter.ai/api/v1",
+      ...
+  }
+\end{lstlisting}
+
+Para apontar para o Ollama, basta adicionar um novo provedor:
+
+\begin{lstlisting}[caption={Configuração para Ollama --- mudança de URL apenas}, label=lst:config_ollama]
+  "ollama": {
+      "name": "Ollama (LLM Local)",
+      "base_url": "http://ollama-svc:11434/v1",
+      "models": {
+          "qwen2.5:7b": "qwen2.5:7b",
+          "llama3.1:8b": "llama3.1:8b",
+      },
+      "get_api_key": lambda: "ollama",  # placeholder
+      ...
+  }
+\end{lstlisting}
+
+A classe \texttt{ChatOpenAI} do LangChain aceita qualquer endpoint compatível com a API OpenAI. O Ollama, o LM~Studio, o vLLM e o llama.cpp expõem exatamente essa API. A transição de provedor em nuvem para LLM local é, portanto, uma \textbf{mudança de configuração}, não de arquitetura.
+
+\subsubsection*{Por que um Pod Separado?}
+
+O LLM consome muita memória e, opcionalmente, GPU. Separando-o em seu próprio pod:
+
+\begin{itemize}
+  \item Ele pode ser \textbf{escalado independentemente} dos demais componentes;
+  \item Pode ser colocado em um \textbf{node com GPU} no cluster, enquanto os outros pods rodam em nodes comuns;
+  \item Se o LLM travar ou consumir memória em excesso, os outros pods continuam funcionando;
+  \item O Kubernetes pode aplicar \textit{resource limits} específicos para o pod do Ollama sem afetar a API ou o Streamlit.
+\end{itemize}
+
+O Ollama \textbf{nunca é exposto} para fora do cluster. O Service \texttt{ollama-svc:11434} é do tipo \textbf{ClusterIP} --- somente os pods internos (RAG-API e Streamlit) conseguem acessá-lo. Isso impede que alguém de fora use o modelo indevidamente.
+
+\subsubsection*{Modelos Recomendados}
+
+A seleção de modelo deve considerar a tarefa específica do RAG: compreender documentos regulatórios em português brasileiro, interpretar trechos técnicos e gerar respostas estruturadas com citações. A Tabela~\ref{tab:modelos} apresenta os modelos recomendados:
+
+\begin{table}[H]
+\centering
+\small
+\caption{Modelos recomendados para o RAG-ANTT via Ollama}
+\label{tab:modelos}
+\begin{tabularx}{\textwidth}{l c c c X}
+\toprule
+\textbf{Modelo} & \textbf{Parâmetros} & \textbf{Disco} & \textbf{RAM} & \textbf{Observações} \\
+\midrule
+Qwen2.5:7b & 7B & 4,7 GB & 8 GB & Excelente em português. Melhor relação qualidade/recurso. \\
+Llama 3.1:8b & 8B & 4,7 GB & 8 GB & Bom multilinguismo. Amplamente testado. \\
+Mistral:7b & 7B & 4,1 GB & 8 GB & Bom desempenho geral. Rápido em CPU. \\
+Gemma2:9b & 9B & 5,4 GB & 10 GB & Alta qualidade. Requer mais recursos. \\
+Phi3:mini & 3,8B & 2,3 GB & 4 GB & Muito leve. Qualidade inferior, mas funcional. \\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+\noindent\textbf{Recomendação primária:} Qwen2.5:7b, por sua excelente compreensão de português e tamanho moderado. Para ambientes com recursos muito restritos, Phi3:mini é uma alternativa viável com qualidade reduzida.
+
+\subsubsection*{Impacto da GPU na Latência --- Análise Detalhada}
+
+O Ollama utiliza internamente o \texttt{llama.cpp} como backend de inferência, que opera modelos quantizados no formato GGUF (tipicamente Q4\_K\_M, com 4 bits por peso). A performance de geração de texto depende de duas fases distintas:
+
+\begin{itemize}
+  \item \textbf{Prompt processing (pp):} Processamento do contexto de entrada (pergunta + trechos de documentos). Essa fase é altamente paralelizável e beneficia-se enormemente de GPU;
+  \item \textbf{Text generation (tg):} Geração token a token da resposta. É sequencial por natureza, mas GPU ainda oferece ganho significativo devido à largura de banda de memória.
+\end{itemize}
+
+No contexto do RAG-ANTT, cada consulta envolve tipicamente:
+\begin{itemize}
+  \item \textbf{Entrada (prompt):} 800 a 2.000 tokens (pergunta + 5--8 trechos de documentos + template de instrução);
+  \item \textbf{Saída (resposta):} 150 a 400 tokens (resposta estruturada com citações).
+\end{itemize}
+
+\begin{table}[H]
+\centering
+\small
+\caption{Latência esperada por modo de execução --- modelo 7B quantizado (Q4\_K\_M)}
+\label{tab:latencia}
+\begin{tabularx}{\textwidth}{l c c c X}
+\toprule
+\textbf{Modo de execução} & \textbf{pp (t/s)} & \textbf{tg (t/s)} & \textbf{Latência total} & \textbf{Observações} \\
+\midrule
+CPU --- 4 cores \\(servidor básico) & 8--15 & 4--8 & 45--90\,s & Uso mínimo viável \\
+CPU --- 8 cores \\(servidor dedicado) & 15--30 & 8--15 & 20--50\,s & Aceitável para uso interno \\
+GPU NVIDIA T4 \\(16 GB VRAM) & 150--250 & 25--40 & 6--12\,s & GPU de entrada para servidores \\
+GPU NVIDIA RTX 4090 \\(24 GB VRAM) & 400--600 & 80--120 & 2--4\,s & Alta performance \\
+GPU NVIDIA A100 \\(80 GB VRAM) & 600--1.000 & 100--150 & 1,5--3\,s & Produção de alta escala \\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+\noindent\textbf{Nota metodológica:} Os valores de \textit{pp} (prompt processing) e \textit{tg} (text generation) são expressos em tokens por segundo. A latência total é calculada para uma consulta típica de 1.500 tokens de entrada e 250 tokens de saída: $t_{\text{total}} = \frac{1500}{\text{pp}} + \frac{250}{\text{tg}}$. Os valores são baseados em benchmarks públicos do \texttt{llama.cpp} (backend do Ollama) para modelos 7B quantizados em Q4\_K\_M, reportados pela comunidade em hardware equivalente.
+
+\noindent\textbf{Importante --- variabilidade dos valores:} Os números apresentados representam \textbf{medianas observadas em condições controladas} (benchmark isolado, sem concorrência, com o modelo já carregado em memória). Na operação real, a latência pode ser \textbf{1,5$\times$ a 2$\times$ maior} que os valores tabelados, dependendo de fatores como:
+
+\begin{itemize}
+  \item \textbf{Tamanho do prompt:} Consultas com documentos longos (ex.: tabelas extensas ou múltiplos normativos) podem gerar prompts de 3.000--4.000 tokens, dobrando o tempo de prompt processing;
+  \item \textbf{Concorrência:} Se múltiplas consultas chegam simultaneamente, elas são enfileiradas --- a segunda consulta espera a primeira terminar (em CPU) ou compartilha recursos (em GPU com batching);
+  \item \textbf{Cold start:} Na primeira consulta após inicialização do pod, o modelo precisa ser carregado do disco para a memória (5--15 segundos adicionais). Consultas subsequentes não sofrem esse overhead;
+  \item \textbf{Throttling térmico:} Em servidores sem refrigeração adequada, CPUs e GPUs podem reduzir a frequência de clock sob carga sustentada, degradando a performance em 10--20\%;
+  \item \textbf{Comprimento da resposta:} Respostas mais elaboradas (400+ tokens) aumentam proporcionalmente o tempo de geração.
+\end{itemize}
+
+\noindent Portanto, os valores devem ser interpretados como \textbf{estimativas otimistas de caso típico}. Para dimensionamento de infraestrutura, recomenda-se aplicar um fator de segurança de \textbf{1,5$\times$} sobre os valores tabelados (ex.: se a tabela indica 35\,s em CPU, planejar para 50--55\,s em pico).
+
+\vspace{0.3cm}
+
+A diferença entre execução em CPU e GPU é de \textbf{uma a duas ordens de grandeza}, dependendo da fase. Em termos práticos:
+
+\begin{table}[H]
+\centering
+\small
+\caption{Comparação direta CPU vs.\ GPU para uma consulta RAG típica}
+\label{tab:cpu_vs_gpu}
+\begin{tabularx}{\textwidth}{l c c X}
+\toprule
+\textbf{Métrica} & \textbf{CPU (8 cores)} & \textbf{GPU (RTX 4090)} & \textbf{Ganho} \\
+\midrule
+Prompt processing & $\sim$100\,ms/tok & $\sim$2\,ms/tok & $\sim$50$\times$ \\
+Text generation & $\sim$100\,ms/tok & $\sim$10\,ms/tok & $\sim$10$\times$ \\
+Latência total (consulta RAG) & $\sim$35\,s & $\sim$3\,s & $\sim$12$\times$ \\
+Consultas simultâneas & 1 (sequencial) & 2--4 (batching) & Escalabilidade \\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+\subsubsection*{Latência Ponta a Ponta do Pipeline RAG}
+
+A inferência do LLM é o \textbf{gargalo dominante} do pipeline. Os demais componentes contribuem com latência marginal:
+
+\begin{table}[H]
+\centering
+\small
+\caption{Decomposição da latência por etapa do pipeline RAG}
+\label{tab:latencia_pipeline}
+\begin{tabularx}{\textwidth}{l c c X}
+\toprule
+\textbf{Etapa} & \textbf{Latência típica} & \textbf{\% do total} & \textbf{Observação} \\
+\midrule
+Embedding da pergunta\\ (sentence-transformers) & 50--150\,ms & $<$1\% & Local, CPU do pod RAG-API \\
+Busca FAISS (similaridade vetorial) & 10--50\,ms & $<$1\% & Índice em memória RAM \\
+Reranking + \\montagem de contexto & 20--80\,ms & $<$1\% & Processamento Python puro \\
+Inferência LLM (Ollama) \\--- \textbf{CPU} & \textbf{20--50\,s} & \textbf{$>$99\%} & Gargalo absoluto \\
+Inferência LLM (Ollama) \\--- \textbf{GPU (T4 ou superior)} & \textbf{2--12\,s} & \textbf{$>$95\%} & Ainda dominante; varia conforme classe de GPU \\
+Formatação da resposta + JSON & 5--15\,ms & $<$1\% & Overhead desprezível \\
+\midrule
+\textbf{Total ponta a ponta (CPU)} & \textbf{20--50\,s} & 100\% & Uso interno ($<$50 requisições/dia) \\
+\textbf{Total ponta a ponta (GPU)} & \textbf{2--12\,s} & 100\% & Produção multiusuário (faixa depende da GPU) \\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+\subsubsection*{Recomendação por Cenário de Uso}
+
+% \begin{table}[H]
+% \centering
+% \small
+% \caption{Recomendação de hardware por cenário de uso}
+% \label{tab:recomendacao_hw}
+% \begin{tabularx}{\textwidth}{l c c X}
+% \toprule
+% \textbf{Cenário} & \textbf{Requisições/dia} & \textbf{Hardware} & \textbf{Justificativa} \\
+% \midrule
+% Piloto / testes internos & $<$20 req/dia & CPU 8 cores, 16 GB & Latência de 30--50\,s é tolerável para validação \\
+% Uso interno \\(equipe técnica) & 20--100 req/dia & CPU 8+ cores, 32 GB & Aceitável; filas curtas em horários de pico \\
+% Produção \\(SIGESCANTT) & 100--500 req/dia & GPU T4 ou superior & Latência $<$10\,s; múltiplos usuários simultâneos \\
+% Produção de \\alta escala & $>$500 req/dia & GPU A100 ou múltiplas T4 & Latência $<$3\,s; batching; alta disponibilidade \\
+% \bottomrule
+% \end{tabularx}
+% \end{table}
+
+
+
+\begin{table}[H]
+\centering
+\footnotesize
+\caption{Recomendação de hardware por cenário de uso}
+\label{tab:recomendacao_hw}
+\begin{tabularx}{\textwidth}{>{\raggedright\arraybackslash}X >{\centering\arraybackslash}p{2.4cm} >{\raggedright\arraybackslash}X >{\raggedright\arraybackslash}X}
+\toprule
+\textbf{Cenário} & \textbf{Requisições/dia} & \textbf{Hardware} & \textbf{Justificativa} \\
+\midrule
+Piloto / testes internos & $<$20 req/dia & Piso técnico: 7 cores, 22 GB RAM, sem GPU & Prova de conceito ponta a ponta; latência elevada e baixa concorrência \\
+Uso interno (equipe técnica) & 20--100 req/dia & 8 vCPU, 32 GB RAM, sem GPU & Operação econômica para homologação e uso interno controlado; filas em picos \\
+Produção (SIGESCANTT) & 100--500 req/dia & 12 vCPU, 48 GB RAM, 1x T4 (16 GB VRAM) & Faixa típica de 6--12\,s e melhor atendimento de concorrência \\
+Produção de alta escala & $>$500 req/dia & 16 vCPU, 64 GB RAM, GPU dedicada (24+ GB VRAM) ou múltiplas T4 & Faixa típica de 2--5\,s em benchmark controlado, com maior throughput \\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+\noindent\textbf{Conclusão sobre hardware:} Para a fase inicial de implantação (piloto com a equipe da GEGIR/SUROD), a execução em \textbf{CPU é suficiente}. A latência de 20--50 segundos por consulta, embora perceptível, permite validar a qualidade das respostas e ajustar parâmetros sem custo adicional de GPU. Quando o sistema for integrado ao SIGESCANTT para uso em produção com múltiplos usuários, a migração para GPU é \textbf{fortemente recomendada}: com T4, a latência típica fica na faixa de 6--12 segundos; com GPU dedicada de maior desempenho, pode chegar a 2--5 segundos em benchmark controlado.
+
+
+
+\subsection{Pod SIGESCANTT (Sistema Externo)}
+
+O SIGESCANTT é o \textbf{sistema corporativo existente} da ANTT, gerenciado por outra equipe. Ele possui sua própria stack tecnológica e interface de usuário. A única mudança é a adição de um \textbf{módulo de consulta} que faz chamadas HTTP para a API do RAG. A integração com o RAG é feita exclusivamente via \textbf{consumo da API REST}.
+
+\subsubsection*{Responsabilidades do SIGESCANTT}
+
+\begin{itemize}
+  \item Fornecer ao usuário um campo de consulta integrado ao fluxo de trabalho existente;
+  \item Enviar a pergunta do usuário para a API REST do RAG;
+  \item Receber e renderizar a resposta (texto, fontes, metadados) na interface do SIGESCANTT;
+  \item Gerenciar autenticação e autorização dos usuários (o RAG não gerencia acesso).
+\end{itemize}
+
+\subsubsection*{Desacoplamento}
+
+Do ponto de vista do SIGESCANTT, o RAG é uma \textbf{caixa preta}: ele envia uma pergunta em JSON e recebe uma resposta em JSON. O time do SIGESCANTT \textbf{não precisa conhecer} FAISS, embeddings, LangChain, Ollama ou qualquer detalhe de IA. A integração se resume a:
+
+\begin{enumerate}[label=\textbf{\arabic*.}]
+  \item Fazer \texttt{POST} para \texttt{http://rag-api-svc:8000/api/query} com o corpo JSON;
+  \item Interpretar o JSON de resposta;
+  \item Exibir na tela.
+\end{enumerate}
+
+O endereço \texttt{rag-api-svc:8000} é o \textbf{Service interno do Kubernetes} --- funciona como um DNS interno que resolve automaticamente para o pod correto. A comunicação é interna ao cluster, sem exposição à internet.
+
+\subsection{FAISS Vectorstore --- PersistentVolume}
+
+O vectorstore não é um pod --- é um \textbf{volume de disco persistente} (PVC no Kubernetes). Ele armazena os dois arquivos que já existem no projeto:
+
+\begin{itemize}
+  \item \texttt{index.faiss} --- o índice vetorial com os embeddings dos documentos;
+  \item \texttt{index.pkl} --- os metadados associados (tipo, número, ano, caminho, etc.).
+\end{itemize}
+
+Esse volume é \textbf{montado} nos pods RAG-API e Streamlit no caminho \\ \texttt{/app/vectorstore\_local/}. Quando a função \texttt{carregar\_vectorstore\_com\_provider()} executa, ela lê os arquivos desse volume. Como o FAISS é \textbf{somente-leitura} durante consultas, múltiplos pods podem ler simultaneamente sem conflito.
+
+A persistência garante que, se o pod RAG-API reiniciar, o índice não precisa ser recriado --- ele sobrevive no disco.
+
+% =============================================================================
+\section{Contrato da API REST}
+% =============================================================================
+
+A API REST do RAG expõe os seguintes endpoints. O SIGESCANTT (e qualquer outro sistema) consome exclusivamente estes contratos.
+
+\subsection{Endpoints}
+
+\begin{table}[H]
+\centering
+\small
+\caption{Endpoints da API REST do RAG}
+\label{tab:endpoints}
+\begin{tabularx}{\textwidth}{l c X}
+\toprule
+\textbf{Endpoint} & \textbf{Método} & \textbf{Descrição} \\
+\midrule
+\texttt{/api/health} & GET & Health check para probes do Kubernetes (liveness/readiness). Retorna \texttt{200 OK} se o sistema está operacional. \\
+\texttt{/api/status} & GET & Status detalhado: vectorstore carregado, LLM acessível, quantidade de documentos, provedor de embeddings. \\
+\texttt{/api/query} & POST & Endpoint principal. Recebe pergunta, executa pipeline RAG completo, retorna resposta com fontes. \\
+\texttt{/api/reindex} & POST & Dispara reindexação dos documentos no vectorstore. Operação assíncrona. \\
+\texttt{/api/documents} & GET & Lista documentos indexados com metadados (tipo, número, ano, caminho). \\
+\texttt{/api/docs} & GET & Documentação interativa Swagger/OpenAPI (gerada automaticamente pelo FastAPI). \\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+\subsection{Contrato do Endpoint Principal (\texttt{POST /api/query})}
+
+\subsubsection*{Requisição (JSON)}
+
+\begin{lstlisting}[caption={Corpo da requisição para o endpoint /api/query}, label=lst:request]
+  {
+    "pergunta": "Quais os requisitos para autorizacao de transporte
+                 interestadual de passageiros?",
+    "filtros": {
+      "tipo_documento": "Resolucao",
+      "ano": 2024
+    },
+    "max_documentos": 5,
+    "temperatura": 0.1
+  }
+\end{lstlisting}
+
+\begin{table}[H]
+\centering
+\small
+\caption{Campos da requisição}
+\label{tab:req_campos}
+\begin{tabularx}{\textwidth}{l l l X}
+\toprule
+\textbf{Campo} & \textbf{Tipo} & \textbf{Obrigatório} & \textbf{Descrição} \\
+\midrule
+\texttt{pergunta} & string & Sim & Pergunta em linguagem natural \\
+\texttt{filtros} & object & Não & Filtros por metadados (tipo, ano, etc.) \\
+\texttt{max\_documentos} & integer & Não & Número máximo de documentos a considerar (padrão: 5) \\
+\texttt{temperatura} & float & Não & Temperatura do LLM, de 0.0 a 1.0 (padrão: 0.1) \\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+\subsubsection*{Resposta (JSON)}
+
+\begin{lstlisting}[caption={Corpo da resposta do endpoint /api/query}, label=lst:response]
+  {
+    "resposta": "Segundo a Resolucao ANTT 5.232/2016, os requisitos
+                 para autorizacao incluem...",
+    "modelo_usado": "qwen2.5:7b",
+    "provider": "ollama",
+    "documentos_consultados": [
+      {
+        "tipo": "Resolucao",
+        "numero": "5232",
+        "ano": "2016",
+        "trecho": "Art. 3o Para obtencao de autorizacao...",
+        "caminho": "dados_antt/RES/2016/RES-00005232-2016.html",
+        "relevancia": 0.87
+      }
+    ],
+    "tempo_processamento_ms": 1250,
+    "total_documentos_encontrados": 5,
+    "embedding_provider": "local",
+    "vectorstore_utilizado": "vectorstore_local"
+  }
+\end{lstlisting}
+
+\begin{table}[H]
+\centering
+\small
+\caption{Campos da resposta}
+\label{tab:resp_campos}
+\begin{tabularx}{\textwidth}{l l X}
+\toprule
+\textbf{Campo} & \textbf{Tipo} & \textbf{Descrição} \\
+\midrule
+\texttt{resposta} & string & Texto gerado pelo LLM com citações e referências \\
+\texttt{modelo\_usado} & string & Nome do modelo LLM utilizado \\
+\texttt{provider} & string & Provedor do LLM (``ollama'', ``deepseek'', ``openai'') \\
+\texttt{documentos\_consultados} & array & Lista de documentos utilizados como contexto \\
+\texttt{tempo\_processamento\_ms} & integer & Tempo total de processamento em milissegundos \\
+\texttt{total\_documentos\_encontrados} & integer & Quantidade de documentos encontrados na busca \\
+\texttt{embedding\_provider} & string & Provedor de embeddings utilizado \\
+\texttt{vectorstore\_utilizado} & string & Caminho do vectorstore consultado \\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+% =============================================================================
+\section{Fluxo de Comunicação}
+% =============================================================================
+
+\subsection{Fluxo Principal --- Consulta via SIGESCANTT}
+
+O fluxo completo de uma consulta iniciada pelo usuário no SIGESCANTT percorre os seguintes passos:
+
+\begin{enumerate}[label=\textbf{Passo~\arabic*.}]
+  \item \textbf{Usuário digita pergunta no SIGESCANTT:} O módulo de consulta RAG, integrado à interface do SIGESCANTT, captura a pergunta em linguagem natural;
+
+  \item \textbf{SIGESCANTT envia requisição HTTP:} O frontend do SIGESCANTT faz \texttt{POST http://rag-api-svc:8000/api/query} com a pergunta e filtros opcionais. A comunicação é interna ao cluster (ClusterIP), sem exposição à internet;
+
+  \item \textbf{RAG-API recebe a requisição:} O FastAPI valida os parâmetros e inicia o pipeline;
+
+  \item \textbf{Geração de embedding da pergunta:} O sentence-transformers (executando localmente dentro do pod RAG-API) transforma a pergunta em um vetor (modelo padrão \texttt{intfloat/multilingual-e5-small}, 384 dimensões, com prefixos \texttt{query:}/\texttt{passage:}). Esse processo utiliza a classe \texttt{LocalEmbeddings} já existente no código;
+
+  \item \textbf{Recuperação híbrida:} A função \texttt{pesquisar\_documentos()} (módulo \texttt{retrieval\_hibrido.py}) combina busca semântica no FAISS com busca lexical BM25, funde os rankings via RRF (\textit{Reciprocal Rank Fusion}), expande chunks do mesmo documento-pai quando útil e prioriza tabelas auxiliares estruturadas em relação a anexos OCR;
+
+  \item \textbf{Reranking:} Os trechos recuperados passam por reranking que considera correspondência lexical, relevância técnica, presença de tabelas e qualidade da fonte (estruturada $>$ OCR);
+
+  \item \textbf{Montagem do contexto:} Os trechos reordenados são formatados em um prompt estruturado, incluindo metadados de cada documento (tipo, número, ano, seção). Cada trecho é precedido por \texttt{[Documento: Tipo Número/Ano - Parte X/Y]} para rastreabilidade;
+
+  \item \textbf{Chamada ao Ollama:} O pod RAG-API envia o prompt para \\ \texttt{http://ollama-svc:11434/v1/chat/completions} com o modelo configurado (ex.: \texttt{qwen2.5:7b}). A chamada utiliza a classe \texttt{ChatOpenAI} do LangChain --- a mesma classe usada atualmente para o DeepSeek, apenas com URL diferente;
+
+  \item \textbf{Ollama gera a resposta:} O modelo processa o contexto e gera uma resposta em português, com citações aos documentos fornecidos. Se a resposta inicial for insatisfatória, o sistema tenta uma extração agressiva de informações (mecanismo já implementado em \texttt{gerar\_resposta()});
+
+  \item \textbf{RAG-API formata a resposta:} A resposta bruta do LLM é enriquecida com metadados, fontes, tempo de processamento e informações de rastreabilidade;
+
+  \item \textbf{Resposta retorna ao SIGESCANTT:} O JSON estruturado é enviado de volta ao SIGESCANTT, que renderiza a resposta na interface do usuário.
+\end{enumerate}
+
+\noindent Todo esse fluxo acontece \textbf{dentro do cluster}, sem nenhum dado saindo para a internet. Custo por consulta: \textbf{zero} (LLM local + embeddings locais).
+
+\subsection{Fluxo Alternativo --- Testes via Streamlit}
+
+O Streamlit executa exatamente o mesmo pipeline descrito acima, porém de forma integrada: a interface visual chama diretamente as funções Python do RAG (sem passar pela API REST). Isso é possível porque ambos compartilham o mesmo código-fonte e os mesmos volumes de dados.
+
+\begin{table}[H]
+\centering
+\small
+\caption{Comparação dos fluxos de consulta}
+\label{tab:fluxos}
+\begin{tabularx}{\textwidth}{l X X}
+\toprule
+\textbf{Aspecto} & \textbf{Via SIGESCANTT} & \textbf{Via Streamlit} \\
+\midrule
+Entrada & HTTP POST (JSON) & Interface visual (formulário) \\
+Autenticação & Gerenciada pelo SIGESCANTT & Acesso direto (rede interna) \\
+Formato de saída & JSON estruturado & Renderização Markdown na tela \\
+Depuração & Logs da API & Métricas visuais, debug na tela \\
+Público-alvo & Usuários finais & Equipe técnica \\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+% =============================================================================
+\section{Avaliação de Qualidade e Métricas}
+% =============================================================================
+
+A qualidade do RAG é medida \textbf{offline}, fora do caminho crítico da consulta em produção. O harness \texttt{avaliar\_retrieval.py} reutiliza as mesmas funções de recuperação e geração do monólito atual (e, no futuro, da RAG-API).
+
+\subsection{Camadas de métrica}
+
+\begin{table}[H]
+\centering
+\small
+\caption{Métricas de avaliação do RAG-ANTT}
+\label{tab:metricas-avaliacao}
+\begin{tabularx}{\textwidth}{l l X}
+\toprule
+\textbf{Métrica} & \textbf{Origem} & \textbf{Uso} \\
+\midrule
+Cobertura do gabarito (retrieval) & Determinística & Fração dos valores normativos presentes nos chunks \\
+Completude da resposta & Determinística & Fração dos valores presentes na resposta gerada \\
+Hit do documento-alvo & Determinística & Tipo/número/ano esperado no top-$k$ \\
+Estruturado vs OCR & Determinística & Preferência por tabelas auxiliares \\
+Latência retrieval / geração & Relógio & Regressão de desempenho \\
+Faithfulness, answer relevancy, context precision/recall & RAGAS 0.1.21 & Juiz LLM; complementar ao gabarito \\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+\noindent\textbf{Diretriz:} no domínio regulatório da ANTT, o gabarito numérico/textual \textbf{não é substituído} pelo juiz LLM. O RAGAS detecta alucinação e irrelevância; o harness detecta valor errado mesmo quando a resposta é fluente.
+
+\subsection{Papel na arquitetura-alvo}
+
+\begin{itemize}
+  \item Em produção, a API retorna latência e metadados da consulta (já previstos no contrato JSON);
+  \item RAGAS e gabarito rodam em CI/homologação (job batch), não a cada \texttt{/api/query};
+  \item Relatórios em \texttt{relatorios\_avaliacao/}; guia operacional em \texttt{docs/avaliacao\_rag.md}.
+\end{itemize}
+
+\noindent Pin de dependência: \texttt{ragas==0.1.21} (compatível com \texttt{langchain==0.2.x} do projeto). Não atualizar para 0.2+ sem planejar upgrade do LangChain.
+
+% =============================================================================
+\section{Infraestrutura Kubernetes (Rancher)}
+% =============================================================================
+
+\subsection{Namespace e Services}
+
+Todos os componentes são implantados no namespace \texttt{rag-antt}. A comunicação entre pods ocorre via Kubernetes Services internos (ClusterIP), sem exposição direta à internet. Tudo rodar dentro de um único namespace significa:
+
+\begin{itemize}
+  \item \textbf{Isolamento de rede:} Pods de outros namespaces não acessam o Ollama;
+  \item \textbf{Isolamento de recursos:} Limites de CPU/RAM são definidos por namespace;
+  \item \textbf{Gestão centralizada:} Todos os componentes são visíveis e gerenciáveis no painel do Rancher;
+  \item \textbf{Deploy atômico:} É possível atualizar ou reiniciar todo o namespace de uma vez.
+\end{itemize}
+
+\begin{table}[H]
+\centering
+\small
+\caption{Services Kubernetes da arquitetura}
+\label{tab:services}
+\begin{tabularx}{\textwidth}{l c l l X}
+\toprule
+\textbf{Service} & \textbf{Porta} & \textbf{Tipo} & \textbf{Pod alvo} & \textbf{Acesso} \\
+\midrule
+\texttt{sgescantt-svc} & 80 & Ingress & sgescantt & Externo (usuários) \\
+\texttt{rag-api-svc} & 8000 & ClusterIP & rag-api & Interno (pods) \\
+\texttt{streamlit-svc} & 8501 & ClusterIP & streamlit & Interno + Ingress opcional \\
+\texttt{ollama-svc} & 11434 & ClusterIP & ollama & Interno apenas \\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+\noindent\textbf{Observação sobre segurança:} O pod Ollama \textbf{nunca é exposto} para fora do cluster. Apenas os pods RAG-API e Streamlit podem acessar o LLM via \texttt{ollama-svc:11434}. Isso impede uso indevido do modelo por agentes externos.
+
+\subsection{Ingress Controller}
+
+Nesta subseção, são apresentadas apenas as regras de roteamento por \textit{path}. O papel arquitetural e os controles de segurança do Ingress já foram descritos na seção ``Camada de Entrada --- Ingress Controller''.
+
+\begin{table}[H]
+\centering
+\small
+\caption{Regras de roteamento do Ingress}
+\label{tab:ingress}
+\begin{tabular}{l l l}
+\toprule
+\textbf{Path externo} & \textbf{Service destino} & \textbf{Observação} \\
+\midrule
+\texttt{/sgescantt} & \texttt{sgescantt-svc:XX} & Interface principal \\
+\texttt{/rag-teste} & \texttt{streamlit-svc:8501} & Acesso restrito (equipe técnica) \\
+\texttt{/api/rag/*} & \texttt{rag-api-svc:8000} & Opcional (se sistemas externos ao cluster consumirem) \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{Volumes Persistentes}
+
+Os dados do sistema (índice vetorial, modelos do Ollama, documentos fonte) são armazenados em Persistent Volume Claims (PVCs) para garantir persistência entre reinicializações de pods:
+
+\begin{table}[H]
+\centering
+\small
+\caption{Volumes persistentes da arquitetura}
+\label{tab:volumes}
+\begin{tabularx}{\textwidth}{l l l X}
+\toprule
+\textbf{PVC} & \textbf{Montagem} & \textbf{Pods} & \textbf{Conteúdo} \\
+\midrule
+\texttt{vectorstore-data} & \texttt{/app/vectorstore\_local/} & rag-api, streamlit & Índice FAISS (index.faiss + index.pkl) \\
+\texttt{ollama-models} & \texttt{/root/.ollama/} & ollama & Cache dos modelos LLM baixados \\
+\texttt{dados-antt} & \texttt{/app/dados\_antt/} & rag-api, streamlit & Documentos fonte (HTML, PDF, JSON) \\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+\noindent\textbf{Nota sobre modo de acesso:} O PVC \texttt{vectorstore-data} deve ser \texttt{ReadWriteMany} (RWX) se ambos os pods (rag-api e streamlit) precisarem montar o mesmo volume simultaneamente. Caso o provedor de storage não suporte RWX, uma alternativa é replicar o índice em cada pod ou utilizar um volume \texttt{ReadOnlyMany} (ROX) para leitura compartilhada.
+% =============================================================================
+\section{Requisitos de Infraestrutura}
+% =============================================================================
+
+\subsection{Requisitos do Cluster Kubernetes}
+
+\begin{table}[H]
+\centering
+\small
+\caption{Recursos minimos estimados para o cluster (baseline tecnico)}
+\label{tab:recursos_cluster}
+\begin{tabularx}{\textwidth}{l c c X}
+\toprule
+\textbf{Pod} & \textbf{CPU} & \textbf{RAM} & \textbf{Observações} \\
+\midrule
+rag-api & 2 cores & 4 GB & sentence-transformers + FAISS em memória \\
+streamlit & 1 core & 2 GB & Mesmo que o RAG-API, menor carga \\
+ollama (CPU) & 4 cores & 16 GB & Modelo 7B quantizado (Q4) em CPU \\
+ollama (GPU) & 2 cores + GPU & 8 GB + 8 GB VRAM & Modelo 7B com aceleração GPU \\
+\midrule
+\textbf{Total minimo (CPU)} & \textbf{7 cores} & \textbf{22 GB} & Sem GPU \\
+\textbf{Total minimo (GPU)} & \textbf{5 cores + GPU} & \textbf{14 GB + 8 GB VRAM} & Com GPU \\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+\begin{table}[H]
+\centering
+\footnotesize
+\caption{Dimensionamento recomendado com folga operacional}
+\label{tab:dimensionamento_recomendado}
+\begin{tabularx}{\textwidth}{>{\raggedright\arraybackslash}p{2.6cm} >{\centering\arraybackslash}p{1.6cm} >{\centering\arraybackslash}p{1.6cm} >{\raggedright\arraybackslash}p{3.4cm} >{\raggedright\arraybackslash}X}
+\toprule
+\textbf{Cenário} & \textbf{CPU} & \textbf{RAM} & \textbf{GPU} & \textbf{Uso indicado} \\
+\midrule
+Inicial (econômico) & 8 vCPU & 32 GB & Não & Piloto e homologação com baixo volume; maior latência e menor concorrência. \\
+Intermediário (suficiente) & 12 vCPU & 48 GB & 1x GPU T4 (16 GB VRAM) & Produção inicial com melhor experiência e redução significativa de latência. \\
+Ideal (produção) & 16 vCPU & 64 GB & 1x GPU dedicada (16--24+ GB VRAM) & Produção com maior folga operacional, melhor concorrência e menor latência. \\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+\noindent\textbf{Observação:} A Tabela~\ref{tab:recursos_cluster} apresenta o piso técnico de funcionamento. A Tabela~\ref{tab:dimensionamento_recomendado} apresenta o dimensionamento sugerido para operação estável, com margem para crescimento e picos.
+
+
+\subsection{Viabilidade do Piloto sem GPU e Riscos Operacionais}
+
+\noindent\textbf{Diretriz para início do piloto:} É tecnicamente viável iniciar sem GPU, desde que o objetivo seja validação funcional e de qualidade de resposta em baixa carga. O piso técnico indicado neste documento (\textbf{7 cores e 22 GB RAM}, sem GPU) permite executar o fluxo completo de ponta a ponta (consulta, recuperação semântica, inferência e retorno de resposta).
+
+\noindent Para um piloto de baixa demanda (\textbf{até aproximadamente 20 requisições/dia}), a operação tende a ser suficiente para prova de conceito. Entretanto, a experiência de uso é inferior ao cenário com GPU, principalmente por conta da latência de inferência em CPU.
+
+\begin{table}[h!]
+\centering
+\small
+\caption{Limites e riscos do piloto sem GPU (CPU-only)}
+\label{tab:riscos_piloto_cpu}
+\begin{tabularx}{\textwidth}{l X X}
+\toprule
+\textbf{Aspecto} & \textbf{Limitacao/Risco} & \textbf{Impacto pratico no piloto} \\
+\midrule
+Latência por consulta & Faixa típica de dezenas de segundos em CPU (podendo variar para mais em horário de pico) & Menor fluidez para usuário; maior tempo de espera por resposta \\
+Concorrência & Baixa capacidade de atender consultas simultâneas sem fila & Aumento de tempo de resposta quando houver mais de um usuário consultando ao mesmo tempo \\
+Picos de uso & Sensibilidade a variações de carga e tamanho de prompt & Oscilação de desempenho, com consultas mais longas em cenários de contexto extenso \\
+Escalabilidade imediata & Crescimento de demanda pressiona CPU e memória rapidamente & Necessidade de ajuste de capacidade em prazo curto, caso o piloto tenha adesão maior que a prevista \\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+
+\noindent\textbf{Recomendação operacional:} O mínimo (7 cores/22 GB) funciona para provar conceito. Para piloto com uso contínuo por equipe, recomenda-se iniciar ao menos no patamar \textbf{8 vCPU e 32 GB RAM} (Tabela~\ref{tab:dimensionamento_recomendado}, cenário ``Inicial (econômico)''). Para menor risco de fila e maior estabilidade, o patamar \textbf{16 vCPU e 64 GB RAM} (cenário ``Ideal (produção)'') oferece folga operacional adicional.
+
+É possível seguir sem GPU na fase inicial, com plena transparência de limites operacionais. Caso a adoção aumente (mais usuários simultâneos, mais consultas por dia ou necessidade de menor tempo de resposta), a migração para GPU deve ser tratada como próxima etapa natural do projeto.
+
+
+
+\subsection{Requisitos de Disco}
+
+\begin{table}[H]
+\centering
+\small
+\caption{Espaço em disco mínimo estimado (baseline técnico)}
+\label{tab:disco}
+\begin{tabular}{l c l}
+\toprule
+\textbf{Componente} & \textbf{Espaço} & \textbf{Conteúdo} \\
+\midrule
+Modelo Ollama (Qwen2.5:7b) & 4,7 GB & Pesos do modelo quantizado \\
+Vectorstore FAISS & 50--200 MB & Índice vetorial dos documentos \\
+Documentos fonte & 500 MB--2 GB & PDFs, HTMLs, JSONs da ANTT \\
+Imagem Docker RAG-API & 2--3 GB & Python + dependências \\
+Imagem Docker Ollama & 1 GB & Runtime do Ollama \\
+\midrule
+\textbf{Total estimado} & \textbf{10--15 GB} & --- \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\begin{table}[H]
+\centering
+\small
+\caption{Capacidade de armazenamento recomendada com folga}
+\label{tab:disco_folga}
+\begin{tabularx}{\textwidth}{l c X}
+\toprule
+\textbf{Volume/PVC} & \textbf{Capacidade recomendada} & \textbf{Finalidade} \\
+\midrule
+\texttt{ollama-models} & 30 GB & Modelos LLM locais e cache de versões \\
+\texttt{vectorstore-data} & 20 GB & Índice FAISS, metadados e snapshots de reindexação \\
+\texttt{dados-antt} & 80 GB & Base documental (PDF/HTML/Markdown) e crescimento \\
+\texttt{logs-metricas} & 20 GB & Logs operacionais e métricas de observabilidade \\
+\texttt{backup} & 100 GB & Cópias de segurança de documentos e índices \\
+\midrule
+\textbf{Total provisionado recomendado} & \textbf{250 GB SSD} & Operação com margem para crescimento e retenção \\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+\noindent\textbf{Observação:} O total de 250 GB SSD inclui folga operacional para expansão da base, retenção de logs e rotinas de backup, reduzindo risco de indisponibilidade por falta de espaço.
+
+% =============================================================================
+\section{Segurança e Isolamento}
+% =============================================================================
+
+A arquitetura implementa segurança em camadas, separando rede externa e interna:
+
+\subsection{Camada Externa (Usuários)}
+
+\begin{itemize}
+  \item O acesso dos usuários é feito exclusivamente via Ingress, com TLS (HTTPS);
+  \item A autenticação e autorização são gerenciadas pelo SIGESCANTT (SSO, LDAP ou mecanismo corporativo existente);
+  \item O Streamlit pode ser protegido por autenticação básica ou restrito a IPs internos via Ingress annotations.
+\end{itemize}
+
+\subsection{Camada Interna (Cluster)}
+
+\begin{itemize}
+  \item A API REST (\texttt{rag-api-svc}) é acessível apenas dentro do cluster (ClusterIP);
+  \item O Ollama (\texttt{ollama-svc}) é acessível apenas dentro do cluster --- \textbf{nunca é exposto externamente};
+  \item Network Policies do Kubernetes podem restringir comunicação: apenas pods do namespace \texttt{rag-antt} podem acessar o \texttt{ollama-svc};
+  \item Nenhum dado regulatório trafega para servidores externos --- LLM e embeddings são 100\% locais.
+\end{itemize}
+
+\subsection{Compliance e Dados}
+
+\begin{table}[H]
+\centering
+\small
+\caption{Análise de compliance por componente}
+\label{tab:compliance}
+\begin{tabularx}{\textwidth}{l c X}
+\toprule
+\textbf{Componente} & \textbf{Dados saem do cluster?} & \textbf{Observação} \\
+\midrule
+Embeddings (sentence-transformers) & Não & Modelo local, execução no pod \\
+LLM (Ollama) & Não & Modelo local, execução no pod \\
+Vectorstore (FAISS) & Não & Armazenado em PVC local \\
+Documentos fonte & Não & Armazenados em PVC local \\
+Logs e métricas & Configurável & Podem ser enviados para Prometheus/Grafana interno \\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+\noindent\textbf{Conclusão:} Com LLM e embeddings locais, \textbf{nenhum dado regulatório sai do perímetro institucional}. Isso atende requisitos de compliance mesmo em cenários restritivos.
+
+% =============================================================================
+\section{Estratégia de Deploy}
+% =============================================================================
+
+\subsection{Ordem de Implantação}
+
+A implantação deve seguir a ordem de dependências:
+
+\begin{enumerate}[label=\textbf{Fase~\arabic*.}]
+  \item \textbf{PVCs e Ollama:} Criar os volumes persistentes e deployar o pod Ollama com o modelo desejado. Validar que o Ollama responde em \texttt{ollama-svc:11434}. Esse é o primeiro passo porque todos os demais dependem do LLM estar disponível;
+
+  \item \textbf{RAG-API:} Deployar o pod FastAPI. Validar que o health check responde em \texttt{rag-api-svc:8000/api/health} e que a consulta funciona via \texttt{/api/query}. Testar pelo menos uma consulta completa (embedding $\rightarrow$ FAISS $\rightarrow$ Ollama $\rightarrow$ resposta);
+
+  \item \textbf{Streamlit:} Deployar o pod Streamlit. Validar que a interface carrega em \texttt{streamlit-svc:8501} e que as consultas funcionam. Comparar os resultados com os obtidos via API para garantir consistência;
+
+  \item \textbf{Integração SIGESCANTT:} Configurar o SIGESCANTT para consumir \\ \texttt{rag-api-svc:8000/api/query}. Validar o fluxo completo de ponta a ponta, incluindo a renderização da resposta na interface do SIGESCANTT.
+\end{enumerate}
+
+\subsection{Fallback e Resiliência}
+
+O sistema deve manter operação degradada em caso de falha parcial:
+
+\begin{table}[H]
+\centering
+\small
+\caption{Cenários de falha e comportamento esperado}
+\label{tab:fallback}
+\begin{tabularx}{\textwidth}{l X X}
+\toprule
+\textbf{Componente em falha} & \textbf{Impacto} & \textbf{Ação automática} \\
+\midrule
+Ollama (LLM) & Não gera respostas em linguagem natural & Retorna apenas os trechos relevantes sem sumarização. O RAG opera como busca pura. \\
+Vectorstore (FAISS) & Não realiza busca semântica & Retorna erro \texttt{503 Service Unavailable} com mensagem explicativa. \\
+RAG-API & Nenhuma consulta funciona & Kubernetes reinicia o pod automaticamente (liveness probe). \\
+Streamlit & Interface de teste indisponível & Não afeta produção (SIGESCANTT continua via API). \\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+
+% =============================================================================
+\section{Estimativa de Esforço}
+% =============================================================================
+
+A transição da aplicação monolítica Streamlit para a arquitetura descrita neste documento envolve as etapas de implementação detalhadas a seguir. O prazo estimado para entrega é de \textbf{30 dias úteis}.
+
+\subsection{Delimitacao de Escopo para Cronograma}
+
+Para fins de planejamento no cronograma do projeto, o escopo do RAG deve ser tratado como um conjunto de entregas tecnicas relacionadas a ingestao de base de conhecimento textual, indexacao semantica, consulta via API e suporte a integracao com o SIGESCANTT. O RAG nao deve ser apresentado como componente multimodal, nem como motor operacional diretamente conectado aos parametros de negocio do SIGESCANTT.
+
+\begin{table}[H]
+\centering
+\footnotesize
+\caption{Premissas e limites do escopo do RAG para o cronograma}
+\label{tab:escopo_cronograma_rag}
+\begin{tabularx}{\textwidth}{l X X}
+\toprule
+\textbf{Item} & \textbf{Dentro do escopo} & \textbf{Fora do escopo} \\
+\midrule
+Base de conhecimento & Upload, armazenamento, extracao de texto, chunking, embeddings e indexacao de documentos textuais. Inclui PDF, HTML, TXT, Markdown, JSON textual e planilhas convertidas para representacao textual/tabular. & Processamento multimodal de imagem, audio, video, OCR avancado ou interpretacao visual de graficos e figuras. \\
+Planilhas & Permitido quando a planilha for usada como fonte textual ou tabular de conhecimento, por exemplo CSV ou XLSX convertido para linhas, colunas e metadados pesquisaveis. & Uso da planilha como sistema transacional, calculadora operacional oficial ou fonte dinamica vinculada automaticamente aos parametros ativos do SIGESCANTT. \\
+Parametros operacionais & Documentos textuais relacionados a parametros operacionais podem ser carregados e consultados, desde que entrem como conhecimento documental versionado. & Vinculo direto via API a parametros operacionais vivos, regras de negocio executaveis, simuladores, motores de calculo ou bases transacionais do SIGESCANTT. \\
+Consulta pelo SIGESCANTT & API REST para receber pergunta, executar o pipeline RAG e devolver resposta, fontes, trechos e metadados para exibicao ao usuario do SIGESCANTT. & Alteracoes na interface, autenticacao, autorizacao, regras internas ou persistencia transacional do SIGESCANTT. \\
+Resultado da query & Retorno estruturado em JSON pelo endpoint de consulta, permitindo que o SIGESCANTT apresente a resposta ao usuario e registre metadados conforme sua propria regra. & Decisao automatica, homologacao juridica automatica, atualizacao de cadastros ou execucao de acoes operacionais no SIGESCANTT. \\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+\subsection{Estrutura de Etapas e Subetapas}
+
+A Tabela~\ref{tab:eap_rag_cronograma} organiza o escopo em formato de etapas e subetapas para uso direto em ferramenta de cronograma. As atividades foram descritas como entregas verificaveis, evitando ambiguidade sobre o que o RAG faz e o que permanece como responsabilidade de sistemas externos.
+
+\begin{table}[H]
+\centering
+\footnotesize
+\caption{Etapas e subetapas sugeridas para o cronograma do RAG -- parte 1}
+\label{tab:eap_rag_cronograma}
+\begin{tabularx}{\textwidth}{>{\raggedright\arraybackslash}p{2.3cm} >{\raggedright\arraybackslash}p{2.6cm} X X}
+\toprule
+\textbf{Etapa} & \textbf{Subetapa} & \textbf{Descricao objetiva} & \textbf{Entregavel} \\
+\midrule
+1. Delimitacao funcional do RAG & 1.1 Definir tipos de fonte textual & Formalizar que o RAG trabalhara com base de conhecimento textual: PDF, HTML, TXT, Markdown, JSON textual e planilhas convertidas para texto ou tabela pesquisavel. & Matriz de fontes aceitas e nao aceitas. \\
+1. Delimitacao funcional do RAG & 1.2 Definir exclusoes de multimodalidade & Registrar que o RAG nao processara imagem, audio, video, leitura visual de figuras, OCR avancado ou interpretacao de graficos como dado visual. & Declaracao de nao multimodalidade no escopo. \\
+1. Delimitacao funcional do RAG & 1.3 Definir limite sobre parametros operacionais & Registrar que parametros operacionais podem ser consultados apenas quando estiverem descritos em documentos textuais carregados na base. Nao havera conexao direta com parametros operacionais vivos via API. & Regra de fronteira entre conhecimento documental e sistema operacional. \\
+2. Ingestao da base de conhecimento & 2.1 Implementar upload de documentos textuais & Disponibilizar mecanismo para receber documentos textuais e armazenar os arquivos em area controlada para processamento. & Upload funcional para documentos suportados. \\
+2. Ingestao da base de conhecimento & 2.2 Implementar upload de planilhas & Permitir upload de planilhas quando seu conteudo puder ser convertido para texto estruturado, preservando nome de abas, colunas, linhas e metadados relevantes. & Conversao de CSV/XLSX para texto indexavel. \\
+2. Ingestao da base de conhecimento & 2.3 Validar arquivos recebidos & Validar extensao, tamanho, tipo, conteudo extraivel e erros de leitura antes de inserir o documento na base. & Rotina de validacao e relatorio de falhas. \\
+3. Processamento e indexacao & 3.1 Extrair e normalizar texto & Extrair conteudo textual, remover ruido, padronizar metadados e preparar o material para chunking. & Textos normalizados com metadados. \\
+3. Processamento e indexacao & 3.2 Gerar chunks e embeddings & Dividir documentos em trechos, gerar embeddings locais e preparar os vetores para busca semantica. & Chunks vetorizados. \\
+3. Processamento e indexacao & 3.3 Atualizar indice vetorial & Persistir ou atualizar o indice FAISS com os documentos processados. & Indice vetorial atualizado e consultavel. \\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+\begin{table}[H]
+\centering
+\footnotesize
+\caption{Etapas e subetapas sugeridas para o cronograma do RAG -- parte 2}
+\label{tab:eap_rag_cronograma_parte_2}
+\begin{tabularx}{\textwidth}{>{\raggedright\arraybackslash}p{2.3cm} >{\raggedright\arraybackslash}p{2.6cm} X X}
+\toprule
+\textbf{Etapa} & \textbf{Subetapa} & \textbf{Descricao objetiva} & \textbf{Entregavel} \\
+\midrule
+4. Consulta RAG via API & 4.1 Implementar endpoint de consulta & Receber pergunta, filtros opcionais e parametros de busca pelo endpoint \texttt{/api/query}. & Contrato REST de consulta. \\
+4. Consulta RAG via API & 4.2 Executar recuperacao e geracao & Buscar trechos relevantes, montar contexto, chamar o LLM local e gerar resposta em linguagem natural. & Pipeline RAG ponta a ponta. \\
+4. Consulta RAG via API & 4.3 Retornar resposta auditavel & Retornar resposta, fontes, trechos, relevancia, tempo de processamento e metadados em JSON. & Resposta estruturada para consumo pelo SIGESCANTT. \\
+5. Integracao com SIGESCANTT & 5.1 Apoiar consumo da API pelo SIGESCANTT & Fornecer contrato, exemplos de requisicao e orientacao tecnica para que o SIGESCANTT consulte o RAG. & Guia de integracao e exemplos HTTP/JSON. \\
+5. Integracao com SIGESCANTT & 5.2 Validar consulta pelo usuario final & Validar que o usuario do SIGESCANTT consegue enviar uma pergunta e receber a resposta retornada pela API do RAG. & Fluxo de consulta validado em homologacao. \\
+5. Integracao com SIGESCANTT & 5.3 Registrar limites de responsabilidade & Confirmar que o RAG responde perguntas com base documental, mas nao altera dados, nao executa calculos oficiais e nao atualiza parametros operacionais no SIGESCANTT. & Termo tecnico de limites da integracao. \\
+6. Testes e homologacao & 6.1 Testar formatos aceitos & Testar documentos textuais e planilhas convertidas para texto, incluindo casos invalidos. & Evidencias de teste de ingestao. \\
+6. Testes e homologacao & 6.2 Testar qualidade das respostas & Executar \texttt{avaliar\_retrieval.py} (gabarito + opcionalmente \texttt{--com-ragas}); conferir fontes, completude factual e latencia. & Relatorio em \texttt{relatorios\_avaliacao/}. \\
+6. Testes e homologacao & 6.3 Testar API e desempenho & Validar disponibilidade, tempo de resposta, erros esperados e comportamento sob carga controlada. & Relatorio de testes tecnicos. \\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+\begin{table}[H]
+\centering
+\small
+\caption{Estimativa de esforço para implementação (escopo DeepFeed)}
+\label{tab:esforco}
+\begin{tabularx}{\textwidth}{c X c c}
+\toprule
+\textbf{Etapa} & \textbf{Descrição} & \textbf{Horas} & \textbf{Semana} \\
+\midrule
+1 & Refatorar \texttt{antt\_rag\_unified.py}: extrair lógica de busca híbrida (\texttt{retrieval\_hibrido}), geração de resposta e reranking para módulos Python independentes, reutilizáveis tanto pela API quanto pelo Streamlit & 32 & 1--2 \\
+2 & Desenvolver API FastAPI com todos os endpoints (query, health, status, reindex, documents), validação Pydantic, tratamento de erros e documentação Swagger & 40 & 2--3 \\
+3 & Adicionar provedor Ollama no \texttt{config.py} e \texttt{llm\_providers.py}, incluindo fallback para outros provedores em caso de indisponibilidade & 16 & 3 \\
+4 & Criar Dockerfiles otimizados para RAG-API e Streamlit, incluindo multi-stage build, cache de dependências e testes de build & 16 & 4 \\
+5 & Criar manifests Kubernetes (Deployments, Services, PVCs, Ingress, ConfigMaps, resource limits), com ambientes de staging e produção & 24 & 4--5 \\
+6 & Testes de integração ponta a ponta: API + Ollama + vectorstore + Streamlit, incluindo testes de carga, concorrência e cenários de falha & 32 & 5 \\
+7 & Documentação técnica da API para equipe OTI: contrato, exemplos de chamada, guia de integração e tratamento de erros & 16 & 6 \\
+8 & Suporte à integração SIGESCANTT: acompanhamento técnico, resolução de dúvidas e ajustes durante a integração & 24 & 6 \\
+\midrule
+\multicolumn{2}{l}{\textbf{Total (escopo DeepFeed)}} & \textbf{200 h} & \textbf{30 dias} \\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+\subsection{Etapas Dependentes da ANTT}
+
+As seguintes atividades \textbf{não estão incluídas} na estimativa acima por dependerem de ações, decisões e infraestrutura da equipe da ANTT:
+
+\begin{table}[H]
+\centering
+\small
+\caption{Atividades dependentes da ANTT (fora do escopo de estimativa)}
+\label{tab:dependencias_antt}
+\begin{tabularx}{\textwidth}{l X}
+\toprule
+\textbf{Atividade} & \textbf{Dependência} \\
+\midrule
+Provisionar cluster Kubernetes (Rancher) & Equipe de infraestrutura da ANTT deve disponibilizar o cluster com recursos adequados (CPU, RAM, GPU opcional, storage) \\
+Configurar Ollama no Rancher (pod + PVC + modelo) & Requer acesso ao cluster, definição de \textit{resource quotas}, download do modelo LLM e eventual configuração de GPU --- depende da infraestrutura disponibilizada pela ANTT \\
+Configuração de rede e Ingress & Definição de domínios, certificados TLS, regras de firewall e políticas de rede interna --- responsabilidade da equipe de redes/segurança da ANTT \\
+Integração com autenticação corporativa & SSO, LDAP ou mecanismo de autenticação do SIGESCANTT --- responsabilidade da equipe do OTI \\
+Homologação e aceite em produção & Validação funcional, aceite de qualidade e aprovação para publicação em ambiente de produção \\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+\subsection{Escopo Não Incluído --- Integração com Crawler}
+
+\noindent\textbf{Importante:} A estimativa de 30 dias úteis \textbf{não contempla} o desenvolvimento e integração do \textbf{Crawler de atualização da base de conhecimento}.
+
+O Crawler é um componente complementar cuja função é realizar varreduras periódicas nos portais da ANTT e do DNIT (e eventualmente outros, como sites de concessionárias), extraindo documentos regulatórios atualizados (Resoluções, Instruções Normativas, Notas Técnicas, Deliberações, etc.) em formato PDF e/ou Markdown. Esses documentos seriam então enviados ao RAG para reindexação automática, mantendo a base de conhecimento sempre atualizada sem intervenção manual.
+
+O fluxo previsto para a integração Crawler--RAG é:
+
+\begin{enumerate}[label=\textbf{\arabic*.}]
+  \item O Crawler executa periodicamente (ex.: diariamente ou semanalmente) a varredura dos portais da ANTT e DNIT;
+  \item Documentos novos ou atualizados são baixados e armazenados em um diretório compartilhado ou enviados via API;
+  \item O RAG detecta os novos documentos (via webhook, polling ou chamada direta ao endpoint \texttt{POST /api/reindex});
+  \item O pipeline de ingestão processa os documentos (extração de texto, chunking, geração de embeddings);
+  \item O índice FAISS é atualizado com os novos vetores, tornando os documentos disponíveis para consultas.
+\end{enumerate}
+
+\noindent Essa integração envolve desenvolvimento adicional que inclui: adaptação do Crawler existente, criação do pipeline de ingestão automatizado, tratamento de duplicatas e versionamento de documentos, monitoramento de falhas no Crawler, e testes de reindexação incremental. 
+
+\subsection{Resumo do Escopo}
+
+\begin{table}[H]
+\centering
+\small
+\caption{Resumo do escopo da estimativa}
+\label{tab:resumo_escopo}
+\begin{tabularx}{\textwidth}{X c}
+\toprule
+\textbf{Item} & \textbf{Incluído?} \\
+\midrule
+Refatoração do código e criação da API REST & Sim \\
+Provedor Ollama (LLM local) & Sim \\
+Dockerfiles e manifests Kubernetes & Sim \\
+Testes de integração e documentação & Sim \\
+Suporte à integração com SIGESCANTT & Sim \\
+Provisão de infraestrutura no Rancher (cluster, rede, GPU) & Não (ANTT) \\
+Configuração do Ollama no cluster & Não (ANTT) \\
+Desenvolvimento/integração do Crawler de atualização & Não (escopo separado) \\
+Customizações de interface no SIGESCANTT & Não (equipe OTI) \\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+% =============================================================================
+\section{Conclusão}
+% =============================================================================
+
+A arquitetura proposta transforma o Sistema RAG-ANTT de uma aplicação monolítica Streamlit em um conjunto de microsserviços orquestrados pelo Kubernetes (Rancher), mantendo compatibilidade total com o código existente. Os principais ganhos são:
+
+\begin{enumerate}[label=\textbf{\arabic*.}]
+  \item \textbf{Desacoplamento completo:} A lógica de RAG é exposta como API REST, consumível por qualquer sistema (SIGESCANTT, aplicativos móveis, chatbots, automações);
+
+  \item \textbf{Custo zero de inferência:} Com Ollama e sentence-transformers locais, não há cobrança por chamada a APIs externas. O custo se limita à infraestrutura computacional;
+
+  \item \textbf{Compliance total:} Nenhum dado regulatório sai do perímetro do cluster. LLM, embeddings e vectorstore operam 100\% localmente;
+
+  \item \textbf{Continuidade de testes:} O Streamlit permanece disponível para a equipe técnica, sem impactar a produção;
+
+  \item \textbf{Resiliência:} Kubernetes garante reinício automático de pods, e a arquitetura suporta operação degradada em caso de falha do LLM;
+
+  \item \textbf{Evolução incremental:} A transição pode ser feita em fases, começando pelo deploy da API e Ollama, e integrando o SIGESCANTT em um segundo momento.
+\end{enumerate}
+
+A recomendação é iniciar com um \textbf{teste local} do Ollama para validar a qualidade do modelo escolhido com documentos reais da ANTT, e então replicar a configuração no ambiente Rancher seguindo a ordem de implantação descrita na Seção~9.
+
+% =============================================================================
+\vspace{1cm}
+\begin{center}
+\rule{0.5\textwidth}{0.4pt}
+\end{center}
+\vspace{0.5cm}
+
+\noindent\textit{Este documento foi elaborado como referência de arquitetura para o deploy do Sistema RAG-ANTT. A arquitetura descrita é a recomendação técnica atual e pode ser revisada conforme evolução dos requisitos, infraestrutura disponível e resultados do piloto.}
+
+\end{document}
