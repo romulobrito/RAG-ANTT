@@ -70,12 +70,25 @@ Definidos em `CASOS_AVALIACAO` dentro de `avaliar_retrieval.py`. Dominios atuais
 
 Para incluir um dominio novo: adicione um `CasoAvaliacao` com pergunta, valores esperados e documento-alvo.
 
+## Tipos de documento
+
+O reconhecimento de tipos e gerado a partir da **base real** (`dados_antt/`):
+
+- Existencia: so siglas com pelo menos um `.md` (base vazia = filtro sem tipos fantasmas)
+- Aliases: extraidos do cabecalho do documento no ingest (`INSTRUCAO NORMATIVA`, `RESOLUCAO`, `NOTA TECNICA SEI`, ...)
+- Persistencia: `dados_antt/.catalogo_tipos.json`
+- Atualizacao automatica: `atualizar_catalogo_tipos()` no reindex ("Atualizar base"), ao regenerar o relatorio e apos upload de PDF
+- Aliases curtos opcionais (`in` -> INM): `TIPOS_DOCUMENTO_ALIASES_CURTOS` em `config.py`, aplicados so se a sigla existir na base
+- LLM opcional: `TIPOS_DOCUMENTO_USAR_LLM_ALIASES=True` (desligado por padrao)
+
+Modulo: `tipos_documento.py`.
+
 ## Testes automaticos
 
 Sem carregar FAISS nem chamar LLM:
 
 ```bash
-python -m pytest test_avaliar_retrieval.py test_retrieval_hibrido.py -q
+python -m pytest test_avaliar_retrieval.py test_retrieval_hibrido.py test_tipos_documento.py -q
 ```
 
 ## Relacao com a arquitetura

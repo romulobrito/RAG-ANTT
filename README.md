@@ -131,6 +131,7 @@ sequenceDiagram
 | `retrieval_hibrido.py` | Busca hibrida, RRF, expansao por documento-pai, boost de fonte estruturada |
 | `llm_providers.py` | ChatOpenAI (OpenRouter/OpenAI) e `LocalEmbeddings` |
 | `avaliar_retrieval.py` | Metricas offline (gabarito + latencia + RAGAS opcional) |
+| `tipos_documento.py` | Catalogo de tipos gerado da base (aliases do cabecalho; refresh no reindex/upload) |
 | `dados_antt/tabelas_auxiliares/` | Tabelas normativas em Markdown (preferidas ao OCR) |
 
 ## Avaliacao de Qualidade

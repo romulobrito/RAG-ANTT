@@ -3,8 +3,14 @@ import json
 import glob
 import re
 
+from tipos_documento import atualizar_catalogo_tipos, listar_siglas_tipo
+
 DIR_DADOS = "dados_antt"
-TIPOS_DOCUMENTO = ["RES", "POR", "INM", "DLB", "INC", "VTO", "DEC", "LEI", "CON"]
+
+
+def obter_tipos_documento() -> list:
+    """Siglas presentes na base (catalogo gerado a partir dos arquivos)."""
+    return listar_siglas_tipo()
 
 _PADRAO_NOME = re.compile(
     r"^([A-Z]{2,4})-(\d+)-(\d{4})\.md$"
@@ -149,6 +155,16 @@ def gerar_relatorio_documentos():
         json.dump(documentos, f, ensure_ascii=False, indent=4)
 
     print("Relatorio salvo em relatorio_documentos.json")
+
+    try:
+        cat = atualizar_catalogo_tipos(DIR_DADOS)
+        print(
+            f"Catalogo de tipos atualizado: {len(cat.siglas)} sigla(s) "
+            f"({', '.join(cat.siglas) or 'nenhuma'})"
+        )
+    except Exception as exc:
+        print(f"Aviso: falha ao atualizar catalogo de tipos: {exc}")
+
     return documentos
 
 

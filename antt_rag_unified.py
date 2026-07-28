@@ -35,9 +35,14 @@ import json
 import re
 import html
 import unicodedata
-from typing import Dict, Tuple
+from typing import Dict, List, Sequence, Tuple
 from pathlib import Path
 from types import SimpleNamespace
+from tipos_documento import listar_siglas_tipo
+from contexto_compartimentado import (
+    id_fonte_documento as _id_fonte_documento,
+    montar_contexto_compartimentado as _montar_contexto_compartimentado,
+)
 
 # Importar configurações e gerenciador de LLM
 from config import (
@@ -198,6 +203,10 @@ INSTRUCOES:
 - DEMANDAS DISTINTAS: Quando os trechos tratarem de demandas, processos ou assuntos
   distintos (ex: notas tecnicas diferentes, processos SEI diferentes), identifique-os
   separadamente. Quando tratarem do mesmo assunto, consolide normalmente.
+- MULTIPLOS DOCUMENTOS: nao transfira formalizacao (aditamento, decisao, oficio) nem
+  requisitos de um documento para outro sem trecho explicito; se houver orientacao geral
+  e caso concreto, separe as secoes; "fora do escopo da analise" nao e proibicao absoluta
+  salvo texto expresso; exponha divergencias em vez de fundi-las.
 
 FORMATO DA RESPOSTA:
 1. Resposta direta a pergunta
@@ -527,6 +536,9 @@ Diretrizes (sem formato fixo):
 - TABELAS: Os documentos podem conter tabelas em formato markdown (linhas com |).
   Extraia TODOS os valores numericos, limites e criterios presentes nessas tabelas.
 - Quando os trechos tratarem de demandas ou processos DISTINTOS, apresente-os separadamente.
+- Nao transfira formalizacao nem requisitos entre documentos distintos sem trecho explicito;
+  separe orientacao geral de caso concreto; reporte "fora do escopo" como limitacao de
+  escopo, nao como proibicao absoluta sem texto expresso; exponha divergencias.
 
 Base documental:
 {context}
@@ -545,6 +557,9 @@ Requisitos (sem impor estrutura fixa):
 - TABELAS: Os documentos podem conter tabelas em formato markdown (linhas com |).
   Extraia TODOS os valores numericos, limites e criterios presentes nessas tabelas.
 - Quando os trechos tratarem de demandas ou processos DISTINTOS, apresente-os separadamente.
+- Nao transfira formalizacao nem requisitos entre documentos distintos sem trecho explicito;
+  separe orientacao geral de caso concreto; reporte "fora do escopo" como limitacao de
+  escopo, nao como proibicao absoluta sem texto expresso; exponha divergencias.
 
 Documentos:
 {context}
@@ -1393,6 +1408,17 @@ def _reindexar_base_impl(embedding_provider: str) -> tuple:
         logger.error(msg)
         return False, msg
 
+    # 2b) Catalogo de tipos/aliases a partir dos arquivos presentes na base
+    try:
+        from tipos_documento import atualizar_catalogo_tipos
+        cat_tipos = atualizar_catalogo_tipos()
+        logger.info(
+            "Tipos documentais na base: %s",
+            ", ".join(cat_tipos.siglas) or "(nenhum)",
+        )
+    except Exception as exc:
+        logger.warning(f"Atualizacao do catalogo de tipos falhou: {exc}")
+
     # 3) Reconstruir o indice em diretorio temporario. Apagar o indice em uso
     # antes de ter o novo pronto deixaria a base indisponivel durante toda a
     # reindexacao e sem nenhuma versao consultavel caso ela falhasse.
@@ -1686,29 +1712,28 @@ REGRAS DE FOCO, FUNDAMENTACAO E COMPLETUDE (OBRIGATORIAS - TODOS OS DOCUMENTOS):
   NUNCA cite nomes de arquivo de imagem OCR como fonte principal ao usuario.
 - Use OCR apenas para complementar campos que a versao estruturada nao cobrir.
 
-8) ESCOPO DA PERGUNTA
+8) FIDELIDADE ENTRE MULTIPLOS DOCUMENTOS (OBRIGATORIO)
+- O contexto vem em blocos ===== FONTE INICIO / FONTE FIM =====. Cada bloco e uma
+  fonte independente. NAO transfira regra, requisito, prazo, excecao ou forma de
+  formalizacao de um bloco para outro sem trecho explicito que autorize essa extensao.
+- Distinga orientacao geral / entendimento tecnico de analise ou decisao de caso concreto.
+  Se ambos aparecerem no contexto, apresente-os em secoes separadas, cada uma com a
+  identificacao da fonte (tipo, numero/ano ou identificador do processo).
+- Formalizacao (aditamento, termo aditivo, decisao, oficio, despacho, etc.): mencione
+  SOMENTE a modalidade que o proprio trecho enunciar para AQUELE documento. Nao generalize
+  a formalizacao de um caso para outro documento.
+- Expressoes como "fora do escopo desta analise", "nao integrou o escopo" ou equivalentes
+  indicam LIMITACAO DE ESCOPO daquele documento; NAO as reescreva como proibicao normativa
+  absoluta, salvo se o texto disser isso expressamente.
+- Se dois trechos divergirem, ou um for mais especifico que o outro, exponha a divergencia
+  ou a especializacao com citacao; nao escolha um lado nem faca sintese que apague a diferenca.
+- Consolide apenas quando os trechos tratarem do MESMO ato/documento e do mesmo ponto,
+  sem conflito entre si.
+
+9) ESCOPO DA PERGUNTA
 - Responda exatamente o que foi perguntado; contexto complementar so depois da resposta direta.
 - Demandas ou processos distintos nos trechos: apresente separadamente; nao funda em narrativa unica.
 """
-
-_TIPO_DOCUMENTO_MAP = {
-    "resolucao": "RES",
-    "res": "RES",
-    "instrucao normativa": "INM",
-    "in": "INM",
-    "inm": "INM",
-    "deliberacao": "DLB",
-    "dlb": "DLB",
-    "portaria": "POR",
-    "por": "POR",
-    "voto": "VTO",
-    "vto": "VTO",
-    "incidente": "INC",
-    "inc": "INC",
-    "lei": "LEI",
-    "decreto": "DEC",
-    "dec": "DEC",
-}
 
 
 def _dividir_por_estrutura(texto, chunk_max=1500, chunk_overlap=200):
@@ -1908,51 +1933,17 @@ def _detectar_referencia_documento(query):
         "IN 34/2024"           -> [{"tipo": "INM", "numero": "34", "ano": "2024"}]
         "RES 6053 de 2024"     -> [{"tipo": "RES", "numero": "6053", "ano": "2024"}]
 
+    Tipos e aliases vem do catalogo hibrido (config + pastas em dados_antt/).
+
     Args:
         query (str): Texto da pergunta do usuario.
 
     Returns:
         List[dict]: Lista de dicts com chaves tipo, numero, ano.
     """
-    resultados = []
+    from tipos_documento import detectar_referencias_documento
 
-    tipos_regex = (
-        r"(?:instru[cç][aã]o\s+normativa|instrucao\s+normativa|"
-        r"resolu[cç][aã]o|delibera[cç][aã]o|portaria|decreto|lei|voto|"
-        r"INM|RES|DLB|POR|DEC|INC|VTO|IN)"
-    )
-
-    padrao = re.compile(
-        rf"({tipos_regex})\s*(?:n[o.]\s*)?(\d[\d.]*)\s*(?:/|,?\s*de\s+)(\d{{4}})",
-        re.IGNORECASE,
-    )
-
-    for match in padrao.finditer(query):
-        tipo_raw = re.sub(r"\s+", " ", match.group(1).strip().lower())
-        tipo_raw = (
-            tipo_raw
-            .replace("ç", "c")
-            .replace("ã", "a")
-            .replace("á", "a")
-            .replace("é", "e")
-            .replace("í", "i")
-            .replace("ó", "o")
-            .replace("ú", "u")
-        )
-        numero_raw = match.group(2).replace(".", "")
-        ano = match.group(3)
-
-        sigla = _TIPO_DOCUMENTO_MAP.get(tipo_raw)
-        if sigla is None:
-            logger.debug(f"Tipo de documento nao mapeado: '{tipo_raw}'")
-            continue
-
-        resultados.append({
-            "tipo": sigla,
-            "numero": numero_raw,
-            "ano": ano,
-        })
-
+    resultados = detectar_referencias_documento(query)
     logger.info(f"Referencias detectadas na query: {resultados}")
     return resultados
 
@@ -1969,17 +1960,9 @@ def _resolver_caminho_documento(tipo, numero, ano):
     Returns:
         Tuple[List[str], str]: (caminhos_candidatos, nome_tipo_amigavel)
     """
-    nomes = {
-        "RES": "Resolucao",
-        "INM": "Instrucao Normativa",
-        "DLB": "Deliberacao",
-        "POR": "Portaria",
-        "VTO": "Voto",
-        "INC": "Incidente",
-        "LEI": "Lei",
-        "DEC": "Decreto",
-    }
-    nome_tipo = nomes.get(tipo, tipo)
+    from tipos_documento import nome_amigavel_tipo
+
+    nome_tipo = nome_amigavel_tipo(tipo)
 
     numero_padded = numero.zfill(8)
     nome_arquivo = f"{tipo}-{numero_padded}-{ano}.md"
@@ -4253,47 +4236,10 @@ def gerar_resposta(pergunta, documentos, llm, modelo_usado="gpt-4"):
             documentos, _MAX_CHUNKS_LLM
         )
 
-    contextos = []
-    documentos_info = {}
-
-    tipos_documentos = set()
-    contagem_por_tipo = {}
-
-    for i, doc in enumerate(documentos):
-        metadados = doc.metadata
-        tipo = metadados.get('nome_tipo', 'Documento')
-        tipos_documentos.add(tipo)
-
-        contagem_por_tipo[tipo] = contagem_por_tipo.get(tipo, 0) + 1
-
-        numero = metadados.get('numero', 'N/A')
-        ano = metadados.get('ano', 'N/A')
-        doc_id = f"{tipo} {numero}/{ano}"
-
-        if doc_id not in documentos_info:
-            documentos_info[doc_id] = {
-                'tipo': tipo,
-                'numero': numero,
-                'ano': ano,
-                'caminho': metadados.get('caminho', 'Nao especificado'),
-                'trechos': []
-            }
-
-        documentos_info[doc_id]['trechos'].append({
-            'chunk': metadados.get('chunk', 'N/A'),
-            'total_chunks': metadados.get('total_chunks', 'N/A'),
-            'conteudo': doc.page_content
-        })
-
-        contexto = f"""
-[Documento: {doc_id} - Parte {metadados.get('chunk', 'N/A')}/{metadados.get('total_chunks', 'N/A')}]
-Fonte: {metadados.get('caminho', 'Nao especificado')}
-Conteudo:
-{doc.page_content}
-"""
-        contextos.append(contexto)
-
-    contexto_completo = _INSTRUCOES_COMPLETUDE + "\n\n" + "\n\n".join(contextos)
+    corpo_contexto, tipos_documentos, contagem_por_tipo = (
+        _montar_contexto_compartimentado(documentos)
+    )
+    contexto_completo = _INSTRUCOES_COMPLETUDE + "\n\n" + corpo_contexto
 
     # Guarda de tamanho: truncar contexto se exceder limite de chars
     if len(contexto_completo) > _MAX_CONTEXT_CHARS:
@@ -4549,27 +4495,10 @@ def _preparar_contexto_resposta(pergunta, documentos, modelo_usado="gpt-4"):
             documentos, _MAX_CHUNKS_LLM
         )
 
-    contextos = []
-    tipos_documentos = set()
-    contagem_por_tipo = {}
-
-    for i, doc in enumerate(documentos):
-        metadados = doc.metadata
-        tipo = metadados.get("nome_tipo", "Documento")
-        tipos_documentos.add(tipo)
-        contagem_por_tipo[tipo] = contagem_por_tipo.get(tipo, 0) + 1
-        numero = metadados.get("numero", "N/A")
-        ano = metadados.get("ano", "N/A")
-        doc_id = f"{tipo} {numero}/{ano}"
-        contexto = (
-            f"\n[Documento: {doc_id} - Parte "
-            f"{metadados.get('chunk', 'N/A')}/{metadados.get('total_chunks', 'N/A')}]\n"
-            f"Fonte: {metadados.get('caminho', 'Nao especificado')}\n"
-            f"Conteudo:\n{doc.page_content}\n"
-        )
-        contextos.append(contexto)
-
-    contexto_completo = _INSTRUCOES_COMPLETUDE + "\n\n" + "\n\n".join(contextos)
+    corpo_contexto, tipos_documentos, contagem_por_tipo = (
+        _montar_contexto_compartimentado(documentos)
+    )
+    contexto_completo = _INSTRUCOES_COMPLETUDE + "\n\n" + corpo_contexto
 
     if len(contexto_completo) > _MAX_CONTEXT_CHARS:
         logger.warning(
@@ -5220,7 +5149,7 @@ def interface_usuario_unificada():
         
         tipo_documento = st.selectbox(
             "Tipo de documento:",
-            options=["Todos", "RES", "INM", "DLB", "POR", "INC"],
+            options=["Todos"] + listar_siglas_tipo(),
             help="Restringe a busca a um tipo de ato normativo."
         )
         
@@ -5394,15 +5323,16 @@ divergência de texto corrido, use Atualizar base.
     # Se os botoes so existirem com a conversa vazia, o segundo clique se
     # perde: no rerun o chat ja tem mensagens, o widget nao e recriado e o
     # Streamlit descarta o evento antes de gravar processar_automatico.
+    # Mistura normas indexadas (INM/RES) com notas tecnicas SEI da base.
     _EXEMPLOS_CONSULTA = (
         "Quais são os parâmetros técnicos para pavimentos rodoviários?",
-        "Como funciona o processo de fiscalização da ANTT?",
-        "Quais são as penalidades por descumprimento das normas?",
-        "Resolução 6057 de 2024 - principais pontos",
         "Instrução Normativa 34 de 2024 sobre parâmetros de desempenho",
-        "Critérios de segurança para transporte rodoviário",
-        "Procedimentos para licenciamento de transportadoras",
-        "Normas sobre tempo de direção e descanso",
+        "Resolução 6057 de 2024 - principais pontos",
+        "Quais são as penalidades por descumprimento das normas?",
+        "O que diz a Nota Técnica SEI sobre flexibilização da Frente de Serviços Operacionais?",
+        "Qual a orientação da GEGIR sobre regularização e melhoria de acessos nas rodovias federais concedidas?",
+        "O que tratam as notas técnicas SEI sobre disponibilização de veículos para policiamento rodoviário?",
+        "Há análise SEI sobre reposicionamento de agulhas do sistema FreeFlow na RMSP?",
     )
 
     def _agendar_exemplo(texto_exemplo: str) -> None:
@@ -5866,6 +5796,14 @@ divergência de texto corrido, use Atualizar base.
                 try:
                     vectorstore_novo, tabelas = process_pdf(uploaded_file)
                     if vectorstore_novo:
+                        try:
+                            from tipos_documento import atualizar_catalogo_tipos
+                            atualizar_catalogo_tipos()
+                        except Exception as exc_cat:
+                            logger.warning(
+                                "Catalogo de tipos nao atualizado apos upload: %s",
+                                exc_cat,
+                            )
                         st.caption(
                             f"PDF incluído na base. {len(tabelas)} tabela(s) "
                             "analisada(s)."

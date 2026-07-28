@@ -114,6 +114,21 @@ DEFAULT_EMBEDDING_MODEL = "text-embedding-ada-002"
 # de IRI/prazos. Trocar este valor exige reindexacao completa.
 LOCAL_EMBEDDING_MODEL = "intfloat/multilingual-e5-small"
 
+# Aliases curtos opcionais: so entram se a sigla existir na base.
+# A existencia dos tipos vem dos arquivos em dados_antt/, nao desta lista.
+TIPOS_DOCUMENTO_ALIASES_CURTOS = {
+    "INM": ("in",),
+}
+
+# Se True, tenta LLM quando o cabecalho nao entrega nome (custo/latencia).
+TIPOS_DOCUMENTO_USAR_LLM_ALIASES = False
+
+# Pastas sob dados_antt/ que nao sao tipos documentais.
+TIPOS_DOCUMENTO_IGNORAR_DIRS = (
+    "tabelas_auxiliares",
+    ".ocr_cache",
+)
+
 # Configurações do Streamlit
 STREAMLIT_PAGE_TITLE = "Sistema de Consulta Normativa - ANTT"
 # Caminho para o favicon institucional. None usa o icone padrao do Streamlit.
@@ -123,19 +138,22 @@ STREAMLIT_LAYOUT = "wide"
 
 # Exportar constantes para uso na aplicação
 __all__ = [
-    'get_openai_api_key',
-    'get_openrouter_api_key',
-    'LLM_PROVIDERS',
-    'DB_FAISS_PATH',
-    'CHUNK_SIZE',
-    'CHUNK_OVERLAP',
-    'DEFAULT_LLM_PROVIDER',
-    'DEFAULT_LLM_MODEL',
-    'DEFAULT_EMBEDDING_MODEL',
-    'LOCAL_EMBEDDING_MODEL',
-    'STREAMLIT_PAGE_TITLE',
-    'STREAMLIT_PAGE_ICON',
-    'STREAMLIT_LAYOUT',
-    'setup_logging',
-    'logger'
+    "get_openai_api_key",
+    "get_openrouter_api_key",
+    "LLM_PROVIDERS",
+    "DB_FAISS_PATH",
+    "CHUNK_SIZE",
+    "CHUNK_OVERLAP",
+    "DEFAULT_LLM_PROVIDER",
+    "DEFAULT_LLM_MODEL",
+    "DEFAULT_EMBEDDING_MODEL",
+    "LOCAL_EMBEDDING_MODEL",
+    "TIPOS_DOCUMENTO_ALIASES_CURTOS",
+    "TIPOS_DOCUMENTO_USAR_LLM_ALIASES",
+    "TIPOS_DOCUMENTO_IGNORAR_DIRS",
+    "STREAMLIT_PAGE_TITLE",
+    "STREAMLIT_PAGE_ICON",
+    "STREAMLIT_LAYOUT",
+    "setup_logging",
+    "logger",
 ] 
