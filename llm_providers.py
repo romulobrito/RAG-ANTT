@@ -8,9 +8,18 @@ import os
 import threading
 import time
 
+from typing import Dict, Optional, Tuple
+
 from langchain_openai import ChatOpenAI, OpenAIEmbeddings
 from langchain_community.embeddings import OpenAIEmbeddings as CommunityOpenAIEmbeddings
-from config import LLM_PROVIDERS, LOCAL_EMBEDDING_MODEL, logger
+from config import (
+    LLM_PROVIDERS,
+    LOCAL_EMBEDDING_MODEL,
+    cloud_fallback_enabled,
+    get_allowed_llm_providers,
+    get_ollama_base_url,
+    logger,
+)
 
 os.environ.setdefault("TOKENIZERS_PARALLELISM", "false")
 
@@ -381,6 +390,33 @@ class LocalEmbeddings:
         """Compatibilidade com FAISS: trata chamada como consulta."""
         return self.embed_query(text)
 
+def verificar_ollama_disponivel(base_url: Optional[str] = None) -> Tuple[bool, str]:
+    """
+    Verifica se o servico Ollama responde em /api/tags.
+
+    Args:
+        base_url: URL .../v1 do ChatOpenAI; a checagem usa o host sem /v1.
+
+    Returns:
+        (ok, mensagem_diagnostico).
+    """
+    url = (base_url or get_ollama_base_url()).rstrip("/")
+    if url.endswith("/v1"):
+        root = url[:-3]
+    else:
+        root = url
+    tags_url = f"{root.rstrip('/')}/api/tags"
+    try:
+        import urllib.request
+
+        with urllib.request.urlopen(tags_url, timeout=3) as response:
+            if int(response.status) >= 400:
+                return False, f"Ollama respondeu HTTP {response.status}"
+        return True, f"Ollama acessivel em {root}"
+    except Exception as exc:  # noqa: BLE001
+        return False, f"Ollama indisponivel ({exc})"
+
+
 class LLMManager:
     """Gerenciador unificado para diferentes provedores de LLM"""
     
@@ -389,7 +425,7 @@ class LLMManager:
         Inicializa o gerenciador de LLM
         
         Args:
-            provider (str): Provedor do LLM ('openai' ou 'deepseek')
+            provider (str): Provedor do LLM ('openai', 'deepseek' ou 'ollama')
             model (str): Modelo específico a ser usado
             embedding_provider (str): Provedor para embeddings ('openai', 'local', 'free')
         """
@@ -411,9 +447,18 @@ class LLMManager:
             raise ValueError(f"Modelo '{model}' não suportado para {provider}. Use: {list(self.config['models'].keys())}")
         
         self.api_key = self.config["get_api_key"]()
+        requires_key = bool(self.config.get("requires_api_key", True))
         
-        if not self.api_key:
+        if requires_key and not self.api_key:
             raise ValueError(f"Chave de API não encontrada para {provider}")
+
+        if self.provider == "ollama":
+            ok, detalhe = verificar_ollama_disponivel()
+            if not ok:
+                raise ValueError(
+                    f"Ollama nao esta acessivel. {detalhe}. "
+                    "Instale o Ollama e execute: ollama pull llama3.2:3b"
+                )
     
     def get_llm(self, temperature=0.1, max_tokens=None):
         """
@@ -445,6 +490,13 @@ class LLMManager:
             # Headers específicos para OpenRouter
             extra_headers = self.config.get("extra_headers", {})
             llm_kwargs["default_headers"] = extra_headers
+        elif self.provider == "ollama":
+            get_base = self.config.get("get_base_url", get_ollama_base_url)
+            llm_kwargs["base_url"] = get_base()
+            llm_kwargs["api_key"] = self.api_key or "ollama"
+            timeout = int(self.config.get("request_timeout", 300))
+            llm_kwargs["timeout"] = timeout
+            llm_kwargs["max_retries"] = 1
         else:
             # Para OpenAI, usa o parâmetro padrão
             llm_kwargs["api_key"] = self.api_key
@@ -553,20 +605,23 @@ class LLMManager:
             "embedding_provider": self.embedding_provider
         }
 
-def get_available_providers():
+def get_available_providers() -> Dict[str, Dict[str, object]]:
     """
-    Retorna lista de provedores disponíveis
-    
+    Retorna lista de provedores disponiveis (respeita RAG_LLM_ALLOWED_PROVIDERS).
+
     Returns:
-        dict: Dicionário com provedores e seus modelos
+        Dicionario com provedores e seus modelos.
     """
-    return {
-        provider: {
+    allowed = get_allowed_llm_providers()
+    resultado: Dict[str, Dict[str, object]] = {}
+    for provider, config in LLM_PROVIDERS.items():
+        if allowed is not None and provider not in allowed:
+            continue
+        resultado[provider] = {
             "name": config["name"],
-            "models": list(config["models"].keys())
+            "models": list(config["models"].keys()),
         }
-        for provider, config in LLM_PROVIDERS.items()
-    }
+    return resultado
 
 def get_available_embedding_providers():
     """
@@ -620,7 +675,17 @@ def create_llm_manager(provider="deepseek", model=None, embedding_provider="loca
         return LLMManager(provider=provider, model=model, embedding_provider=embedding_provider)
     except Exception as e:
         logger.error(f"Erro ao criar LLMManager: {e}")
-        # Fallback para OpenAI se DeepSeek falhar
+        # Ollama: fallback cloud so se habilitado (dev). Em antt_prod falha clara.
+        if provider == "ollama":
+            if cloud_fallback_enabled():
+                logger.warning("Ollama indisponivel; fallback para DeepSeek (dev).")
+                return LLMManager(
+                    provider="deepseek",
+                    model=None,
+                    embedding_provider=embedding_provider,
+                )
+            raise
+        # Fallback historico: DeepSeek/outros -> OpenAI
         if provider != "openai":
             logger.warning("Tentando fallback para OpenAI...")
             return LLMManager(provider="openai", model="gpt-4o", embedding_provider=embedding_provider)

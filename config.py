@@ -4,7 +4,7 @@ Gerencia variáveis de ambiente e configurações do aplicativo.
 """
 
 import os
-from typing import Optional
+from typing import List, Optional
 from dotenv import load_dotenv
 import logging
 
@@ -58,11 +58,77 @@ def get_openrouter_api_key():
         
     return api_key
 
+
+def get_ollama_base_url() -> str:
+    """
+    Retorna a URL base da API OpenAI-compatible do Ollama.
+
+    Returns:
+        URL terminando em /v1 (padrao: http://localhost:11434/v1).
+    """
+    raw = os.environ.get("OLLAMA_BASE_URL", "http://localhost:11434/v1").strip()
+    if not raw:
+        return "http://localhost:11434/v1"
+    return raw.rstrip("/")
+
+
+def get_ollama_api_key() -> str:
+    """
+    Placeholder exigido pelo cliente ChatOpenAI; Ollama nao valida a chave.
+
+    Returns:
+        String nao vazia (padrao: ollama).
+    """
+    return os.environ.get("OLLAMA_API_KEY", "ollama").strip() or "ollama"
+
+
+def get_deploy_profile() -> str:
+    """
+    Perfil de deploy: dev, homolog ou antt_prod.
+
+    Returns:
+        Nome do perfil em minusculas.
+    """
+    return os.environ.get("RAG_DEPLOY_PROFILE", "dev").strip().lower() or "dev"
+
+
+def get_allowed_llm_providers() -> Optional[List[str]]:
+    """
+    Lista de provedores de chat permitidos via env.
+
+    Returns:
+        Lista de ids ou None para permitir todos os registrados.
+    """
+    raw = os.environ.get("RAG_LLM_ALLOWED_PROVIDERS", "").strip()
+    if not raw:
+        return None
+    return [item.strip() for item in raw.split(",") if item.strip()]
+
+
+def cloud_fallback_enabled() -> bool:
+    """
+    Se True, falha do Ollama pode cair em DeepSeek (perfil dev).
+
+    Em producao ANTT use RAG_LLM_CLOUD_FALLBACK=false.
+
+    Returns:
+        True quando o fallback cloud esta habilitado.
+    """
+    raw = os.environ.get("RAG_LLM_CLOUD_FALLBACK", "").strip().lower()
+    if raw in ("0", "false", "no", "off"):
+        return False
+    if raw in ("1", "true", "yes", "on"):
+        return True
+    # Padrao: desligado em antt_prod; ligado nos demais.
+    return get_deploy_profile() != "antt_prod"
+
+
 # Configurações dos provedores de LLM
 LLM_PROVIDERS = {
     "openai": {
         "name": "OpenAI",
         "base_url": None,  # URL padrão da OpenAI
+        "requires_api_key": True,
         "models": {
             "gpt-4o": "gpt-4o",
             "gpt-4": "gpt-4",
@@ -74,6 +140,7 @@ LLM_PROVIDERS = {
     "deepseek": {
         "name": "DeepSeek (via OpenRouter)",
         "base_url": "https://openrouter.ai/api/v1",
+        "requires_api_key": True,
         # A primeira chave e usada como padrao quando nenhum modelo e
         # informado. Slugs verificados no catalogo do OpenRouter.
         "models": {
@@ -95,7 +162,25 @@ LLM_PROVIDERS = {
             "HTTP-Referer": "https://rag-antt.streamlit.app",
             "X-Title": "RAG-ANTT"
         }
-    }
+    },
+    # Provedor local (SUTEC/GETIC: CPU, sem API externa). Aditivo.
+    "ollama": {
+        "name": "Local (Ollama)",
+        "base_url": None,  # Resolvido em runtime via get_ollama_base_url()
+        "requires_api_key": False,
+        "models": {
+            # Padrao CPU no notebook / GETIC.
+            "llama3.2:3b": "llama3.2:3b",
+            # Homologacao de qualidade (mais RAM/latencia).
+            "qwen2.5:7b": "qwen2.5:7b",
+            # Alternativa leve.
+            "phi3:mini": "phi3:mini",
+        },
+        "embedding_model": "text-embedding-ada-002",
+        "get_api_key": get_ollama_api_key,
+        "get_base_url": get_ollama_base_url,
+        "request_timeout": 300,
+    },
 }
 
 # Constantes e configurações do sistema
@@ -140,6 +225,11 @@ STREAMLIT_LAYOUT = "wide"
 __all__ = [
     "get_openai_api_key",
     "get_openrouter_api_key",
+    "get_ollama_base_url",
+    "get_ollama_api_key",
+    "get_deploy_profile",
+    "get_allowed_llm_providers",
+    "cloud_fallback_enabled",
     "LLM_PROVIDERS",
     "DB_FAISS_PATH",
     "CHUNK_SIZE",

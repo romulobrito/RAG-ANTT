@@ -26,3 +26,18 @@ torch
 ragas==0.1.21
 datasets>=2.14.0,<3.0.0
 pysbd==0.3.4
+
+# ---------------------------------------------------------------------------
+# LLM local (Ollama) - requisito SUTEC/GETIC (CPU, sem API externa)
+# ---------------------------------------------------------------------------
+# O runtime Ollama NAO e pacote pip: e um binario de sistema.
+# Instalacao neste note (usuario, sem sudo):
+#   ~/.local/ollama/bin/ollama  (symlink em ~/.local/bin/ollama)
+#   ollama serve
+#   ollama pull llama3.2:3b
+# O RAG usa langchain-openai (ChatOpenAI) com:
+#   OLLAMA_BASE_URL=http://localhost:11434/v1
+# Download oficial: https://ollama.com/download
+# Modelo padrao CPU: llama3.2:3b (~2 GB). Homolog: qwen2.5:7b.
+# Cliente Python oficial (opcional; o codigo atual nao importa este modulo):
+ollama>=0.4.0

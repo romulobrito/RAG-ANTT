@@ -53,6 +53,7 @@ from config import (
     CHUNK_OVERLAP,
     DEFAULT_EMBEDDING_MODEL,
     DEFAULT_LLM_MODEL,
+    LLM_PROVIDERS,
     STREAMLIT_PAGE_TITLE,
     STREAMLIT_PAGE_ICON,
     STREAMLIT_LAYOUT,
@@ -60,7 +61,13 @@ from config import (
     logger
 )
 
-from llm_providers import LLMManager, get_available_providers, create_llm_manager, get_available_embedding_providers
+from llm_providers import (
+    LLMManager,
+    get_available_providers,
+    create_llm_manager,
+    get_available_embedding_providers,
+    verificar_ollama_disponivel,
+)
 
 from retrieval_hibrido import (
     BM25_DISPONIVEL,
@@ -4097,6 +4104,29 @@ def _normalize_text_ascii_lower(value: str) -> str:
 
 _MAX_CONTEXT_CHARS = 50000
 _MAX_CHUNKS_LLM = 30
+# Limite mais baixo para modelos locais em CPU (evita timeout/OOM).
+_LIMITE_CONTEXTO_OLLAMA = 24000
+
+
+def _limite_contexto_chars(modelo_usado: str) -> int:
+    """
+    Retorna o limite de caracteres de contexto conforme o provedor.
+
+    Cloud mantem 50000. Ollama usa OLLAMA_MAX_CONTEXT_CHARS ou 24000.
+
+    Args:
+        modelo_usado: Identificador do provedor/modelo (ex.: ollama, deepseek).
+
+    Returns:
+        Limite inteiro de caracteres.
+    """
+    texto = (modelo_usado or "").lower()
+    if "ollama" in texto or "llama3" in texto or "qwen2.5" in texto or "phi3" in texto:
+        raw = os.environ.get("OLLAMA_MAX_CONTEXT_CHARS", "").strip()
+        if raw.isdigit():
+            return int(raw)
+        return _LIMITE_CONTEXTO_OLLAMA
+    return _MAX_CONTEXT_CHARS
 
 
 def _resumo_chunk_para_log(indice, documento):
@@ -4242,12 +4272,13 @@ def gerar_resposta(pergunta, documentos, llm, modelo_usado="gpt-4"):
     contexto_completo = _INSTRUCOES_COMPLETUDE + "\n\n" + corpo_contexto
 
     # Guarda de tamanho: truncar contexto se exceder limite de chars
-    if len(contexto_completo) > _MAX_CONTEXT_CHARS:
+    limite_ctx = _limite_contexto_chars(modelo_usado)
+    if len(contexto_completo) > limite_ctx:
         logger.warning(
             f"Contexto com {len(contexto_completo)} chars excede limite de "
-            f"{_MAX_CONTEXT_CHARS}. Truncando."
+            f"{limite_ctx}. Truncando."
         )
-        contexto_completo = contexto_completo[:_MAX_CONTEXT_CHARS]
+        contexto_completo = contexto_completo[:limite_ctx]
 
     # Log detalhado dos chunks enviados ao LLM para diagnostico
     logger.info("=" * 60)
@@ -4500,12 +4531,13 @@ def _preparar_contexto_resposta(pergunta, documentos, modelo_usado="gpt-4"):
     )
     contexto_completo = _INSTRUCOES_COMPLETUDE + "\n\n" + corpo_contexto
 
-    if len(contexto_completo) > _MAX_CONTEXT_CHARS:
+    limite_ctx = _limite_contexto_chars(modelo_usado)
+    if len(contexto_completo) > limite_ctx:
         logger.warning(
             f"Contexto com {len(contexto_completo)} chars excede limite de "
-            f"{_MAX_CONTEXT_CHARS}. Truncando."
+            f"{limite_ctx}. Truncando."
         )
-        contexto_completo = contexto_completo[:_MAX_CONTEXT_CHARS]
+        contexto_completo = contexto_completo[:limite_ctx]
 
     logger.info("=" * 60)
     logger.info("CHUNKS ENVIADOS AO LLM")
@@ -4908,20 +4940,24 @@ def interface_usuario_unificada():
         providers = get_available_providers()
         provider_names = {
             "openai": "OpenAI (GPT-4)",
-            "deepseek": "DeepSeek"
+            "deepseek": "DeepSeek",
+            "ollama": "Local (Ollama) - CPU",
         }
         
-        # Tornar DeepSeek padrão
+        # Tornar DeepSeek padrão quando disponivel no filtro
+        provider_keys = list(providers.keys())
         default_index = 0
         if "deepseek" in providers:
-            default_index = list(providers.keys()).index("deepseek")
+            default_index = provider_keys.index("deepseek")
+        elif "ollama" in providers:
+            default_index = provider_keys.index("ollama")
         
         selected_provider = st.selectbox(
             "Serviço:",
-            options=list(providers.keys()),
+            options=provider_keys,
             format_func=lambda x: provider_names.get(x, x),
-            index=default_index,
-            help="Serviço de IA que redige a resposta."
+            index=default_index if provider_keys else 0,
+            help="Serviço de IA que redige a resposta. Local (Ollama) nao envia dados a APIs externas."
         )
         
         # Seleção do modelo
@@ -4940,6 +4976,11 @@ def interface_usuario_unificada():
             st.caption(
                 "Se a OpenAI atingir o limite de uso, o DeepSeek assume "
                 "automaticamente e a consulta continua."
+            )
+        elif selected_provider == "ollama":
+            st.caption(
+                "Inferencia local via Ollama (CPU). Ideal para ambiente ANTT "
+                "sem API externa. Respostas podem demorar 20-60 s."
             )
         
         # Status das APIs
@@ -4972,6 +5013,21 @@ def interface_usuario_unificada():
                 f"DeepSeek: indisponível ({str(e)[:50]})</div>",
                 unsafe_allow_html=True,
             )
+
+        # Verificar status do Ollama (sem criar LLMManager completo se filtrado)
+        if "ollama" in providers or "ollama" in LLM_PROVIDERS:
+            ollama_ok, ollama_msg = verificar_ollama_disponivel()
+            if ollama_ok:
+                st.markdown(
+                    '<div class="provider-status status-ok">Ollama: conectado</div>',
+                    unsafe_allow_html=True,
+                )
+            else:
+                st.markdown(
+                    f'<div class="provider-status status-error">'
+                    f"Ollama: indisponível ({ollama_msg[:60]})</div>",
+                    unsafe_allow_html=True,
+                )
         
         # Configurações avançadas
         st.subheader("Configurações avançadas")
@@ -5394,10 +5450,16 @@ divergência de texto corrido, use Atualizar base.
                     try:
                         llm_manager = create_llm_manager(selected_provider, selected_model)
                         llm = llm_manager.get_llm(temperature=temperatura, max_tokens=max_tokens)
+                        provider_usado = llm_manager.provider
                         st.caption(
                             f"Serviço em uso: "
-                            f"{provider_names.get(selected_provider, selected_provider)}"
+                            f"{provider_names.get(provider_usado, provider_usado)}"
                         )
+                        if selected_provider == "ollama" and provider_usado != "ollama":
+                            st.warning(
+                                "Ollama indisponivel; usando fallback DeepSeek "
+                                "(desligue com RAG_LLM_CLOUD_FALLBACK=false)."
+                            )
                     except Exception as e:
                         error_msg = str(e).lower()
                         if any(keyword in error_msg for keyword in ["insufficient_quota", "429", "quota", "exceeded"]):
@@ -5679,6 +5741,8 @@ divergência de texto corrido, use Atualizar base.
                                 template_info = "**Estilo da resposta:** estruturado e detalhado"
                             elif "deepseek" in selected_model.lower() or modelo_usado_final == "deepseek":
                                 template_info = "**Estilo da resposta:** direto e conciso"
+                            elif modelo_usado_final == "ollama" or "llama" in selected_model.lower():
+                                template_info = "**Estilo da resposta:** local (Ollama/CPU)"
                             else:
                                 template_info = "**Estilo da resposta:** balanceado"
                             
