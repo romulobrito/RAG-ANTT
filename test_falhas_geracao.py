@@ -142,7 +142,7 @@ def test_aviso_aparece_quando_streaming_falha(monkeypatch):
     monkeypatch.setattr(
         antt_rag_unified,
         "_preparar_contexto_resposta",
-        lambda *args, **kwargs: ("prompt qualquer", "normativa"),
+        lambda *args, **kwargs: ("prompt qualquer", "normativa", "corpo"),
     )
 
     documento = type("Doc", (), {"page_content": "texto", "metadata": {}})()

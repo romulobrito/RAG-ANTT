@@ -43,6 +43,16 @@ from contexto_compartimentado import (
     id_fonte_documento as _id_fonte_documento,
     montar_contexto_compartimentado as _montar_contexto_compartimentado,
 )
+from contexto_packing import (
+    eh_identificador_ollama,
+    selecionar_chunks_para_orcamento,
+)
+from geracao_dois_passos import (
+    coletar_evidencias,
+    deve_usar_dois_passos,
+    gerar_com_dois_passos,
+    iter_redacao_streaming,
+)
 
 # Importar configurações e gerenciador de LLM
 from config import (
@@ -1658,6 +1668,18 @@ def simplificar_query(query):
 # ---------------------------------------------------------------------------
 # Mapeamento de tipos de documentos regulatorios para siglas de arquivo
 # ---------------------------------------------------------------------------
+# Grounding neutro apenas para modelos locais (Ollama). Sem listas de tema.
+_INSTRUCOES_GROUNDING_OLLAMA = """
+REGRAS ADICIONAIS PARA MODELO LOCAL (OBRIGATORIAS):
+- Use APENAS o contexto fornecido abaixo.
+- Se o contexto contiver valores, tabelas ou limites, REPRODUZA-OS na resposta
+  (tabela ou lista). Nao omita numeros presentes nos trechos.
+- NAO diga ao usuario para consultar o documento original quando a evidencia
+  ja estiver no contexto.
+- Declare lacuna SOMENTE para campos ausentes nos trechos fornecidos.
+- Cite a fonte pelo identificador das cercas FONTE INICIO / FONTE FIM.
+"""
+
 _INSTRUCOES_COMPLETUDE = """
 REGRAS DE FOCO, FUNDAMENTACAO E COMPLETUDE (OBRIGATORIAS - TODOS OS DOCUMENTOS):
 
@@ -4120,13 +4142,70 @@ def _limite_contexto_chars(modelo_usado: str) -> int:
     Returns:
         Limite inteiro de caracteres.
     """
-    texto = (modelo_usado or "").lower()
-    if "ollama" in texto or "llama3" in texto or "qwen2.5" in texto or "phi3" in texto:
+    if eh_identificador_ollama(modelo_usado):
         raw = os.environ.get("OLLAMA_MAX_CONTEXT_CHARS", "").strip()
         if raw.isdigit():
             return int(raw)
         return _LIMITE_CONTEXTO_OLLAMA
     return _MAX_CONTEXT_CHARS
+
+
+def _instrucoes_contexto_para_modelo(modelo_usado: str) -> str:
+    """
+    Monta o bloco de instrucoes prefixado ao contexto.
+
+    Ollama recebe grounding neutro adicional. API cloud mantem apenas
+    _INSTRUCOES_COMPLETUDE.
+
+    Args:
+        modelo_usado: Identificador do provedor/modelo.
+
+    Returns:
+        Texto das instrucoes.
+    """
+    if eh_identificador_ollama(modelo_usado):
+        return (
+            _INSTRUCOES_COMPLETUDE.strip()
+            + "\n\n"
+            + _INSTRUCOES_GROUNDING_OLLAMA.strip()
+        )
+    return _INSTRUCOES_COMPLETUDE.strip()
+
+
+def _empacotar_documentos_para_contexto(
+    documentos,
+    modelo_usado: str,
+):
+    """
+    Aplica packing estrutural conforme orcamento do provedor.
+
+    Se o contexto completo cabe no limite, a lista permanece intacta
+    (invariante de identidade). Caso contrario, seleciona chunks por
+    score estrutural e teto por fonte.
+
+    Args:
+        documentos: Chunks recuperados.
+        modelo_usado: Identificador do provedor/modelo.
+
+    Returns:
+        Tupla (documentos_empacotados, instrucoes, limite_chars).
+    """
+    instrucoes = _instrucoes_contexto_para_modelo(modelo_usado)
+    limite_ctx = _limite_contexto_chars(modelo_usado)
+    empacotados = selecionar_chunks_para_orcamento(
+        documentos,
+        limite_chars=limite_ctx,
+        overhead_instrucoes=len(instrucoes),
+    )
+    if len(empacotados) != len(documentos):
+        logger.info(
+            "Packing de contexto: %s -> %s chunks (limite=%s, modelo=%s)",
+            len(documentos),
+            len(empacotados),
+            limite_ctx,
+            modelo_usado,
+        )
+    return empacotados, instrucoes, limite_ctx
 
 
 def _resumo_chunk_para_log(indice, documento):
@@ -4266,19 +4345,28 @@ def gerar_resposta(pergunta, documentos, llm, modelo_usado="gpt-4"):
             documentos, _MAX_CHUNKS_LLM
         )
 
+    documentos, instrucoes_ctx, limite_ctx = _empacotar_documentos_para_contexto(
+        documentos, modelo_usado
+    )
     corpo_contexto, tipos_documentos, contagem_por_tipo = (
         _montar_contexto_compartimentado(documentos)
     )
-    contexto_completo = _INSTRUCOES_COMPLETUDE + "\n\n" + corpo_contexto
-
-    # Guarda de tamanho: truncar contexto se exceder limite de chars
-    limite_ctx = _limite_contexto_chars(modelo_usado)
+    contexto_completo = instrucoes_ctx + "\n\n" + corpo_contexto
     if len(contexto_completo) > limite_ctx:
+        # Rede de seguranca: packing deveria impedir isso; nao cortar no meio
+        # de tabela se ainda houver chunks removiveis do final.
         logger.warning(
-            f"Contexto com {len(contexto_completo)} chars excede limite de "
-            f"{limite_ctx}. Truncando."
+            "Contexto ainda excede limite apos packing (%s > %s). "
+            "Removendo chunks finais.",
+            len(contexto_completo),
+            limite_ctx,
         )
-        contexto_completo = contexto_completo[:limite_ctx]
+        while len(documentos) > 1 and len(contexto_completo) > limite_ctx:
+            documentos = documentos[:-1]
+            corpo_contexto, tipos_documentos, contagem_por_tipo = (
+                _montar_contexto_compartimentado(documentos)
+            )
+            contexto_completo = instrucoes_ctx + "\n\n" + corpo_contexto
 
     # Log detalhado dos chunks enviados ao LLM para diagnostico
     logger.info("=" * 60)
@@ -4344,6 +4432,26 @@ def gerar_resposta(pergunta, documentos, llm, modelo_usado="gpt-4"):
     # Selecionar template adaptativo baseado no modelo
     template_escolhido = selecionar_template_adaptativo(template_tipo, modelo_usado)
     logger.info(f"Template selecionado: {template_tipo} para modelo {modelo_usado}")
+
+    # Ollama: extrair evidencias e so entao redigir (modelos pequenos ignoram tabelas).
+    if deve_usar_dois_passos(modelo_usado):
+        try:
+            logger.info("Geracao Ollama em dois passos (extracao -> redacao)")
+            conteudo_dois = gerar_com_dois_passos(pergunta, corpo_contexto, llm)
+            if conteudo_dois:
+                logger.info(
+                    "Dois passos Ollama: resposta final com %s caracteres",
+                    len(conteudo_dois),
+                )
+                return conteudo_dois, modelo_usado
+            logger.warning(
+                "Dois passos Ollama devolveu vazio; caindo no fluxo de um passo"
+            )
+        except Exception as exc_dois:
+            logger.warning(
+                "Dois passos Ollama falhou (%s); caindo no fluxo de um passo",
+                exc_dois,
+            )
     
     prompt = PromptTemplate(
         template=template_escolhido,
@@ -4511,11 +4619,13 @@ def _preparar_contexto_resposta(pergunta, documentos, modelo_usado="gpt-4"):
         modelo_usado: Identificador do provedor (gpt-4, deepseek, etc.).
 
     Returns:
-        Tuple (prompt_formatado: str, template_tipo: str) prontos para envio ao LLM.
-        Retorna (None, None) se documentos estiver vazio.
+        Tuple (prompt_formatado, template_tipo, corpo_contexto).
+        Retorna (None, None, None) se documentos estiver vazio.
+        corpo_contexto e o texto das fontes sem as instrucoes longas (usado
+        no passo de extracao do fluxo Ollama em dois passos).
     """
     if not documentos:
-        return None, None
+        return None, None, None
 
     if len(documentos) > _MAX_CHUNKS_LLM:
         logger.warning(
@@ -4526,18 +4636,26 @@ def _preparar_contexto_resposta(pergunta, documentos, modelo_usado="gpt-4"):
             documentos, _MAX_CHUNKS_LLM
         )
 
+    documentos, instrucoes_ctx, limite_ctx = _empacotar_documentos_para_contexto(
+        documentos, modelo_usado
+    )
     corpo_contexto, tipos_documentos, contagem_por_tipo = (
         _montar_contexto_compartimentado(documentos)
     )
-    contexto_completo = _INSTRUCOES_COMPLETUDE + "\n\n" + corpo_contexto
-
-    limite_ctx = _limite_contexto_chars(modelo_usado)
+    contexto_completo = instrucoes_ctx + "\n\n" + corpo_contexto
     if len(contexto_completo) > limite_ctx:
         logger.warning(
-            f"Contexto com {len(contexto_completo)} chars excede limite de "
-            f"{limite_ctx}. Truncando."
+            "Contexto ainda excede limite apos packing (%s > %s). "
+            "Removendo chunks finais.",
+            len(contexto_completo),
+            limite_ctx,
         )
-        contexto_completo = contexto_completo[:limite_ctx]
+        while len(documentos) > 1 and len(contexto_completo) > limite_ctx:
+            documentos = documentos[:-1]
+            corpo_contexto, tipos_documentos, contagem_por_tipo = (
+                _montar_contexto_compartimentado(documentos)
+            )
+            contexto_completo = instrucoes_ctx + "\n\n" + corpo_contexto
 
     logger.info("=" * 60)
     logger.info("CHUNKS ENVIADOS AO LLM")
@@ -4604,7 +4722,7 @@ def _preparar_contexto_resposta(pergunta, documentos, modelo_usado="gpt-4"):
         input_variables=["context", "question"],
     )
     prompt_formatado = prompt.format(context=contexto_completo, question=pergunta)
-    return prompt_formatado, template_tipo
+    return prompt_formatado, template_tipo, corpo_contexto
 
 
 # Marcadores encontrados na excecao do provedor, agrupados por causa. A ordem
@@ -4754,7 +4872,7 @@ def gerar_resposta_streaming(pergunta, documentos, llm, modelo_usado="gpt-4"):
         yield "Nao encontrei documentos relevantes para esta pergunta."
         return
 
-    prompt_formatado, template_tipo = _preparar_contexto_resposta(
+    prompt_formatado, template_tipo, corpo_contexto = _preparar_contexto_resposta(
         pergunta, documentos, modelo_usado
     )
     if prompt_formatado is None:
@@ -4762,6 +4880,34 @@ def gerar_resposta_streaming(pergunta, documentos, llm, modelo_usado="gpt-4"):
         return
 
     from langchain_core.messages import HumanMessage
+
+    # Ollama: passo 1 sincrono (extracao) + passo 2 em streaming (redacao).
+    if deve_usar_dois_passos(modelo_usado):
+        houve_conteudo = False
+        try:
+            logger.info(
+                "Streaming Ollama em dois passos "
+                "(tabelas+extracao -> redacao)"
+            )
+            evidencias = coletar_evidencias(pergunta, corpo_contexto or "", llm)
+            for token in iter_redacao_streaming(pergunta, evidencias, llm):
+                if token:
+                    houve_conteudo = True
+                    yield token
+            if not houve_conteudo:
+                yield (
+                    "Nao foi possivel gerar a resposta com o modelo local. "
+                    "Tente novamente."
+                )
+            return
+        except Exception as exc:
+            causa = classificar_falha_de_geracao(exc)
+            logger.error(
+                "Falha nos dois passos Ollama [%s]: %s; tentando um passo",
+                causa,
+                exc,
+            )
+            # Fallback: streaming de um passo com o prompt completo.
 
     houve_conteudo = False
     try:

@@ -1,0 +1,19 @@
+---
+description: Manter docs/piloto_llm_local_avaliacao.tex atualizado com abordagens, dificuldades e resultados do LLM local
+globs: "**/docs/piloto_llm_local_avaliacao.tex"
+alwaysApply: true
+---
+
+# Atualizar LaTeX do piloto LLM local
+
+Quando alterar provedor Ollama, truncamento de contexto, modelos locais, fallback cloud, avaliacao de qualidade local ou metricas de retrieval relacionadas ao piloto:
+
+1. Atualizar **na mesma entrega** `docs/piloto_llm_local_avaliacao.tex`.
+2. Seguir o checklist em `docs/regra.md`.
+3. Registrar: abordagem (status), dificuldade/gargalo novo, e resultado (modelo + pergunta + veredito).
+4. Manter o estilo de `docs/arquitetura_rag_api.tex` (article, tabelas booktabs, secoes claras).
+5. Nao apagar historico; acrescente linhas/status.
+
+Pergunta-gabarito qualitativa padrao:
+
+`Quais sao os parametros tecnicos para pavimentos rodoviarios?`

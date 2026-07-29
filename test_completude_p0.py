@@ -83,11 +83,13 @@ def test_contexto_inclui_instrucoes_completude():
             metadata={"nome_tipo": "INM", "numero": "34", "ano": "2024", "chunk": 1, "total_chunks": 1},
         )
     ]
-    prompt, template_tipo = _preparar_contexto_resposta(
+    prompt, template_tipo, corpo = _preparar_contexto_resposta(
         "Quais os limites de IRI?", docs, modelo_usado="deepseek"
     )
     assert _INSTRUCOES_COMPLETUDE.strip() in prompt
     assert template_tipo == "parametros"
+    assert corpo is not None
+    assert "| A | B |" in corpo
     print(f"OK: contexto inclui instrucoes completude (template={template_tipo})")
 
 

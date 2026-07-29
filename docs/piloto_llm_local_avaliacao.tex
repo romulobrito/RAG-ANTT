@@ -1,0 +1,493 @@
+% =============================================================================
+% Relatorio de Piloto --- LLM Local (Ollama) no Sistema RAG-ANTT
+% Dificuldades, achados, gargalos, abordagens e resultados
+% =============================================================================
+\documentclass[12pt, a4paper]{article}
+
+% --- Codificacao e idioma ---
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage[brazil]{babel}
+
+% --- Tipografia e layout ---
+\usepackage{lmodern}
+\usepackage[top=2.5cm, bottom=2.5cm, left=3cm, right=2.5cm]{geometry}
+\usepackage{setspace}
+\onehalfspacing
+\usepackage{indentfirst}
+\setlength{\parindent}{1.25cm}
+\usepackage{float}
+
+% --- Tabelas ---
+\usepackage{booktabs}
+\usepackage{array}
+\usepackage{longtable}
+\usepackage{tabularx}
+\usepackage{multirow}
+
+% --- Figuras e cores ---
+\usepackage[dvipsnames]{xcolor}
+\usepackage{graphicx}
+\graphicspath{{figs/}}
+\usepackage{tikz}
+\usetikzlibrary{arrows.meta,positioning,fit}
+
+% --- Cores e links ---
+\usepackage[colorlinks=true, linkcolor=NavyBlue, citecolor=NavyBlue, urlcolor=NavyBlue]{hyperref}
+
+% --- Listas ---
+\usepackage{enumitem}
+
+% --- Cabecalho e rodape ---
+\usepackage{fancyhdr}
+\pagestyle{fancy}
+\fancyhf{}
+\fancyhead[L]{\small\textit{Piloto LLM Local --- RAG-ANTT (Ollama/CPU)}}
+\fancyhead[R]{\small\thepage}
+\fancyfoot[C]{\small\textit{Relatorio de Avaliacao --- DeepFeed}}
+\renewcommand{\headrulewidth}{0.4pt}
+\renewcommand{\footrulewidth}{0.4pt}
+
+% --- Matematica ---
+\usepackage{amsmath}
+\usepackage{amssymb}
+
+% --- Citacao em bloco ---
+\usepackage{csquotes}
+
+% --- Listagens ---
+\usepackage{listings}
+\lstset{
+  basicstyle=\ttfamily\small,
+  frame=single,
+  breaklines=true,
+  breakatwhitespace=false,
+  columns=fullflexible,
+  keepspaces=true,
+  xleftmargin=0.5cm,
+  framexleftmargin=0.5cm,
+  backgroundcolor=\color{gray!5},
+  rulecolor=\color{gray!50},
+  literate={---}{{\textemdash}}1
+           {-->}{{$\rightarrow$}}3
+           {<--}{{$\leftarrow$}}3,
+}
+
+% --- Titulo ---
+\title{%
+  \vspace{-1cm}
+  \textbf{Relatorio de Piloto}\\[0.5cm]
+  \Large LLM Local via Ollama (CPU) no Sistema RAG-ANTT\\
+  Dificuldades, Gargalos, Abordagens e Resultados\\[0.3cm]
+  \large Agencia Nacional de Transportes Terrestres (ANTT)
+}
+
+\author{%
+  DeepFeed\\
+}
+
+\date{Julho de 2026}
+
+% =============================================================================
+\begin{document}
+
+\maketitle
+\thispagestyle{empty}
+
+\vspace{1cm}
+
+\begin{center}
+  \fbox{\parbox{0.85\textwidth}{
+    \centering
+    \vspace{0.3cm}
+    \textbf{Classificacao:} Relatorio tecnico de piloto --- Projeto RAG-ANTT\\[0.2cm]
+    \small Registra a implantacao aditiva do provedor Ollama na interface Streamlit,\\
+    as restricoes de hardware, os testes qualitativos com documentos reais da ANTT\\
+    (pergunta de parametros de pavimento / INM~34) e os gargalos de qualidade\\
+    observados frente ao baseline em nuvem (DeepSeek via OpenRouter).
+    \vspace{0.3cm}
+  }}
+\end{center}
+
+\newpage
+\tableofcontents
+\newpage
+
+% =============================================================================
+\section{Introducao e Contexto}
+% =============================================================================
+
+O Sistema RAG-ANTT opera hoje como aplicacao monolitica Streamlit com recuperacao hibrida (FAISS + BM25 fundidos por RRF), priorizacao de tabelas auxiliares, embeddings locais \texttt{intfloat/multilingual-e5-small} e geracao via LLMs em nuvem (DeepSeek / OpenAI).
+
+No ambito do oficio SUTEC/ANTT e da proposta de arquitetura descrita em \texttt{docs/arquitetura\_rag\_api.tex}, a DeepFeed entrega o nucleo de IA (RAG + API). Autenticacao e frontend corporativo ficam com outra equipe. A arquitetura-alvo preve API REST (FastAPI), pod Ollama e orquestracao Kubernetes (Rancher).
+
+Este relatorio documenta o \textbf{piloto de LLM local} executado \textbf{antes} da API: opcao \textbf{Local (Ollama) - CPU} na sidebar do Streamlit, mantendo os provedores cloud como baseline de qualidade.
+
+\subsection{Objetivos do piloto}
+
+\begin{enumerate}[label=\textbf{\arabic*.}]
+  \item Validar instalacao e operacao do Ollama em estacao de desenvolvimento (WSL/CPU);
+  \item Integrar o provedor de forma aditiva (sem quebrar DeepSeek/OpenAI);
+  \item Comparar qualidade de resposta local versus nuvem na mesma pergunta normativa;
+  \item Identificar gargalos (hardware, truncamento de contexto, modelo) e priorizar proximos passos;
+  \item Manter evidencia documental atualizavel para a equipe e para o agente Cursor.
+\end{enumerate}
+
+\subsection{Escopo deste piloto}
+
+\begin{table}[H]
+\centering
+\small
+\caption{Escopo do piloto versus arquitetura-alvo}
+\label{tab:escopo_piloto}
+\begin{tabularx}{\textwidth}{X c c}
+\toprule
+\textbf{Item} & \textbf{Piloto (atual)} & \textbf{Arquitetura-alvo} \\
+\midrule
+Provedor Ollama na UI Streamlit & Sim & Sim (cliente da API) \\
+Modelos 3B e 7B em CPU & Sim & A definir (CPU/GPU no cluster) \\
+API REST FastAPI & Nao & Sim \\
+Auth / SSO / SIGESCANTT & Nao & Outra equipe / OTI \\
+Deploy Rancher / Ingress & Nao & Sim (ANTT + DeepFeed) \\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+% =============================================================================
+\section{Ambiente e Restricoes de Hardware}
+% =============================================================================
+
+O piloto foi executado em notebook de desenvolvimento com as seguintes caracteristicas observadas:
+
+\begin{table}[H]
+\centering
+\small
+\caption{Perfil de hardware do ambiente de piloto}
+\label{tab:hardware}
+\begin{tabularx}{\textwidth}{l X}
+\toprule
+\textbf{Item} & \textbf{Observacao} \\
+\midrule
+CPU & Intel i5-10300H (adequado a inferencia 3B--7B quantizada, lenta) \\
+RAM & 16~GiB total; disponivel tipicamente 8--9~GiB sob carga leve \\
+GPU NVIDIA & Presente, porem sem stack de driver util no WSL para Ollama --- inferencia \textbf{CPU-only} \\
+Disco & Critico em fases do piloto ($\sim$92\%); apos limpeza de backup Cursor $\sim$28~GiB livres \\
+SO & Windows 11 Pro + WSL (Linux) \\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+\subsection{Implicacoes}
+
+\begin{itemize}
+  \item Modelos \textbf{7B} exigem fechar navegadores/apps pesados para reduzir swap e latencia;
+  \item Modelos \textbf{13B+} sao inviaveis neste hardware sem GPU funcional;
+  \item O perfil de producao SUTEC/GETIC tambem e tratado como \textbf{CPU-only} ate haver GPU no cluster --- o piloto e representativo desse cenario.
+\end{itemize}
+
+% =============================================================================
+\section{Abordagem Implementada}
+% =============================================================================
+
+A integracao foi deliberadamente \textbf{aditiva}: nenhum provedor cloud foi removido; o Ollama entra como opcao selecionavel e pode ser restringido por variavel de ambiente em perfil ``ANTT prod''.
+
+\subsection{Componentes alterados}
+
+\begin{table}[H]
+\centering
+\small
+\caption{Artefatos do provedor Ollama}
+\label{tab:artefatos}
+\begin{tabularx}{\textwidth}{l X}
+\toprule
+\textbf{Arquivo} & \textbf{Papel} \\
+\midrule
+\texttt{config.py} & Registro em \texttt{LLM\_PROVIDERS}; helpers \texttt{get\_ollama\_*}; \texttt{get\_deploy\_profile}; \texttt{get\_allowed\_llm\_providers}; \texttt{cloud\_fallback\_enabled} \\
+\texttt{llm\_providers.py} & \texttt{verificar\_ollama\_disponivel}; ramo Ollama em \texttt{get\_llm}; filtro de provedores; fallback cloud apenas se habilitado \\
+\texttt{antt\_rag\_unified.py} & Sidebar Ollama; packing via \texttt{\_empacotar\_documentos\_para\_contexto}; grounding local \\
+\texttt{contexto\_packing.py} & Selecao estrutural de chunks por orcamento (local e API) \\
+\texttt{test\_llm\_local\_mvp.py} & Sandbox de regressao do MVP (6/6 OK na entrega) \\
+\texttt{test\_contexto\_packing.py} & Regressao do packing (identidade API, tabela, teto por fonte) \\
+\texttt{requirements.txt} & Cliente \texttt{ollama>=0.4.0}; notas sobre binario e \texttt{ollama serve} \\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+\subsection{Instalacao Ollama (sem sudo)}
+
+Sem privilegios de administrador no WSL, o binario foi instalado em espaco do usuario:
+
+\begin{lstlisting}
+~/.local/ollama/bin/ollama
+~/.local/bin/ollama          # symlink
+ollama serve                 # API em 127.0.0.1:11434
+export LD_LIBRARY_PATH=$HOME/.local/ollama/lib:$LD_LIBRARY_PATH
+\end{lstlisting}
+
+Versao validada no piloto: \textbf{Ollama v0.32.5}.
+
+\subsection{Modelos avaliados}
+
+\begin{table}[H]
+\centering
+\small
+\caption{Modelos baixados e usados no piloto}
+\label{tab:modelos}
+\begin{tabularx}{\textwidth}{l c c X}
+\toprule
+\textbf{Modelo} & \textbf{Tamanho} & \textbf{Uso de RAM} & \textbf{Papel no piloto} \\
+\midrule
+\texttt{llama3.2:3b} & $\sim$2,0~GB & Menor & Baseline local rapido; qualidade insuficiente em tabelas normativas \\
+\texttt{qwen2.5:7b} & $\sim$4,7~GB & $\sim$8--10~GB & Melhor candidato local atual em CPU \\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+\subsection{Politica de fallback}
+
+Em perfil restrito (\texttt{RAG\_LLM\_ALLOWED\_PROVIDERS=ollama}), o fallback para nuvem fica desabilitado por padrao (\texttt{cloud\_fallback\_enabled}), alinhado a ambientes ANTT sem saida para APIs externas.
+
+% =============================================================================
+\section{Dificuldades Encontradas}
+% =============================================================================
+
+\begin{enumerate}[label=\textbf{D\arabic*.}]
+  \item \textbf{Instalacao sem root:} pacotes oficiais com \texttt{sudo} indisponiveis; exigiu binario em \texttt{\textasciitilde/.local} e ajuste de \texttt{LD\_LIBRARY\_PATH}.
+
+  \item \textbf{Pressao de disco:} HF cache compartilhado com outros projetos nao podia ser apagado em massa; a limpeza util foi backup do Cursor (\texttt{state.vscdb.backup}, $\sim$12~GB).
+
+  \item \textbf{GPU inutilizavel no WSL:} forcou CPU-only e latencias de dezenas de segundos a minutos na primeira carga.
+
+  \item \textbf{RAM apertada para 7B:} concorrencia com Chrome/Streamlit/embeddings aumenta risco de thrashing; recomendacao operacional de liberar memoria antes de consultas longas.
+
+  \item \textbf{Qualidade vs. expectativa do usuario:} a pergunta ``Quais sao os parametros tecnicos para pavimentos rodoviarios?'' exige \textbf{numeros e tabelas} da INM~34/2024; modelos locais tenderam a responder com estrutura do RCR e remeter a INM, sem extrair valores.
+
+  \item \textbf{Truncamento de contexto:} limite de $\sim$24k caracteres para Ollama (e historico de estouros de tokens em cloud ao carregar documentos inteiros) pode cortar exatamente as tabelas que respondem a pergunta.
+\end{enumerate}
+
+% =============================================================================
+\section{Gargalos Identificados}
+% =============================================================================
+
+Os gargalos abaixo estao ordenados por impacto provavel na qualidade da resposta local:
+
+\begin{table}[H]
+\centering
+\small
+\caption{Gargalos e impacto}
+\label{tab:gargalos}
+\begin{tabularx}{\textwidth}{c l X}
+\toprule
+\textbf{ID} & \textbf{Gargalo} & \textbf{Descricao / efeito} \\
+\midrule
+G1 & Truncamento linear (historico) & Mitigado: packing estrutural em \texttt{contexto\_packing.py} \\
+G2 & Capacidade do modelo 3B & Respostas evasivas/repetitivas; pouco uso util do contexto normativo \\
+G3 & Capacidade do modelo 7B (CPU) & Melhor estrutura juridica; ainda pode falhar em materializar numeros \\
+G4 & Hardware CPU-only & Latencia alta; restringe tamanho de modelo e janela de contexto pratica \\
+G5 & Prompt generico em modelos pequenos & Mitigado parcialmente: grounding neutro so para Ollama \\
+G6 & API ainda inexistente & Piloto acoplado ao monolitico Streamlit; nao valida contrato HTTP do alvo \\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+\begin{figure}[H]
+\centering
+\footnotesize
+\begin{tikzpicture}[
+  node distance=6mm and 8mm,
+  box/.style={draw, rounded corners, align=center, inner sep=4pt, minimum height=8mm},
+  edge/.style={-Latex, thick}
+]
+\node[box, fill=blue!5, text width=3.2cm] (ret) {Recuperacao\\hibrida + tabelas};
+\node[box, fill=orange!10, text width=3.4cm, right=of ret] (ctx) {Montagem de\\contexto};
+\node[box, fill=red!10, text width=3.4cm, right=of ctx] (trunc) {\textbf{G1:} Truncamento\\24k chars};
+\node[box, fill=green!8, text width=3.2cm, right=of trunc] (llm) {Ollama\\3B / 7B CPU};
+\draw[edge] (ret) -- (ctx);
+\draw[edge] (ctx) -- (trunc);
+\draw[edge] (trunc) -- (llm);
+\end{tikzpicture}
+\caption{Ponto critico atual do pipeline local: truncamento antes da inferencia.}
+\label{fig:gargalo_trunc}
+\end{figure}
+
+% =============================================================================
+\section{Achados e Resultados}
+% =============================================================================
+
+\subsection{Smoke test do modelo}
+
+Pergunta curta fora do RAG (apenas Ollama):
+
+\begin{quote}
+\textit{Responda em uma frase curta: o que e IRI em pavimento rodoviario?}
+\end{quote}
+
+\texttt{qwen2.5:7b} respondeu corretamente em $\sim$77~s na primeira carga (conceito de Indice de Regularidade do Percurso), confirmando que o runtime local esta operacional.
+
+\subsection{Pergunta normativa (mesmo prompt no RAG)}
+
+\textbf{Pergunta:} ``Quais sao os parametros tecnicos para pavimentos rodoviarios?''
+
+\begin{table}[H]
+\centering
+\small
+\caption{Comparativo qualitativo na pergunta de pavimentos}
+\label{tab:comparativo}
+\begin{tabularx}{\textwidth}{l X X X}
+\toprule
+\textbf{Criterio} & \textbf{llama3.2:3b} & \textbf{qwen2.5:7b} & \textbf{DeepSeek (cloud)} \\
+\midrule
+Relevancia tematica & Fraca & Boa & Boa \\
+Estrutura RCR / fases & Pobre & Forte (Arts.\ 127--141) & Media/forte \\
+Citacao INM~34 / IRI--FWD--IFI & Nao util & Menciona e remete & Extrai e tabula \\
+Valores / tabelas numericas & Nao & Nao & Sim (INM~34) \\
+Latencia observada & $\sim$30~s ordem & Maior (carga 7B) & $\sim$minutos (rede/API) \\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+\subsection{Sintese do resultado Qwen 7B (RAG)}
+
+O \texttt{qwen2.5:7b} produziu resposta estruturada sobre o Regulamento de Concessoes Rodoviarias (RES~6000/2022): obrigacao geral (Art.~127), fases (Trabalhos Iniciais, Recuperacao, Conservacao, Recebimento Final), vinculo com INM~34/2024 e mencao explicita a IRI, FWD/Dadm e IFI --- porem \textbf{sem listar os limites numericos}, concluindo com orientacao para consultar a INM~34.
+
+\textbf{Veredito:} o 7B ja serve para \textbf{orientacao normativa / mapa do RCR}; para \textbf{parametros tecnicos numericos}, o gargalo dominante e a combinacao G1+G3+G5, nao apenas ``falta de modelo''.
+
+\subsection{Metricas offline de recuperacao (baseline do sistema)}
+
+Harness \texttt{avaliar\_retrieval.py --com-geracao --com-ragas}. Relatorio de referencia: \texttt{relatorios\_avaliacao/retrieval\_20260728\_194233.md}.
+
+\begin{itemize}
+  \item Metricas deterministas do gabarito: \textbf{100\%} (8/8) no lote avaliado;
+  \item RAGAS parcial: \texttt{context\_precision} indisponivel por timeout; \textit{faithfulness} media $\sim$0,84;
+  \item Dependencia: pacote \texttt{ragas==0.1.21} no venv (instalado durante o piloto de metricas).
+\end{itemize}
+
+Essas metricas aferem sobretudo a \textbf{recuperacao}; a falha qualitativa local na pergunta de pavimento e tipicamente de \textbf{geracao + selecao de contexto}, nao de ``documento inexistente no indice''.
+
+% =============================================================================
+\section{Abordagens Avaliadas e Priorizadas}
+% =============================================================================
+
+\begin{table}[H]
+\centering
+\small
+\caption{Abordagens consideradas para melhorar o LLM local}
+\label{tab:abordagens}
+\begin{tabularx}{\textwidth}{c l c X}
+\toprule
+\textbf{ID} & \textbf{Abordagem} & \textbf{Status} & \textbf{Notas} \\
+\midrule
+A1 & Modelo 3B (llama3.2) & Testado & Inadequado para tabelas normativas \\
+A2 & Modelo 7B (qwen2.5) & Testado & Melhor local atual; reteste pos-A3 pendente na UI \\
+A3 & Packing estrutural de contexto (sem hardcode de tema) & Implementado & Modulo \texttt{contexto\_packing.py}; caminho compartilhado local+API \\
+A4 & Grounding neutro Ollama (reproduzir valores do contexto) & Implementado & Anexo so para identificadores Ollama; API inalterada \\
+A5 & Geracao em 2 passos (extrair evidencias -> redigir) so Ollama & Implementado & Modulo \texttt{geracao\_dois\_passos.py}; API inalterada \\
+A6 & Fine-tune de dominio & Baixo ROI curto prazo & Custo alto vs.\ ganho esperado neste hardware \\
+A7 & API FastAPI + contrato JSON & Fora do escopo imediato do piloto UI & Documentado na arquitetura \\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+\subsection{Detalhe da entrega A3 + A4 (julho/2026)}
+
+Implementado packing generalizavel (sinais estruturais: tabela markdown, \texttt{fonte\_qualidade}, densidade numerica, ranking, teto por fonte). Sem listas de topicos/siglas.
+
+\begin{itemize}
+  \item Artefato: \texttt{contexto\_packing.py}; integracao em \texttt{\_preparar\_contexto\_resposta} e \texttt{gerar\_resposta}.
+  \item Orcamento: Ollama $\sim$24k; DeepSeek/OpenAI $\sim$50k via \texttt{\_limite\_contexto\_chars}.
+  \item Invariante: se o contexto cabe no limite do provedor, a lista de chunks permanece intacta (API tipica nao muda).
+  \item Testes: \texttt{test\_contexto\_packing.py} (5/5) --- identidade sob 50k, tabela sob orcamento apertado, teto por fonte.
+  \item Reteste UI pos-A3 (mesma pergunta): logs mostram chunks INM~34 \texttt{[tabela, estruturada]} no contexto;
+        \texttt{qwen2.5:7b} ainda respondeu so com RCR (sem numeros) e errou expansoes de siglas;
+        DeepSeek, com o mesmo tipo de contexto, extraiu tabelas numericas corretas.
+        Conclusao: G1 mitigado; gargalo dominante passou a ser \textbf{G3} (capacidade/comportamento do 7B).
+\end{itemize}
+
+\subsection{Detalhe da entrega A5 (julho/2026)}
+
+Para mitigar G3 sem hardcode de tema, a geracao local passou a dois passos:
+
+\begin{enumerate}[label=\textbf{\arabic*.}]
+  \item \textbf{Colheita deterministica:} tabelas markdown do contexto sao copiadas por codigo (estrutural);
+  \item \textbf{Extracao LLM:} complemento em prosa (opcional);
+  \item \textbf{Redacao:} resposta so com evidencias hibridas (streaming); proibido declarar insuficiencia se houver \texttt{BLOCOS\_TABULARES}.
+\end{enumerate}
+
+\begin{itemize}
+  \item Artefato: \texttt{geracao\_dois\_passos.py}; ligado em \texttt{gerar\_resposta} e \texttt{gerar\_resposta\_streaming}.
+  \item Escopo: somente Ollama (\texttt{deve\_usar\_dois\_passos}); DeepSeek/OpenAI seguem um passo.
+  \item Desligar: \texttt{RAG\_OLLAMA\_TWO\_PASS=0}.
+  \item Custo: aproximadamente 2x latencia de inferencia no modelo local.
+  \item Testes: \texttt{test\_geracao\_dois\_passos.py}.
+  \item Reteste UI 19:02: contexto tinha 14 chunks INM com tabelas; extracao LLM (1714 chars) ignorou numeros e a redacao alegou insuficiencia --- motivou a colheita deterministica de tabelas.
+\end{itemize}
+
+\subsection{Proximos passos}
+
+\begin{enumerate}[label=\textbf{\arabic*.}]
+  \item Reiniciar Streamlit e retestar a pergunta-gabarito com \texttt{qwen2.5:7b};
+  \item Registrar neste documento se os numeros passam a aparecer na resposta local;
+  \item Se ainda falhar, considerar modelo maior com GPU no ambiente ANTT (nao fine-tune no note).
+\end{enumerate}
+
+% =============================================================================
+\section{Como Reproduzir o Piloto}
+% =============================================================================
+
+\begin{lstlisting}
+# 1) Servidor Ollama
+export PATH="$HOME/.local/bin:$PATH"
+export LD_LIBRARY_PATH="$HOME/.local/ollama/lib:$LD_LIBRARY_PATH"
+ollama serve
+ollama list   # deve listar llama3.2:3b e qwen2.5:7b
+
+# 2) Aplicacao
+cd RAG-ANTT
+streamlit run antt_rag_unified.py
+
+# 3) UI
+# Sidebar -> Servico: Local (Ollama) - CPU
+# Modelo: qwen2.5:7b
+# Pergunta de regressao qualitativa:
+#   "Quais sao os parametros tecnicos para pavimentos rodoviarios?"
+\end{lstlisting}
+
+% =============================================================================
+\section{Controle de Atualizacao deste Documento}
+% =============================================================================
+
+Este arquivo (\texttt{docs/piloto\_llm\_local\_avaliacao.tex}) e a \textbf{fonte de verdade narrativa} do piloto de LLM local. Deve ser atualizado sempre que houver:
+
+\begin{itemize}
+  \item Nova abordagem implementada ou descartada;
+  \item Novo gargalo ou dificuldade operacional relevante;
+  \item Novo resultado comparativo (modelo, pergunta-gabarito, metrica);
+  \item Mudanca de modelo padrao, limite de contexto ou politica de fallback.
+\end{itemize}
+
+A regra operacional para agentes e equipe esta em \texttt{docs/regra.md} e espelhada em \texttt{.cursor/rules/atualizar-piloto-llm-local.mdc}.
+
+% =============================================================================
+\section{Conclusao}
+% =============================================================================
+
+O piloto demonstrou que:
+
+\begin{enumerate}[label=\textbf{\arabic*.}]
+  \item E viavel operar LLM local via Ollama em CPU no fluxo Streamlit do RAG-ANTT;
+  \item \texttt{qwen2.5:7b} e superior a \texttt{llama3.2:3b} para orientacao normativa, mas ainda inferior ao DeepSeek na extracao de parametros numericos da INM~34;
+  \item O principal gargalo de qualidade local nao e apenas o tamanho do modelo: e a \textbf{preservacao e uso do contexto tabular} sob limite de tokens/caracteres;
+  \item A entrega A3+A4+A5: packing estrutural compartilhado, grounding neutro e geracao em dois passos so no Ollama;
+  \item A API REST e o deploy Rancher permanecem na trilha da arquitetura de referencia, fora do escopo ja entregue neste piloto de UI.
+\end{enumerate}
+
+% =============================================================================
+\vspace{1cm}
+\begin{center}
+\rule{0.5\textwidth}{0.4pt}
+\end{center}
+\vspace{0.5cm}
+
+\noindent\textit{Documento vivo: atualizar a cada marco do piloto LLM local. Ultima revisao: julho de 2026 (A3 packing + A4 grounding + A5 dois passos).}
+
+\end{document}
