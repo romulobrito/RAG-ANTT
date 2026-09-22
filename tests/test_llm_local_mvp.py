@@ -13,7 +13,7 @@ from __future__ import annotations
 import os
 import sys
 
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from config import (
     DEFAULT_LLM_PROVIDER,
@@ -86,7 +86,7 @@ def test_cloud_fallback_desligado_em_antt_prod() -> None:
 
 
 def test_historico_conversa_padrao() -> None:
-    """Sem env, a continuidade permanece 5 guardadas, 3 na reescrita, 300 chars."""
+    """Sem env, a continuidade permanece a definida em config.py."""
     from config import (
         get_historico_chars_resposta,
         get_historico_turnos_guardados,
@@ -102,9 +102,9 @@ def test_historico_conversa_padrao() -> None:
     try:
         for nome in nomes:
             os.environ.pop(nome, None)
-        assert get_historico_turnos_guardados() == 5
-        assert get_historico_turnos_reescrita() == 3
-        assert get_historico_chars_resposta() == 300
+        assert get_historico_turnos_guardados() == 10
+        assert get_historico_turnos_reescrita() == 8
+        assert get_historico_chars_resposta() == 1000
         os.environ["RAG_HISTORICO_REESCRITA"] = "4"
         assert get_historico_turnos_reescrita() == 4
     finally:

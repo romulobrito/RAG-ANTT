@@ -27,6 +27,10 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Dict, List, Optional, Sequence, Tuple
 
+_RAIZ = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+if _RAIZ not in sys.path:
+    sys.path.insert(0, _RAIZ)
+
 from config import LLM_PROVIDERS, logger
 from llm_providers import create_llm_manager
 

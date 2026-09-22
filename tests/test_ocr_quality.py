@@ -10,7 +10,7 @@ Executar:
 import os
 import sys
 
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from antt_rag_unified import (
     _OCR_PIPELINE_VERSION,
@@ -182,7 +182,7 @@ def test_cache_real_inm34_matriz_reprocessada():
     pista sejam recuperaveis apos o pos-processamento.
     """
     cache_path = os.path.join(
-        os.path.dirname(__file__),
+        os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
         "dados_antt",
         ".ocr_cache",
         "51e3de9dbfe4672d.txt",

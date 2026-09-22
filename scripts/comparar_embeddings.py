@@ -18,6 +18,13 @@ Uso:
 
 from __future__ import annotations
 
+import os
+import sys
+
+_RAIZ = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+if _RAIZ not in sys.path:
+    sys.path.insert(0, _RAIZ)
+
 import argparse
 import json
 import os
@@ -39,7 +46,7 @@ from antt_rag_unified import (
     _dividir_por_estrutura,
     _mesclar_tabelas_auxiliares,
 )
-from comparar_modelos import CASOS_REFERENCIA, CasoReferencia
+from scripts.comparar_modelos import CASOS_REFERENCIA, CasoReferencia
 
 
 # ---------------------------------------------------------------------------

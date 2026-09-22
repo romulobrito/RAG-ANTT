@@ -17,11 +17,12 @@ from typing import List, Tuple
 
 import pytest
 
-ARQUIVO_PRINCIPAL = Path(__file__).parent / "antt_rag_unified.py"
-ARQUIVO_CONFIG = Path(__file__).parent / "config.py"
-ARQUIVO_PROVIDERS = Path(__file__).parent / "llm_providers.py"
-ARQUIVO_TEMA = Path(__file__).parent / "ui" / "theme.py"
-ARQUIVO_TEMA_NATIVO = Path(__file__).parent / ".streamlit" / "config.toml"
+RAIZ = Path(__file__).resolve().parent.parent
+ARQUIVO_PRINCIPAL = RAIZ / "ui" / "app.py"
+ARQUIVO_CONFIG = RAIZ / "config.py"
+ARQUIVO_PROVIDERS = RAIZ / "llm_providers.py"
+ARQUIVO_TEMA = RAIZ / "ui" / "theme.py"
+ARQUIVO_TEMA_NATIVO = RAIZ / ".streamlit" / "config.toml"
 
 # Faixas Unicode de pictogramas, simbolos diversos, setas decorativas e
 # seletores de variacao usados por emojis.
@@ -297,7 +298,7 @@ def test_tooltip_com_css_ampliado():
 
 def test_badge_tipo_documento_gera_html_valido():
     """O badge institucional deve produzir HTML com faixa lateral colorida."""
-    from antt_rag_unified import badge_tipo_documento
+    from ui.app import badge_tipo_documento
 
     html_gerado = badge_tipo_documento("Instrucao Normativa")
 
@@ -309,7 +310,7 @@ def test_badge_tipo_documento_gera_html_valido():
 
 def test_badge_tipo_documento_aceita_acentuacao():
     """Rotulos acentuados devem casar com a mesma cor institucional."""
-    from antt_rag_unified import badge_tipo_documento
+    from ui.app import badge_tipo_documento
 
     com_acento = badge_tipo_documento("Instrução Normativa")
     sem_acento = badge_tipo_documento("Instrucao Normativa")
@@ -320,7 +321,7 @@ def test_badge_tipo_documento_aceita_acentuacao():
 
 def test_badge_tipo_documento_usa_cor_padrao_para_tipo_desconhecido():
     """Tipos nao mapeados recebem a cor neutra, sem quebrar a renderizacao."""
-    from antt_rag_unified import badge_tipo_documento
+    from ui.app import badge_tipo_documento
     from ui.theme import CINZA_SECUNDARIO
 
     html_gerado = badge_tipo_documento("Tipo Inexistente")
@@ -331,7 +332,7 @@ def test_badge_tipo_documento_usa_cor_padrao_para_tipo_desconhecido():
 
 def test_badge_tipo_documento_trata_entrada_vazia():
     """Entrada vazia nao deve gerar badge sem rotulo."""
-    from antt_rag_unified import badge_tipo_documento
+    from ui.app import badge_tipo_documento
 
     assert "Documento" in badge_tipo_documento("")
     assert "Documento" in badge_tipo_documento("   ")
@@ -339,7 +340,7 @@ def test_badge_tipo_documento_trata_entrada_vazia():
 
 def test_badge_tipo_documento_escapa_html():
     """O rotulo deve ser escapado para evitar injecao de marcacao."""
-    from antt_rag_unified import badge_tipo_documento
+    from ui.app import badge_tipo_documento
 
     html_gerado = badge_tipo_documento("<script>alert(1)</script>")
 

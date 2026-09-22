@@ -2,6 +2,11 @@ import os
 import json
 import glob
 import re
+import sys
+
+_RAIZ = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+if _RAIZ not in sys.path:
+    sys.path.insert(0, _RAIZ)
 
 from tipos_documento import atualizar_catalogo_tipos, listar_siglas_tipo
 

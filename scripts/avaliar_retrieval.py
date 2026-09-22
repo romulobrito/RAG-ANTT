@@ -29,6 +29,10 @@ import json
 import os
 import sys
 import time
+
+_RAIZ = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+if _RAIZ not in sys.path:
+    sys.path.insert(0, _RAIZ)
 import unicodedata
 from dataclasses import dataclass
 from datetime import datetime

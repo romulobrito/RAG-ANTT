@@ -212,6 +212,105 @@ def get_historico_turnos_reescrita() -> int:
     return _inteiro_ambiente("RAG_HISTORICO_REESCRITA", 8, 1, 10)
 
 
+def get_llm_model() -> str:
+    """
+    Modelo de geracao quando o chamador nao escolhe um.
+
+    RAG_LLM_MODEL padrao qwen2.5:7b.
+
+    Returns:
+        Nome do modelo no Ollama ou no provedor configurado.
+    """
+    raw = os.environ.get("RAG_LLM_MODEL", "qwen2.5:7b").strip()
+    return raw or "qwen2.5:7b"
+
+
+def get_llm_temperature() -> float:
+    """
+    Liberdade de redacao quando o chamador omite o valor.
+
+    RAG_LLM_TEMPERATURE padrao 0.1. Fora de 0.0 a 1.0 volta ao padrao.
+
+    Returns:
+        Temperatura entre 0.0 e 1.0.
+    """
+    raw = os.environ.get("RAG_LLM_TEMPERATURE", "0.1").strip()
+    if not raw:
+        return 0.1
+    try:
+        valor = float(raw)
+    except ValueError:
+        logger.warning(
+            "RAG_LLM_TEMPERATURE invalido (%s); usando 0.1",
+            raw,
+        )
+        return 0.1
+    if valor < 0.0 or valor > 1.0:
+        logger.warning(
+            "RAG_LLM_TEMPERATURE %s fora de 0.0 a 1.0; usando 0.1",
+            valor,
+        )
+        return 0.1
+    return valor
+
+
+def get_llm_max_tokens() -> int:
+    """
+    Tamanho maximo da resposta quando o chamador omite o valor.
+
+    RAG_LLM_MAX_TOKENS padrao 4096. Teto 4096.
+
+    Returns:
+        Inteiro entre 1 e 4096.
+    """
+    return _inteiro_ambiente("RAG_LLM_MAX_TOKENS", 4096, 1, 4096)
+
+
+def get_max_documentos() -> int:
+    """
+    Quantos trechos entram na consulta quando o chamador omite o valor.
+
+    RAG_MAX_DOCUMENTOS padrao 30. Teto do contrato: 40.
+
+    Returns:
+        Inteiro entre 1 e 40.
+    """
+    return _inteiro_ambiente("RAG_MAX_DOCUMENTOS", 30, 1, 40)
+
+
+def get_embedding_allowed() -> List[str]:
+    """
+    Embeddings que a reindexacao e a consulta podem usar.
+
+    RAG_EMBEDDING_ALLOWED padrao local. Lista separada por virgula.
+    Trocar de local para outro provedor exige reindexar a base.
+
+    Returns:
+        Lista nao vazia de identificadores.
+    """
+    raw = os.environ.get("RAG_EMBEDDING_ALLOWED", "local").strip()
+    if not raw:
+        return ["local"]
+    itens = [item.strip() for item in raw.split(",") if item.strip()]
+    return itens or ["local"]
+
+
+def get_llm_provider_padrao() -> str:
+    """
+    Provedor de geracao quando o chamador nao envia um.
+
+    Se RAG_LLM_ALLOWED_PROVIDERS estiver definido, usa o primeiro
+    da lista. Senao, ollama.
+
+    Returns:
+        Identificador do provedor.
+    """
+    permitidos = get_allowed_llm_providers()
+    if permitidos:
+        return permitidos[0]
+    return "ollama"
+
+
 def get_historico_chars_resposta() -> int:
     """
     Quantos caracteres da resposta anterior entram na reescrita.
@@ -334,6 +433,12 @@ __all__ = [
     "get_historico_turnos_guardados",
     "get_historico_turnos_reescrita",
     "get_historico_chars_resposta",
+    "get_llm_model",
+    "get_llm_temperature",
+    "get_llm_max_tokens",
+    "get_max_documentos",
+    "get_embedding_allowed",
+    "get_llm_provider_padrao",
     "LLM_PROVIDERS",
     "DB_FAISS_PATH",
     "CHUNK_SIZE",

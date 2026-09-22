@@ -7,7 +7,7 @@ gabarito, montagem do relatorio e helpers RAGAS offline.
 
 from langchain_core.documents import Document
 
-from avaliar_retrieval import (
+from scripts.avaliar_retrieval import (
     METRICAS_RAGAS,
     CasoAvaliacao,
     _float_ou_nulo,

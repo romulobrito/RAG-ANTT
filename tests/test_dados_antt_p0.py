@@ -15,9 +15,10 @@ Executar:
 import os
 import sys
 
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+RAIZ = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, RAIZ)
 
-from gerar_relatorio import _varrer_filesystem
+from scripts.gerar_relatorio import _varrer_filesystem
 from antt_rag_unified import (
     _SEPARADOR_TABELAS_AUX,
     _carregar_documento_markdown,
@@ -58,7 +59,7 @@ def test_remover_frontmatter():
 
 
 def test_mesclar_inm34_contem_iri_dadm_sem_ocr():
-    base_dir = os.path.dirname(os.path.abspath(__file__))
+    base_dir = RAIZ
     caminho = os.path.join(
         base_dir, "dados_antt", "INM", "2024", "INM-00000034-2024.md"
     )
@@ -81,7 +82,7 @@ def test_mesclar_documento_sem_aux_inalterado():
 
 
 def test_carregar_documento_inm34_chunks_com_tabela():
-    base_dir = os.path.dirname(os.path.abspath(__file__))
+    base_dir = RAIZ
     caminho = os.path.join(
         base_dir, "dados_antt", "INM", "2024", "INM-00000034-2024.md"
     )
@@ -107,7 +108,7 @@ def test_carregar_documento_inm34_chunks_com_tabela():
 
 def test_varredura_catalogo_ignora_tabelas_auxiliares():
     md_map = _varrer_filesystem(
-        os.path.join(os.path.dirname(__file__), "dados_antt")
+        os.path.join(RAIZ, "dados_antt")
     )
     paths = list(md_map.values())
     assert not any("tabelas_auxiliares" in p.replace("\\", "/") for p in paths)
@@ -122,7 +123,7 @@ def test_detector_pendencias_ignora_tabelas_auxiliares():
     Elas nao sao documentos autonomos; se o detector as listar, o usuario ve
     um falso positivo e clica em Atualizar base sem necessidade.
     """
-    raiz = os.path.dirname(os.path.abspath(__file__))
+    raiz = RAIZ
     md_map = _listar_md_em_dados_antt(os.path.join(raiz, "dados_antt"))
     assert "INM-00000034-2024-parametros-pavimento.md" not in md_map
     assert not any(
