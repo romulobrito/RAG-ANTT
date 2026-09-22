@@ -158,6 +158,72 @@ def get_vagas_geracao_local() -> int:
     return valor
 
 
+def _inteiro_ambiente(nome: str, padrao: int, minimo: int, maximo: int) -> int:
+    """
+    Le um inteiro de ambiente, com piso, teto e valor padrao.
+
+    Args:
+        nome: Nome da variavel.
+        padrao: Valor usado quando a variavel falta ou e invalida.
+        minimo: Menor valor aceito.
+        maximo: Maior valor aceito.
+
+    Returns:
+        Inteiro dentro do intervalo.
+    """
+    raw = os.environ.get(nome, str(padrao)).strip()
+    if not raw:
+        return padrao
+    try:
+        valor = int(raw)
+    except ValueError:
+        logger.warning("%s invalido (%s); usando %s", nome, raw, padrao)
+        return padrao
+    if valor < minimo:
+        return minimo
+    if valor > maximo:
+        logger.warning("%s %s acima do teto; usando %s", nome, valor, maximo)
+        return maximo
+    return valor
+
+
+def get_historico_turnos_guardados() -> int:
+    """
+    Quantas trocas da conversa ficam guardadas na sessao.
+
+    RAG_HISTORICO_TURNOS padrao 10. Teto 20.
+
+    Returns:
+        Inteiro entre 1 e 20.
+    """
+    return _inteiro_ambiente("RAG_HISTORICO_TURNOS", 10, 1, 20)
+
+
+def get_historico_turnos_reescrita() -> int:
+    """
+    Quantas trocas recentes entram na reescrita da pergunta seguinte.
+
+    RAG_HISTORICO_REESCRITA padrao 8. Teto 10. Se for maior que o
+    que esta guardado, a reescrita usa so o que existe.
+
+    Returns:
+        Inteiro entre 1 e 10.
+    """
+    return _inteiro_ambiente("RAG_HISTORICO_REESCRITA", 8, 1, 10)
+
+
+def get_historico_chars_resposta() -> int:
+    """
+    Quantos caracteres da resposta anterior entram na reescrita.
+
+    RAG_HISTORICO_CHARS_RESPOSTA padrao 1000. Teto 2000.
+
+    Returns:
+        Inteiro entre 50 e 2000.
+    """
+    return _inteiro_ambiente("RAG_HISTORICO_CHARS_RESPOSTA", 1000, 50, 2000)
+
+
 # Configurações dos provedores de LLM
 LLM_PROVIDERS = {
     "openai": {
@@ -265,6 +331,9 @@ __all__ = [
     "get_deploy_profile",
     "get_allowed_llm_providers",
     "cloud_fallback_enabled",
+    "get_historico_turnos_guardados",
+    "get_historico_turnos_reescrita",
+    "get_historico_chars_resposta",
     "LLM_PROVIDERS",
     "DB_FAISS_PATH",
     "CHUNK_SIZE",

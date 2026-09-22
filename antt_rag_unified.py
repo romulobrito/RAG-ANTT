@@ -68,7 +68,10 @@ from config import (
     STREAMLIT_PAGE_ICON,
     STREAMLIT_LAYOUT,
     setup_logging,
-    logger
+    logger,
+    get_historico_turnos_guardados,
+    get_historico_turnos_reescrita,
+    get_historico_chars_resposta,
 )
 
 from llm_providers import (
@@ -4293,12 +4296,14 @@ def _reescrever_query_com_historico(pergunta, historico, llm):
     if not historico:
         return pergunta
 
-    # Montar texto do historico (ultimas 3 interacoes)
-    turnos = historico[-3:]
+    # Montar texto do historico (ultimas N interacoes; padrao 3)
+    n_turnos = get_historico_turnos_reescrita()
+    n_chars = get_historico_chars_resposta()
+    turnos = historico[-n_turnos:]
     linhas = []
     for turno in turnos:
         linhas.append(f"Usuario: {turno['pergunta']}")
-        resumo_resp = turno["resposta"][:300]
+        resumo_resp = turno["resposta"][:n_chars]
         linhas.append(f"Assistente: {resumo_resp}...")
     texto_historico = "\n".join(linhas)
 
@@ -5494,21 +5499,9 @@ ou com qualidade baixa. Leva alguns minutos.
             if msg.get("provider"):
                 st.caption(f"Resposta via {msg['provider']}")
 
-    # Campo de pergunta. O Streamlit fixa o st.chat_input no rodape da
-    # pagina, de modo que ele acompanha o fim da conversa em vez de ficar
-    # acima da ultima resposta. Altura e largura sao ajustaveis pelo
-    # usuario (alca no canto inferior direito; ver ui/theme.py).
-    pergunta = st.chat_input(
-        "Digite sua pergunta sobre documentos da ANTT",
-        disabled=not vectorstore_loaded,
-    )
-
-    # O Streamlit prende o chat_input no rodape. O marcador e o script
-    # levam este botao para dentro desse rodape, abaixo da caixa.
-    st.markdown(
-        '<span id="marcador-nova-conversa"></span>',
-        unsafe_allow_html=True,
-    )
+    # Acima da caixa de pergunta. O Streamlit fixa o chat_input no
+    # rodape; um botao depois dele nao fica abaixo da caixa, e o script
+    # que forcava essa posicao apagava a tela no segundo envio.
     if st.button(
         "Nova conversa",
         key="btn_nova_conversa",
@@ -5522,27 +5515,13 @@ ou com qualidade baixa. Leva alguns minutos.
         st.session_state.pop("processar_automatico", None)
         st.rerun()
 
-    import streamlit.components.v1 as components
-
-    components.html(
-        """
-        <script>
-        const doc = window.parent.document;
-        const mark = doc.getElementById("marcador-nova-conversa");
-        const bottom = doc.querySelector('[data-testid="stBottom"]');
-        if (mark && bottom) {
-          const marcador = mark.closest(".element-container");
-          const botao = marcador ? marcador.nextElementSibling : null;
-          if (botao && botao.parentElement !== bottom) {
-            bottom.appendChild(botao);
-          }
-          if (marcador && marcador.parentElement) {
-            marcador.remove();
-          }
-        }
-        </script>
-        """,
-        height=0,
+    # Campo de pergunta. O Streamlit fixa o st.chat_input no rodape da
+    # pagina, de modo que ele acompanha o fim da conversa em vez de ficar
+    # acima da ultima resposta. Altura e largura sao ajustaveis pelo
+    # usuario (alca no canto inferior direito; ver ui/theme.py).
+    pergunta = st.chat_input(
+        "Digite sua pergunta sobre documentos da ANTT",
+        disabled=not vectorstore_loaded,
     )
 
     # Sugestoes sempre montadas no script (mesmo apos a primeira resposta).
@@ -5736,8 +5715,11 @@ ou com qualidade baixa. Leva alguns minutos.
                                 "pergunta": pergunta_original,
                                 "resposta": resposta if resposta else "",
                             })
-                            if len(st.session_state.chat_history) > 5:
-                                st.session_state.chat_history = st.session_state.chat_history[-5:]
+                            limite_historico = get_historico_turnos_guardados()
+                            if len(st.session_state.chat_history) > limite_historico:
+                                st.session_state.chat_history = (
+                                    st.session_state.chat_history[-limite_historico:]
+                                )
 
                         # Salvar no historico visual do chat
                         st.session_state.mensagens_chat.append({

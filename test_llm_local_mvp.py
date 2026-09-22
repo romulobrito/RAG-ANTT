@@ -85,6 +85,36 @@ def test_cloud_fallback_desligado_em_antt_prod() -> None:
             os.environ["RAG_LLM_CLOUD_FALLBACK"] = ant_fb
 
 
+def test_historico_conversa_padrao() -> None:
+    """Sem env, a continuidade permanece 5 guardadas, 3 na reescrita, 300 chars."""
+    from config import (
+        get_historico_chars_resposta,
+        get_historico_turnos_guardados,
+        get_historico_turnos_reescrita,
+    )
+
+    nomes = (
+        "RAG_HISTORICO_TURNOS",
+        "RAG_HISTORICO_REESCRITA",
+        "RAG_HISTORICO_CHARS_RESPOSTA",
+    )
+    anteriores = {nome: os.environ.get(nome) for nome in nomes}
+    try:
+        for nome in nomes:
+            os.environ.pop(nome, None)
+        assert get_historico_turnos_guardados() == 5
+        assert get_historico_turnos_reescrita() == 3
+        assert get_historico_chars_resposta() == 300
+        os.environ["RAG_HISTORICO_REESCRITA"] = "4"
+        assert get_historico_turnos_reescrita() == 4
+    finally:
+        for nome, anterior in anteriores.items():
+            if anterior is None:
+                os.environ.pop(nome, None)
+            else:
+                os.environ[nome] = anterior
+
+
 def test_vagas_geracao_local_padrao_e_teto() -> None:
     """Padrao e uma vaga; valor invalido cai para 1; teto interno e 8."""
     from config import get_vagas_geracao_local
@@ -200,6 +230,7 @@ def main() -> int:
         test_config_ollama_registrado,
         test_filtro_antt_prod_so_ollama,
         test_cloud_fallback_desligado_em_antt_prod,
+        test_historico_conversa_padrao,
         test_vagas_geracao_local_padrao_e_teto,
         test_ollama_uma_vaga_por_vez,
         test_provedor_externo_nao_espera_vaga,
