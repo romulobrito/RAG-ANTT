@@ -1,0 +1,1042 @@
+AGÊNCIA NACIONAL DE TRANSPORTES TERRESTRES
+GERÊNCIA DE GESTÃO DE INVESTIMENTOS RODOVIÁRIOS
+COORDENAÇÃO DE GESTÃO DE INVESTIMENTOS PROPOSTOS PARA SEREM INCLUÍDOS NOS CONTRATOS DE CONCESSÃO
+NOTA TÉCNICA SEI Nº 8115/2025/COGIN/GEGIR/SUROD/DIR/ANTT
+Interessado: Concessionária EPR Via Mineira S.A.
+Referência: Processo nº 50500.026576/2025-09
+Assunto: Demanda - Segurança Viária - Inclusão de redutores de velocidade em Praças de Pedágio da
+BR-040/MG - Contrato de Concessão do Edital nº 04/2023 - Concessionária EPR Via Mineira S.A.
+I. INTRODUÇÃO
+1. A presente Nota Técnica trata da análise, no que compete a esta Gerência de Gestão de
+Inves(cid:57)mentos Rodoviários - GEGIR, nos termos da Resolução ANTT nº 5.977/2022, da demanda de
+implantação de 12 (doze) redutores de velocidade nas Praças de Pedágio no sistema rodoviário
+concedido à Concessionária EPR Via Mineira no Contrato do Edital de Concessão nº 04/2023,
+encaminhado pela Concessionária, por meio da Carta EVM-REG-250512-0001 (SEI nº 32089025), de
+12/05/2025.
+2. O sistema rodoviário explorado e objeto da referida concessão compreende a rodovia BR-
+040/MG, conforme imagem ilustrativa abaixo:
+Figura 1 - Sistema Rodoviário - BR-040/MG
+Fonte: PER - Edital nº 04/2023
+Nota Técnica - ANTT 8115 (34503555) SEI 50500.026576/2025-09 / pg. 1
+
+---
+
+3. Abaixo, são apresentados os principais dados rela(cid:57)vos ao Contrato do Edital de Concessão
+nº 04/2023:
+Quadro 1 - Dados da Concessão
+ITEM DESCRIÇÃO DADO DA CONCESSÃO
+1 Sistema Rodoviário BR-040/MG
+2 Extensão do Sistema Rodoviário 232,1 km
+3 Prazo do Contrato 30 (trinta) Anos
+4 Data-Base do Contrato Julho/2023
+5 Assinatura do Contrato 04/07/2024
+6 Início da Concessão 06/08/2024
+7 Início da Cobrança de Pedágio 06/08/2024
+8 2º Ano de Concessão 06/08/2024 - 05/08/2025
+II. OBJETIVO
+4. A presente Nota Técnica tem como obje(cid:57)vo avaliar a solicitação apresentada pela
+Concessionária referente à implantação de 12 (doze) redutores de velocidade nas praças de pedágio
+do trecho rodoviário sob a responsabilidade da EPR Via Mineira.
+5. Para tanto, será verificada a mo(cid:57)vação, o mérito, a previsão contratual e regulamentar,
+bem como serão avaliados os requisitos para viabilizar e o mecanismo adequado para operacionalizar a
+alteração contratual e a eventual recomposição do equilíbrio econômico-financeiro do Contrato do Edital
+de Concessão nº 04/2023.
+III. HISTÓRICO PROCESSUAL
+6. A tabela a seguir apresenta histórico com as principais trata(cid:57)vas relacionadas ao pleito em
+questão:
+Quadro 2 - Histórico do processual
+NÚMERO
+ITEM DOCUMENTO DATA DESCRIÇÃO
+SEI
+Concessionária encaminha
+para SUROD, demanda da
+1 Carta EVM-REG-250512-0001 32089025 12/05/2025 inclusão de redutores de
+velocidade nas praças de
+pedágio.
+COGIN encaminha os
+2 Despacho COGIN 32342011 23/05/2025 documentos para análise da
+GEENG
+GEENG conclui como "Não
+Aceito" o Orçamento
+Nota Técnica referente à implantação de
+3 32982540 24/06/2025
+nº 5996/2025/COROR/GEENG/SUROD/DIR/ANTT redutores de velocidade
+(radar) nas praças de
+pedágio
+Nota Técnica - ANTT 8115 (34503555) SEI 50500.026576/2025-09 / pg. 2
+
+
+| ITEM | DESCRIÇÃO | DADO DA CONCESSÃO |
+| --- | --- | --- |
+| 1 | Sistema Rodoviário | BR-040/MG |
+| 2 | Extensão do Sistema Rodoviário | 232,1 km |
+| 3 | Prazo do Contrato | 30 (trinta) Anos |
+| 4 | Data-Base do Contrato | Julho/2023 |
+| 5 | Assinatura do Contrato | 04/07/2024 |
+| 6 | Início da Concessão | 06/08/2024 |
+| 7 | Início da Cobrança de Pedágio | 06/08/2024 |
+| 8 | 2º Ano de Concessão | 06/08/2024 - 05/08/2025 |
+
+
+
+| ITEM | DOCUMENTO | NÚMERO
+SEI | DATA | DESCRIÇÃO |
+| --- | --- | --- | --- | --- |
+| 1 | Carta EVM-REG-250512-0001 | 32089025 | 12/05/2025 | Concessionária encaminha
+para SUROD, demanda da
+inclusão de redutores de
+velocidade nas praças de
+pedágio. |
+| 2 | Despacho COGIN | 32342011 | 23/05/2025 | COGIN encaminha os
+documentos para análise da
+GEENG |
+| 3 | Nota Técnica
+nº 5996/2025/COROR/GEENG/SUROD/DIR/ANTT | 32982540 | 24/06/2025 | GEENG conclui como "Não
+Aceito" o Orçamento
+referente à implantação de
+redutores de velocidade
+(radar) nas praças de
+pedágio |
+| Nota Técnica - ANTT 8115 (34503555) SEI 50500.026576/2025-09 / pg. 2 |  |  |  |  |
+
+
+---
+
+GEENG conclui como
+"aceito" ao projeto
+executivo (quantidade e
+Nota Técnica pranchas do projeto) para a
+4 33243143 23/06/2025
+nº 6326/2025/CPROJ/GEENG/SUROD/DIR/ANTT inclusão dos 12 (doze)
+radares nas praças de
+pedágio localizados na BR-
+040/MG.
+Concessionária solicita que
+os radares sejam
+5 Carta EVM-REG-250723-0003 34102936 23/07/2025
+incluídos como valor
+provisório.
+Concessionária reapresenta
+projeto executivo e
+6 Carta EVM-REG-250811-0002 34623696 11/08/2025
+orçamento para análise da
+GEENG
+GEENG conclui como 'não
+aceita' a documentação
+referente às obras do
+Nota Técnica projeto executivo de
+7 36846054 03/11/2025
+nº 10882/2025/COROR/GEENG/SUROD/DIR/ANTT inclusão de controladores
+de velocidade (radares) nas
+praças de pedágio da BR-
+040/MG.
+Concessionária reapresenta
+projeto executivo e
+8 Carta EVM-PRJ-251107-0001 37164557 07/11/2025
+orçamento para análise da
+GEENG
+GEENG conclui como pelo
+“ACEITO” do pleito
+apresentado pela
+Concessionária EPR Via
+9 Ata de Reunião RAC 003/2025/COROR - ANTT 37233980 14/11/2025 Mineira S.A., referente às
+obras de inclusão de
+redutores de velocidade em
+praças de pedágio na BR-
+040/MG.
+IV. REFERÊNCIAS CONTRATUAIS E NORMATIVOS
+7. Apresenta-se a seguir as referências contratuais e norma(cid:57)vas consideradas na presente
+análise, sendo que os excertos necessários serão transcritos no momento oportuno:
+Contrato do Edital de Concessão nº 04/2023, Anexos e respectivo Programa de
+Exploração da Rodovia – PER;
+Resolução ANTT nº 5.950/2021: Aprova a primeira norma do Regulamento das
+Concessões Rodoviárias, rela(cid:57)va às diretrizes gerais aplicáveis aos contratos de
+concessão de infraestrutura rodoviária, sob competência da Agência Nacional de
+Transportes Terrestres;
+Resolução ANTT nº 6.000/2022: Aprova a segunda norma do Regulamento das
+Nota Técnica - ANTT 8115 (34503555) SEI 50500.026576/2025-09 / pg. 3
+
+---
+
+Concessões Rodoviárias, relativa a bens, obras e serviços, aplicável aos contratos de
+concessão de exploração de infraestrutura rodoviária sob competência da ANTT;
+Resolução ANTT nº 6.032/2023: Aprova a terceira norma do Regulamento das
+Concessões Rodoviárias, rela(cid:57)va à gestão econômico-financeira dos contratos de
+concessão de exploração de infraestrutura rodoviária sob competência da Agência
+Nacional de Transportes Terrestres;
+Instrução Norma(cid:57)va ANTT nº 18/2023: Disciplina o procedimento do reajuste e das
+revisões ordinárias e extraordinárias, no âmbito dos contratos de concessão de
+exploração de infraestrutura rodoviária sob gestão da ANTT.
+V. CONSIDERAÇÕES INICIAIS
+8. A Nota Técnica SEI nº 10766/2024/COGIN/GEGIR/SUROD/DIR/ANTT (SEI nº 27195845)
+analisou a inclusão de redutores de velocidade (radares) em praças de pedágio nos contratos de
+concessão de rodovias federais. A Agência Nacional de Transportes Terrestres (ANTT) considera a
+segurança viária uma prioridade estratégica, em consonância com a Polí(cid:57)ca Nacional de Transportes do
+Governo Federal, a qual ins(cid:57)tuiu o programa inov@BR, voltado à modernização das rodovias com foco
+em segurança, fluidez e tecnologias avançadas.
+9. A decisão de incluir radares nas praças de pedágio foi fundamentada em estudos técnicos
+apresentados por concessionárias, como a Autopista Litoral Sul. No projeto-piloto implantado na praça
+de pedágio P-02, em Garuva/SC, observou-se uma redução de 42,8% no número de acidentes após a
+instalação dos equipamentos. Outro exemplo, da Concessionária Via Paulista, indicou redução de 64,3%
+na Unidade Padrão de Severidade (UPS) no ano de implantação dos radares. Esses resultados sugerem
+uma relação causal entre o monitoramento eletrônico de velocidade e o aumento da segurança viária,
+jus(cid:57)ficando a adoção de medidas que influenciem posi(cid:57)vamente o comportamento dos condutores, com
+vistas à redução de acidentes e à proteção de usuários e colaboradores das concessionárias.
+10. Para a implementação desses equipamentos, a Nota Técnica indicou que a inclusão da
+intervenção contratual deve observar o rito previsto na regulação vigente. A Resolução CONTRAN nº
+798/2020 exige a realização de Levantamentos Técnicos bienais para redutores de velocidade ou Estudos
+Técnicos anuais para redutores, nos trechos classificados como crí(cid:57)cos, com altos índices de
+acidentalidade ou elevada vulnerabilidade dos usuários.
+11. Adicionalmente, a inclusão de novos inves(cid:57)mentos nos contratos de concessão deve ser
+formalizada por meio de termo adi(cid:57)vo, sendo os efeitos financeiros decorrentes tratados por meio de
+revisão extraordinária da tarifa de pedágio, conforme disciplinado pelo regulamento da ANTT.
+12. A Nota concluiu pela viabilidade da inclusão de radares nas praças de pedágio, desde que
+as concessionárias apresentem os respec(cid:57)vos levantamentos técnicos devidamente validados pela
+Polícia Rodoviária Federal (PRF), acompanhados das es(cid:57)ma(cid:57)vas orçamentárias correspondentes. A
+formalização contratual ocorrerá por termo adi(cid:57)vo, com a recomposição do equilíbrio econômico-
+financeiro realizada por meio de revisão extraordinária. A GEGIR entendeu que esse trâmite é o mais
+adequado diante da urgência e da relevância do tema, dada a sua estreita vinculação com a promoção da
+segurança viária.
+VI. ANÁLISE TÉCNICA
+VI.A. PROPOSTA
+13. A Concessionária EPR Via Mineira S.A., por meio da Carta EVM-REG-250512-0001 (SEI nº
+Nota Técnica - ANTT 8115 (34503555) SEI 50500.026576/2025-09 / pg. 4
+
+---
+
+32089025), de 12/05/2024, solicitou a inclusão de investimentos não previstos no Contrato de Concessão
+nº 04/2023, visando e a alteração de 12 (doze) radares educa(cid:57)vos das Praças de Pedágio para modelos
+operacionais. A solicitação foi mo(cid:57)vada por o(cid:91)cio da Polícia Rodoviária Federal (PRF), o qual indica que a
+BR-040 apresenta um dos maiores índices de acidentalidade do estado de Minas Gerais, sendo o excesso
+de velocidade apontado como uma das principais causas.
+Quadro 3 - Proposta de Radares apresentada pela Concessionária
+km Velocidade Coordenadas (Graus)
+Radar Estudo km Pista Trecho Sentido Tipo Regulamentada
+Latitude Longitude
+Técnico (km/h)
+- -
+576+720 577+200 Rural Norte Redutor 40
+20.272786° 43.950754°
+- -
+576+720 577+200 Rural Norte Redutor 40
+20.272820° 43.950787°
+- -
+576+680 577+200 Rural Sul Redutor 40
+20.273017° 43.951521°
+- -
+576+680 577+200 Rural Sul Redutor 40
+20.272995° 43.951480°
+- -
+642+690 642+850 Rural Norte Redutor 40
+20.767185° 43.806468°
+- -
+Praça 642+690 642+850 Rural Norte Redutor 40
+20.767185° 43.806518°
+de
+- -
+Pedágio 642+655 642+850 Rural Sul Redutor 40
+20.766858° 43.806861°
+- -
+642+655 642+850 Rural Sul Redutor 40
+20.766865° 43.806816°
+- -
+714+260 714+100 Rural Norte Redutor 40
+21.262704° 43.661882°
+- -
+714+260 714+100 Rural Norte Redutor 40
+21.262719° 43.661941°
+- -
+714+230 714+100 Rural Sul Redutor 40
+21.262605° 43.662508°
+- -
+714+230 714+100 Rural Sul Redutor 40
+21.262604° 43.662459°
+Fonte: Volume 1 - EVM-040MG-544-776-SIN-EXO-MD- (SEI nº 32089076)
+14. Posteriormente, por meio da Carta EVM-REG-250723-0003 (SEI nº 34102936), de
+23/07/2025, a Concessionária solicita que, diante da urgência e da necessidade de implantação dos
+disposi(cid:57)vos para assegurar a segurança viária do trecho concedido, seja autorizada, a u(cid:57)lização de
+valores provisórios até a finalização da análise orçamentária definitiva.
+15. Por fim, mediante a Carta EVM-PRJ-251107-0001 (SEI nº 37164557), de 07/11/2025, a
+Concessionária informa o reenvio do orçamento para análise, foram encaminhadas versões com e sem
+desoneração dos orçamentos de implantação e conservação.
+Quadro 4: Indicação dos valores protocolados pela Concessionária (Implantação + 5 anos de conservação e
+manutenção).
+SEM COM
+ANÁLISE DATA BASE DOCUMENTOS SEI
+DESONERAÇÃO DESONERAÇÃO
+Nota Técnica - ANTT 8115 (34503555) SEI 50500.026576/2025-09 / pg. 5
+
+
+| Radar | km
+Estudo
+Técnico | km Pista | Trecho | Sentido | Tipo | Velocidade
+Regulamentada
+(km/h) | Coordenadas (Graus) |   |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+|  |  |  |  |  |  |  | Latitude | Longitude |
+| Praça
+de
+Pedágio | 576+720 | 577+200 | Rural | Norte | Redutor | 40 | -
+20.272786° | -
+43.950754° |
+|  | 576+720 | 577+200 | Rural | Norte | Redutor | 40 | -
+20.272820° | -
+43.950787° |
+|  | 576+680 | 577+200 | Rural | Sul | Redutor | 40 | -
+20.273017° | -
+43.951521° |
+|  | 576+680 | 577+200 | Rural | Sul | Redutor | 40 | -
+20.272995° | -
+43.951480° |
+|  | 642+690 | 642+850 | Rural | Norte | Redutor | 40 | -
+20.767185° | -
+43.806468° |
+|  | 642+690 | 642+850 | Rural | Norte | Redutor | 40 | -
+20.767185° | -
+43.806518° |
+|  | 642+655 | 642+850 | Rural | Sul | Redutor | 40 | -
+20.766858° | -
+43.806861° |
+|  | 642+655 | 642+850 | Rural | Sul | Redutor | 40 | -
+20.766865° | -
+43.806816° |
+|  | 714+260 | 714+100 | Rural | Norte | Redutor | 40 | -
+21.262704° | -
+43.661882° |
+|  | 714+260 | 714+100 | Rural | Norte | Redutor | 40 | -
+21.262719° | -
+43.661941° |
+|  | 714+230 | 714+100 | Rural | Sul | Redutor | 40 | -
+21.262605° | -
+43.662508° |
+|  | 714+230 | 714+100 | Rural | Sul | Redutor | 40 | -
+21.262604° | -
+43.662459° |
+
+
+
+| ANÁLISE | SEM
+DESONERAÇÃO | COM
+DESONERAÇÃO | DATA BASE | DOCUMENTOS SEI |
+| --- | --- | --- | --- | --- |
+| Nota Técnica - ANTT 8115 (34503555) SEI 50500.026576/2025-09 / pg. 5 |  |  |  |  |
+
+
+---
+
+Carta EVM-REG-250512-0001 (SEI nº
+R$ 3.272.441,94 R$ 3.442.954,12
+1ª outubro/2024
+32089025)
+Carta EVM-REG-250811-0002 (SEI nº
+2ª R$ 3.004.720,21 R$ 3.001.441,98 janeiro/2025
+34623696)
+Carta EVM-PRJ-251107-0001 (SEI nº
+3ª R$ 3.029.706,37 R$ 3.033.314,67 julho/2025
+37164557)
+VI.B. MANIFESTAÇÃO DAS ÁREAS RELACIONADAS
+16. A GEENG, por meio da Nota Técnica nº 5996/2025/COROR/GEENG/SUROD/DIR/ANTT (SEI
+nº 32982540), concluiu pela não aceitação do orçamento apresentado pela Concessionária.
+21. Diante do exposto, conclui-se como "Não Aceito" o Orçamento referente a implantação de
+redutores de velocidade (radar) nas praças de pedágio, localizadas na BR-040/MG, encaminhado
+pela EPRVM, restando pendente o atendimento aos apontamentos apresentados no Quadro 3
+acima, os quais deverão ser devidamente verificados/justificados/atendidos pela Concessionária.
+17. Adicionalmente, por meio da Nota Técnica
+n º 6326/2025/CPROJ/GEENG/SUROD/DIR/ANTT (SEI nº 33243143), acabou por aceitar o projeto
+executivo apresentado.
+21. Diante do exposto, conclui-se como "aceito" ao projeto execu(cid:52)vo (quan(cid:52)dade e pranchas do
+projeto) para a inclusão dos 12 (doze) radares nas praças de pedágio localizados na BR-040/MG.
+22. Por fim, propõe-se o encaminhamento de o(cid:55)cio à Concessionária informando sobre o
+resultado da análise nesta Nota Técnica e solicitando a apresentação do projeto execu(cid:52)vo,
+atendendo às ressalvas e aos prazos estabelecidos na Resolução ANTT nº 6.000/2022.
+18. Ainda, destaca-se que a Concessionária apresentou, no "Anexo C – Fichas de Estudo de
+Radar Assinadas pela Polícia Rodoviária Federal", constante do Volume 1 - EVM-040MG-544-776-SIN-
+EXO-MD- (SEI nº 32089076), documentos considerados imprescindíveis à análise e eventual inclusão de
+novos radares no trecho concedido.
+19. Finalmente, a GEENG procedeu à análise do orçamento apresentado, considerando-o
+“ACEITO” para as obras rela(cid:57)vas ao Projeto Execu(cid:57)vo de Inclusão de Controladores de Velocidade nas
+praças de pedágio da BR-040/MG, vinculadas ao Edital do Contrato de Concessão nº 04/2023, conforme
+deliberado em Ata da Reunião RAC 003/2025/COROR – ANTT (SEI nº 37233980).
+VI - CONCLUSÃO:
+Conclui-se pelo “ACEITO” do pleito apresentado pela Concessionária EPR Via Mineira S.A.,
+referente às obras de inclusão de redutores de velocidade em praças de pedágio na BR-040/MG,
+abrangendo os municípios de Itabirito/MG, Conselheiro Lafaiete/MG, Barbacena/MG,
+classificadas como Extra-PER no âmbito do Contrato de Concessão nº 04/2023.
+A Coordenação de Orçamentos de Rodovias (COROR/GEENG/SUROD), com apoio técnico
+especializado, constatou a adequação das peças orçamentárias e o atendimento integral das
+pendências. O orçamento foi avaliado sob o princípio da vantajosidade à Administração Pública,
+adotando-se a versão sem desoneração fiscal.
+Dessa forma, o valor total para execução das obras de implantação de equipamentos de
+fiscalização eletrônica, sinalização e elementos de proteção e segurança (EPS), incluindo 5 (cinco)
+anos de conservação e manutenção da sinalização, é de R$ 3.029.706,37 (três milhões, vinte e
+Nota Técnica - ANTT 8115 (34503555) SEI 50500.026576/2025-09 / pg. 6
+
+---
+
+nove mil setecentos e seis reais e trinta e sete centavos), com data-base julho/2025.
+Do ponto de vista da engenharia orçamentária, não há óbices técnicos ao prosseguimento do
+pleito, recomendando-se o encaminhamento às áreas competentes para as análises econômico-
+financeiras e contratuais subsequentes.
+20. Do exposto, verifica-se que o valor total para execução das obras de implantação de
+equipamentos de fiscalização eletrônica, sinalização e elementos de proteção e segurança (EPS),
+incluindo 5 (cinco) anos de conservação e manutenção da sinalização, é de R$ 3.029.706,37 (três
+milhões, vinte e nove mil setecentos e seis reais e trinta e sete centavos), com data-base julho/2025.
+VI.C. CONTRATO DE CONCESSÃO E ANEXOS
+21. O Contrato do Edital de Concessão nº 04/2023 discorre o seguinte acerca da recomposição
+do equilíbrio econômico-financeiro, para alterações por inicia(cid:57)va do poder concedente, da seguinte
+forma:
+8. Obras e Serviços
+8.1 Diretrizes de Execução das Obras e dos Serviços
+8.1.1 A Concessionária deverá executar as obras e os serviços necessários ao cumprimento do
+objeto do Contrato, atendendo integralmente aos Parâmetros de Desempenho, ao Escopo, aos
+Parâmetros Técnicos e às demais exigências estabelecidas no Contrato e no PER, observando
+também as seguintes obrigações a(cid:52)nentes à Avaliação da Conformidade sobre requisitos
+especificados em Normas Técnicas:
+[...]
+8.1.4 A Concessionária deverá realizar:
+(i) as obrigações de investimento constantes do PER, nos prazos indicados; e
+(ii) todas as demais obras e intervenções necessárias ao cumprimento dos Parâmetros de
+Desempenho e demais Parâmetros Técnicos e Escopo estabelecidos no Contrato e no PER, nos
+prazos indicados.
+8.1.5 A Concessionária declara e garante ao Poder Concedente que a qualidade dos projetos, da
+execução e da manutenção das obras e dos serviços objeto da Concessão é, e será, durante a
+vigência da Concessão, suficiente e adequada ao cumprimento do Contrato e do PER,
+responsabilizando-se integralmente por qualquer desconformidade com os Parâmetros de
+Desempenho, com os Parâmetros Técnicos, com o Escopo e especificações técnicas mínimas
+estabelecidas.
+[...]
+8.1.10 Inclusões, exclusões ou alterações de obras e serviços, com exceção das hipóteses do
+Estoque de Melhorias, das Obras de Manutenção de Nível de Serviço e de adequação ou
+complementação de Obras Supervenientes, serão realizadas exclusivamente por meio de
+Revisão Quinquenal.
+(i) Inclusões ou alterações de obras e serviços que tenham comprovada repercussão sobre os
+inves(cid:52)mentos e custos de responsabilidade da Concessionária implicarão a correspondente
+recomposição do equilíbrio econômico-financeiro do Contrato por meio da u(cid:52)lização do Fluxo de
+Caixa Marginal.
+(ii) A exclusão de obras e serviços ensejará a correspondente recomposição do equilíbrio
+econômico-financeiro do Contrato por meio da utilização do Desconto de Reequilíbrio.
+(iii) Para a aplicação de Desconto de Reequilíbrio ou Acréscimo de Reequilíbrio referente a obras e
+serviços que não tenham percentuais previstos no Anexo 5, a ANTT poderá definir novos
+percentuais com base em regulamentação específica.
+8.1.11 Eventuais inclusões, exclusões e alterações de obras ou serviços que ensejem a
+recomposição do equilíbrio econômico-financeiro do Contrato por meio da aplicação do Fluxo de
+Caixa Marginal devem ser objeto de ajustes específicos a serem formalizados mediante termo
+aditivo.
+Nota Técnica - ANTT 8115 (34503555) SEI 50500.026576/2025-09 / pg. 7
+
+---
+
+(i) Além das previsões deste Contrato, eventuais inclusões, exclusões e alterações de obras e
+serviços deverão observar condições e critérios estabelecidos em regulamentação da ANTT.
+[...]
+8.3 Obras de Ampliação de Capacidade e Melhorias e da Frente de Serviços Operacionais
+8.3.1 As Obras de Ampliação de Capacidade e Melhorias e da Frente de Serviços Operacionais de
+cada um dos segmentos do Sistema Rodoviário descritos no PER deverão estar concluídas e em
+operação no prazo e nas condições estabelecidas no PER, observados o Escopo, os Parâmetros
+Técnicos e os Parâmetros de Desempenho previstos.
+[...]
+8.3.3 A ANTT poderá aprovar, caso a caso, a alteração do (cid:52)po de obra de melhoria prevista no
+PER e/ou seu deslocamento, desde que seja man(cid:52)da a sua funcionalidade, que não seja aplicada
+uma solução inferior, e que a nova solução e localização não apresentem maior impacto
+socioambiental.
+(i) Caso a alteração prevista resulte em atraso no prazo de apresentação ou em reapresentação
+do anteprojeto, ou reflita de qualquer forma na obtenção e encargos das licenças ou
+autorizações ambientais necessárias, a Concessionária não fará jus a qualquer prazo adicional
+para entrega das obras, tampouco à recomposição do equilíbrio econômico-financeiro do
+Contrato.
+22 Alocação de Riscos
+22.1 Com exceção dos riscos expressamente alocados ao Poder Concedente nos termos da
+subcláusula 21.2 e em outras disposições contratuais, a Concessionária é integral e
+exclusivamente responsável por todos os riscos relacionados à Concessão, inclusive, mas sem
+limitação, pelos seguintes riscos:
+[...]
+22.1.9 inves(cid:71)mentos e custos excedentes relacionados às obras e aos serviços objeto da
+Concessão, exceto nos casos previstos na subcláusula 22.2;
+[...]
+22.2 O Poder Concedente é responsável pelos seguintes riscos relacionados à Concessão:
+[...]
+22.2.13 alteração unilateral no PER e no Contrato, por inicia(cid:71)va do Poder Concedente, por
+inclusão e modificação de obras e serviços que afetem o equilíbrio econômico-financeiro;
+[...]
+22.2.15 fato do príncipe ou fato da administração que provoque impacto econômicofinanceiro no
+Contrato; (Grifo nosso)
+22. Do exposto, observa-se que o Contrato de Concessão estabelece, de forma clara, os
+mecanismos e instrumentos aplicáveis à inclusão, exclusão ou alteração de obras e serviços previstos no
+Plano de Exploração da Rodovia – PER. A Cláusula 8.1.10 define, como regra geral, que tais modificações
+devem ser promovidas exclusivamente no âmbito das Revisões Quinquenais, excetuadas três hipóteses
+específicas: Estoque de Melhorias, Obras de Manutenção de Nível de Serviço e adequações ou
+complementações decorrentes de Obras Supervenientes.
+23. Adicionalmente, o Contrato prevê que, além das disposições contratuais, quaisquer
+alterações no escopo de obras e serviços deverão observar as condições e os critérios estabelecidos na
+regulamentação vigente da ANTT.
+VI.D. ARCABOUÇO REGULATÓRIO
+24. Atualmente, temos a Resolução ANTT nº 5.950/2021 (RCR 1), que trata de alterações
+contratuais, bem como da possibilidade de realização de termo adi(cid:57)vo para a inclusão de valores de
+reequilíbrio, a saber:
+Nota Técnica - ANTT 8115 (34503555) SEI 50500.026576/2025-09 / pg. 8
+
+---
+
+Art. 27-D. Toda alteração do contrato de concessão, do Programa de Exploração da Rodovia
+(PER) ou de quaisquer outros anexos ao contrato deverá ser formalizada mediante termo
+aditivo.
+§ 1º A proposta de termo adi(cid:71)vo deverá tramitar em processo próprio devidamente mo(cid:71)vado
+pelas razões que ensejaram a sua propositura.
+§ 2º O termo adi(cid:71)vo será celebrado com base em valores defini(cid:71)vos, admi(cid:71)da a u(cid:71)lização de
+valores provisórios nas seguintes hipóteses:
+I - reequilíbrio parcial de natureza cautelar ou baseado em evidência;
+II - inclusão de obrigações de caráter con(cid:52)nuado cujos valores dependam de fatores variáveis não
+controlados pela concessionária, nos termos da segunda norma do Regulamento das Concessões
+Rodoviárias;
+III - situações emergenciais que demandem intervenção imediata para preservação da
+segurança viária ou continuidade do serviço, desde que tecnicamente demonstrada a urgência;
+IV - quando, tendo sido aceito, com ou sem ressalvas, o projeto execu(cid:52)vo, a definição final do
+orçamento envolver elementos de maior complexidade que não prejudiquem o início da execução,
+desde que seja possível estabelecer estimativa com razoável grau de segurança.
+§ 3º O termo aditivo com valores provisórios deverá dispor, expressamente, sobre:
+I - a metodologia u(cid:52)lizada para es(cid:52)ma(cid:52)va, que poderá se basear em análise simplificada,
+paramétrica, comparativa ou de sensibilidade, validada pela Superintendência competente;
+II - os parâmetros de referência adotados;
+III - o prazo e forma de apresentação dos valores definitivos;
+IV - a forma de reequilíbrio econômico-financeiro, que deverá ser parcial, sendo ajustado quando
+da aprovação dos valores definitivos;
+V - as consequências do descumprimento dos prazos estabelecidos; e
+VI - a forma de compensação de eventuais diferenças.
+§ 4º A u(cid:52)lização de valores não dispensa a posterior aprovação dos valores defini(cid:52)vos, com a
+celebração de termo aditivo retificador.
+§ 5º A área técnica manterá registro específico dos termos adi(cid:52)vos celebrados com valores
+es(cid:52)mados, incluindo análise compara(cid:52)va entre as es(cid:52)ma(cid:52)vas e os valores defini(cid:52)vos, para
+aprimoramento contínuo da metodologia.
+§ 6º A Procuradoria Federal junto à ANTT estabelecerá modelos padronizados de minutas de
+termos aditivos.
+Art. 27-E. O contrato de concessão poderá ser adi(cid:71)vado a qualquer momento, quando se
+identificar alguma das seguintes hipóteses:
+I - necessidade de intervenção para ampliação, preservação ou restabelecimento da segurança
+viária;
+II - obra ou serviço emergencial para mi(cid:52)gação de risco iminente ou remediação de dano ao
+sistema rodoviário;
+III - adequação do sistema rodoviário decorrente de obras supervenientes do Poder Concedente;
+IV - implantação de sistemas ou tecnologias essenciais à supervisão, gestão ou fiscalização do
+contrato;
+V - alterações contratuais sem impacto no equilíbrio econômico-financeiro do contrato;
+VI - reprogramação de obrigações contratuais vencidas ou vincendas cuja execução no prazo
+originalmente previsto tenha sido impossibilitada ou significativamente prejudicada por:
+a) fatos não imputáveis à concessionária;
+b) materialização de riscos não assumidos pela concessionária no contrato de concessão; ou
+c) interferências de terceiros que impactem o cronograma de execução.
+VII - outras situações excepcionais, devidamente fundamentadas, em que a postergação da
+alteração contratual para o momento da revisão quinquenal possa causar prejuízo ao interesse
+público.
+§ 1º A urgência deverá ser tecnicamente demonstrada, com indicação objetiva dos riscos ou danos
+que se pretende evitar ou remediar.
+§ 2º As alterações que não se enquadrem nas hipóteses do caput serão processadas por ocasião
+da revisão quinquenal do contrato. (grifo nosso)
+Nota Técnica - ANTT 8115 (34503555) SEI 50500.026576/2025-09 / pg. 9
+
+---
+
+25. Ainda, a Resolução ANTT nº 6.000/2022 (RCR 2), que dispõe sobre a REEF da TP para
+execução de obras e serviços não previstos inicialmente no Contrato de Concessão, conforme transcrito a
+seguir:
+Art. 40. Para inclusão ou alteração das obras e serviços não previstos inicialmente no contrato
+de concessão, a concessionária deverá apresentar à Superintendência competente, conforme o
+caso, estudo de viabilidade técnica, econômica e ambiental, projeto funcional ou projeto
+executivo acompanhado de orçamento.
+§ 1º Os custos relacionados à contratação de estudos, projetos execu(cid:52)vos e orçamentos rela(cid:52)vos
+a obras e serviços não previstos inicialmente no contrato de concessão, desde que aceitos pela
+Superintendência competente, serão objeto de recomposição do equilíbrio por meio de revisão
+extraordinária:
+I - quando solicitada pela ANTT sua apresentação, independentemente da formalização de
+inclusão da obra ou serviço no contrato de concessão;
+II - quando apresentados espontaneamente pela concessionária, apenas se formalizada a inclusão
+da obra ou serviço no contrato de concessão por meio de termo aditivo.
+§ 2º Os custos relacionados à contratação de projetos funcionais ou anteprojetos serão
+exclusivamente atribuídos à concessionária.
+§ 3º Os estudos, projetos execu(cid:52)vos e orçamentos serão remunerados por percentual sobre o
+valor da obra ou serviço ou, caso não executado, mediante prestação de contas pela
+Superintendência competente
+Art. 41. Nas propostas de inclusão ou alteração de obras e serviços não previstos inicialmente
+no contrato de concessão, deverão ser considerados os respec(cid:71)vos custos de manutenção,
+conservação, operação, monitoração, remoção de interferências, desapropriação,
+licenciamento, compensações ambientais e seguro de obra, entre outras obrigações indiretas.
+[...]
+Art. 44. Para inclusão ou alteração de obras e serviços no contrato de concessão, a concessionária
+deverá apresentar inicialmente projeto funcional, mediante solicitação da Superintendência
+competente ou por sua própria iniciativa.
+§ 1º A Superintendência competente analisará o projeto funcional, podendo:
+I - determinar a realização de ajustes e correções, em caso de incompletude ou desconformidade
+com o contrato de concessão ou normativos vigentes;
+II - Consultar a Comissão Tripar(cid:52)te da rodovia, de forma não vinculante, sobre a adequação do
+projeto funcional em função de possíveis reflexos decorrentes de execução ou de sua
+implementação, sob a ótica dos lindeiros do interesse geral.
+III - informar a ausência de interesse na inclusão ou alteração;
+IV - autorizar a elaboração de projeto execu(cid:52)vo para obra ou serviço com preço de venda de até
+R$ 20.000.000,00 (vinte milhões de reais), a preços correntes; e
+V - submeter para Diretoria proposta de autorização de realização do projeto execu(cid:52)vo ou estudo
+de viabilidade, cujo preço de venda supere o valor previsto no inciso III.
+§ 2º A concessionária disporá do prazo de 60 (sessenta) dias para reapresentar o projeto
+funcional corrigido, em caso de determinação de diligência, contado do recebimento da
+notificação da ANTT, ou outro prazo indicado pela Superintendência competente.
+§ 3º A concessionária disporá do prazo de 180 (cento e oitenta) dias para apresentar o projeto
+execu(cid:52)vo acompanhado do cer(cid:52)ficado de inspeção acreditada, ou, se for o caso, estudo de
+viabilidade, em caso de aceitação ou aceitação com ressalvas do projeto funcional, contado do
+recebimento da autorização.
+Art. 45. A Superintendência competente analisará o projeto execu(cid:52)vo acompanhado de
+orçamento e informará sua aceitação ou determinará, fundamentadamente, a realização de
+ajustes e correções, em caso de incompletude ou desconformidade com o contrato de concessão
+ou normativos vigentes.
+Parágrafo único. A concessionária disporá do prazo de 30 (trinta) dias para reapresentar o projeto
+execu(cid:52)vo corrigido, em caso de determinação de diligência, contado do recebimento da
+notificação da Superintendência competente, ou outro prazo indicado por esta.
+Nota Técnica - ANTT 8115 (34503555) SEI 50500.026576/2025-09 / pg. 10
+
+---
+
+Art. 46. A inclusão ou alteração de obra ou serviço no contrato de concessão poderá ser
+promovida mediante deliberação da Diretoria em termo adi(cid:71)vo contratual, cujos efeitos
+tarifários serão incorporados por meio da revisão extraordinária ou quinquenal, nos termos da
+terceira norma do Regulamento das Concessões Rodoviárias, com base em projeto execu(cid:71)vo
+aceito.
+Parágrafo único. Inves(cid:71)mentos em consonância com os programas governamentais
+estabelecidos, principalmente voltados à segurança viária, inclusive os associados à tecnologia,
+conforme definições da área competente, poderão ser celebrados por meio de termo adi(cid:71)vo,
+cujos efeitos tarifários serão incorporados no âmbito das revisões extraordinárias. (Grifo nosso)
+26. Ainda, a Resolução ANTT nº 6.032/2023 (RCR 3) rela(cid:57)va à gestão econômico-financeira
+dos contratos de concessão de exploração de infraestrutura rodoviária, temos que a revisão
+extraordinária é a via adequada para inclusão de impactos financeiros relacionados à segurança viária
+aos contratos de concessão, conforme excertos transcritos a seguir:
+Art. 81. A recomposição do equilíbrio econômico-financeiro do contrato de concessão será
+realizada mediante utilização dos seguintes mecanismos, a critério da ANTT:
+I - alteração do valor da tarifa de pedágio;
+II - alteração do prazo da concessão;
+III - aporte público;
+V - modificação de obrigações contratuais;
+V - alteração da localização ou inclusão de praças de pedágio ou pórticos de fluxo livre;
+VI - estabelecimento ou remoção de cabines de bloqueio; e
+VII - transferência ou retenção de valores utilizando o mecanismo de contas da concessão.
+[...]
+Art. 136. O contrato de concessão e a tarifa de pedágio serão subme(cid:52)dos às revisões ordinária,
+extraordinária e quinquenal de acordo com o procedimento e as hipóteses de cabimento previstas
+neste Capítulo.
+Parágrafo único. As revisões serão processadas de o(cid:55)cio por inicia(cid:52)va da Superintendência
+competente, exceto as extraordinárias que poderão ser mediante apresentação de pleito da
+concessionária.
+Art. 137. A Superintendência competente poderá, jus(cid:52)ficadamente, reputar prejudicado pedido
+que não se enquadre nas hipóteses de cabimento de cada modalidade de revisão, sem prejuízo de
+sua reanálise no âmbito da modalidade adequada e em momento oportuno.
+Parágrafo único. A Superintendência competente poderá estabelecer formulário padrão para
+apresentação de requerimentos ou estabelecer outras formas de padronização de processamento.
+Art. 138. Se a revisão for motivada por necessidade de alteração do contrato de concessão ou dela
+resultar esta necessidade, a celebração de termo adi(cid:52)vo será realizada na forma da primeira
+norma do Regulamento das Concessões Rodoviárias.
+[...]
+Art. 150. A revisão extraordinária tem por finalidade a recomposição do equilíbrio econômico do
+contrato de concessão em razão da ocorrência de eventos de risco ou de alterações promovidas
+no contrato de concessão e será processada de ofício, pela Superintendência competente.
+§ 1º A revisão extraordinária será processada a qualquer tempo quando, alterna(cid:57)vamente, forem
+atendidos os seguintes requisitos:
+I - em razão de evento decorrente de caso fortuito, força maior, fato do príncipe ou fato da
+administração; e
+II - o impacto econômico-financeiro do evento ou do conjunto de eventos de desequilíbrio
+extraordinários ocorridos dentro de período de 12 (doze) meses ultrapassar os seguintes valores,
+em relação à receita bruta anual do exercício financeiro anterior ao requerimento:
+a) 7% (sete por cento), caso a receita bruta anual do exercício financeiro anterior seja até R$
+300.000.000,00 (trezentos milhões de reais);
+b) 5% (cinco por cento) ou R$ 21.000.000,00 (vinte e um milhões de reais), o que for maior, caso a
+receita bruta anual do exercício financeiro anterior seja entre R$ 300.000.000,01 (trezentos
+Nota Técnica - ANTT 8115 (34503555) SEI 50500.026576/2025-09 / pg. 11
+
+---
+
+milhões de reais e um centavo) e R$ 600.000.000,00 (seiscentos milhões de reais);
+c) 3% (três por cento) ou R$ 30.000.000,00 (trinta milhões de reais), o que for maior, caso a
+receita bruta anual do exercício financeiro anterior seja acima de R$ 600.000.000,00 (seiscentos
+milhões de reais);
+§ 2º O requisito previsto no inciso II do § 1º não se aplica para inclusão ou alteração de obras e
+serviços no contrato de concessão. (Grifo nosso)
+27. Ainda, a Portaria SUROD nº 88, de 16 de Julho de 2025 que estabelece o Procedimento
+Operacional Padrão, no âmbito da Superintendência de Infraestrutura Rodoviária, para instauração,
+análise e processamento das revisões extraordinárias das tarifas de pedágio dos contratos de concessão
+de rodovias federais, esclarece sobre a necessidade de Termo Adi(cid:57)vo também para questões de
+alteração contratual que ensejam Reequilíbrio Econômico-Financeiro e Revisão Extraordinária da TP, a
+saber:
+Art. 18. Nos termos da Resolução ANTT nº 5.950, de 20 de julho de 2021 e da Instrução Normativa
+ANTT nº 18/2023 os seguintes inves(cid:52)mentos, objeto de Termos Adi(cid:52)vos - TAS prévios, poderão ser
+processados pela GEGIR por meio de revisão extraordinária tarifária:
+I - obra ou serviço emergencial;
+II - obra de segurança viária;
+III - obra de manutenção do nível de serviço (gatilho de tráfego);
+IV - obra de resiliência climática;
+V - obra de atendimento a política pública;
+VI - equipamento, sistema ou tecnologia operacional;
+VII - reprogramações de obra;
+VIII - outras obras elencadas nos normativos da ANTT.
+§ 1º Poderão ser, por meio de revisão extraordinária tarifária, a inclusão de nova obrigação
+contratual excepcional, por termo adi(cid:52)vo, e a recomposição de acréscimo de custo, a critério da
+SUROD.
+§ 2º Conforme o caso, obras emergenciais poderão ser por meio de revisão extraordinária
+tarifária, mesmo sem a celebração de termo adi(cid:52)vo contratual, para fins de recomposição do
+equilíbrio econômico-financeiro.
+§ 3º Os efeitos financeiros da revisão extraordinária aprovada pela DICOL deverão ser
+processados pela SUROD na revisão ordinária tarifária subsequente.
+28. Diante do exposto, é possível verificar que a legislação aplicável prevê a possibilidade de
+ajustes contratuais rela(cid:57)vos a obras e serviços nas concessões rodoviárias, inclusive fora das Revisões
+Quinquenais, desde que observados os requisitos e procedimentos estabelecidos pelas normas da ANTT.
+29. A Resolução ANTT nº 5.950/2021, que ins(cid:57)tui o Regulamento das Concessões Rodoviárias
+(RCR), estabelece, em seu art. 27, que o contrato de concessão pode ser alterado unilateralmente pela
+ANTT ou mediante acordo entre as partes. O art. 27-E, elenca hipóteses específicas que autorizam a
+celebração de termos adi(cid:57)vos a qualquer tempo, incluindo intervenções voltadas à segurança viária,
+reprogramações mo(cid:57)vadas por fatores externos à concessionária, obras supervenientes, entre outras
+situações devidamente justificadas.
+30. Complementarmente, a Resolução ANTT nº 6.000/2022 (RCR2) disciplina o procedimento
+técnico aplicável à inclusão ou modificação de obras nos contratos, a par(cid:57)r da apresentação de projeto
+funcional e, em seguida, do projeto execu(cid:57)vo. Essa norma define prazos, etapas de análise, possibilidade
+de ajustes e reapresentações, culminando, quando cabível, na formalização das alterações mediante
+termo aditivo.
+VI.E. MÉRITO
+Nota Técnica - ANTT 8115 (34503555) SEI 50500.026576/2025-09 / pg. 12
+
+---
+
+31. A instalação de novos redutores de velocidade em trechos crí(cid:57)cos do sistema rodoviário
+configura medida estratégica voltada à redução de acidentes, à proteção da vida e à promoção de uma
+mobilidade mais segura e eficiente para os usuários.
+32. Com esse obje(cid:57)vo, a Superintendência de Infraestrutura Rodoviária (SUROD), por meio do
+O(cid:91)cio Circular nº 4911/2024/COGIN/GEGIR/SUROD/DIR-ANTT (SEI nº 27258288), de 09/12/2024,
+recomendou às Concessionárias a inclusão de redutores de velocidade nas praças de pedágio.
+33. Adicionalmente, a Instrução Norma(cid:57)va ANTT nº 18/2023, que regulamenta os
+procedimentos de reajuste e de revisões ordinárias e extraordinárias dos contratos de concessão de
+infraestrutura rodoviária, estabelece prioridade para os inves(cid:57)mentos em segurança viária. A norma
+prevê a revisão extraordinária como o instrumento adequado para contemplar os efeitos financeiros de
+medidas emergenciais e estruturantes.
+34. Quanto à definição dos locais de instalação, a competência é atribuída ao órgão com
+circunscrição sobre a via, nos termos do art. 5º da Resolução CONTRAN nº 798/2020, que dispõe:
+Art. 5º Cabe ao órgão ou en(cid:52)dade com circunscrição sobre a via determinar a localização, a
+sinalização, a instalação e a operação dos medidores de velocidade.
+35. Nesse contexto, a Concessionária apresentou, no "Anexo C – Fichas de Estudo de Radar
+Assinadas pela Polícia Rodoviária Federal", constante do Volume 1 - EVM-040MG-544-776-SIN-EXO-MD-
+(SEI nº 32089076), a documentação da Polícia Rodoviária Federal, que manifestou ciência e concordância
+com a proposta de instalação de 12 (doze) radares nas praças de pedágio.
+36. Sob a ó(cid:57)ca contratual e regulatória, a Resolução ANTT nº 5.950/2021, com as alterações
+promovidas pela Resolução nº 6.063/2025, admite a celebração de termos adi(cid:57)vos a qualquer tempo,
+desde que devidamente fundamentados. O art. 27-E da norma contempla expressamente, entre as
+hipóteses permi(cid:57)das, a execução de intervenções voltadas à segurança viária, bem como outras
+situações excepcionais de interesse público.
+37. Diante do exposto, conclui-se que a inclusão dos controladores de velocidade no escopo
+contratual, mediante termo adi(cid:57)vo e com previsão de recomposição do equilíbrio econômico-financeiro,
+está em conformidade com o arcabouço contratual e regulatório aplicável. Trata-se de inicia(cid:57)va voltada
+ao aumento dos níveis de segurança na rodovia, à mi(cid:57)gação de acidentes e à preservação de vidas, o que
+justifica sua admissibilidade no âmbito da revisão extraordinária da tarifa.
+38. Assim, esta área técnica manifesta-se, do ponto de vista contratual e regulamentar, pela
+não objeção à proposta apresentada pela Concessionária, reconhecendo sua viabilidade técnica,
+contratual e regulatória, bem como sua compatibilidade com o interesse público.
+VI.F. TERMO ADITIVO
+39. Sobre o assunto, a Resolução ANTT nº 5.950/2021 trata de alteração contratual via Termo
+Aditivo, da seguinte forma:
+Alteração Contratual
+DO TERMO ADITIVO
+Art. 27-D. Toda alteração do contrato de concessão, do Programa de Exploração da Rodovia (PER)
+ou de quaisquer outros anexos ao contrato deverá ser formalizada mediante termo aditivo.
+[...]
+Art. 27-E. O contrato de concessão poderá ser adi(cid:52)vado a qualquer momento, quando se
+identificar alguma das seguintes hipóteses:
+Nota Técnica - ANTT 8115 (34503555) SEI 50500.026576/2025-09 / pg. 13
+
+---
+
+I - necessidade de intervenção para ampliação, preservação ou restabelecimento da segurança
+viária;
+[...]
+VII - outras situações excepcionais, devidamente fundamentadas, em que a postergação da
+alteração contratual para o momento da revisão quinquenal possa causar prejuízo ao interesse
+público.
+§ 1º A urgência deverá ser tecnicamente demonstrada, com indicação objetiva dos riscos ou danos
+que se pretende evitar ou remediar.
+§ 2º As alterações que não se enquadrem nas hipóteses do caput serão processadas por ocasião
+da revisão quinquenal do contrato. (Grifo nosso)
+40. Já a Resolução ANTT nº 6.000/2022, dispõe que a inclusão de serviço no Contrato de
+Concessão deve ser realizada via Termo Aditivo, conforme excerto a seguir:
+Art. 40. Para inclusão ou alteração das obras e serviços não previstos inicialmente no contrato
+de concessão, a concessionária deverá apresentar à Superintendência competente, conforme o
+caso, estudo de viabilidade técnica, econômica e ambiental, projeto funcional ou projeto
+executivo acompanhado de orçamento.
+Parágrafo único. Inves(cid:57)mentos em consonância com os programas governamentais
+estabelecidos, principalmente voltados à segurança viária, inclusive os associados à tecnologia,
+conforme definições da área competente, poderão ser celebrados por meio de termo adi(cid:57)vo,
+cujos efeitos tarifários serão incorporados no âmbito das revisões extraordinárias.
+§ 1º Os custos relacionados à contratação de estudos, projetos execu(cid:71)vos e orçamentos
+rela(cid:71)vos a obras e serviços não previstos inicialmente no contrato de concessão, desde que
+aceitos pela Superintendência competente, serão objeto de recomposição do equilíbrio por
+meio de revisão extraordinária:
+I - quando solicitada pela ANTT sua apresentação, independentemente da formalização de
+inclusão da obra ou serviço no contrato de concessão;
+II - quando apresentados espontaneamente pela concessionária, apenas se formalizada a
+inclusão da obra ou serviço no contrato de concessão por meio de termo aditivo.
+§ 2º Os custos relacionados à contratação de projetos funcionais ou anteprojetos serão
+exclusivamente atribuídos à concessionária.
+§ 3º Os estudos, projetos execu(cid:52)vos e orçamentos serão remunerados por percentual sobre o
+valor da obra ou serviço ou, caso não executado, mediante prestação de contas pela
+Superintendência competente.
+[...]
+Art. 44. Para inclusão ou alteração de obras e serviços no contrato de concessão, a
+concessionária deverá apresentar inicialmente projeto funcional, mediante solicitação da
+Superintendência competente ou por sua própria iniciativa.
+§ 1º A Superintendência competente analisará o projeto funcional, podendo:
+I - determinar a realização de ajustes e correções, em caso de incompletude ou desconformidade
+com o contrato de concessão ou normativos vigentes;
+II - Consultar a Comissão Tripar(cid:52)te da rodovia, de forma não vinculante, sobre a adequação do
+projeto funcional em função de possíveis reflexos decorrentes de execução ou de sua
+implementação, sob a ótica dos lindeiros do interesse geral.
+III - informar a ausência de interesse na inclusão ou alteração;
+IV - autorizar a elaboração de projeto execu(cid:52)vo para obra ou serviço com preço de venda de até
+R$ 20.000.000,00 (vinte milhões de reais), a preços correntes; e
+V - submeter para Diretoria proposta de autorização de realização do projeto execu(cid:52)vo ou estudo
+de viabilidade, cujo preço de venda supere o valor previsto no inciso III.
+[...]
+Art. 46. A inclusão ou alteração de obra ou serviço no contrato de concessão poderá ser
+promovida mediante deliberação da Diretoria em termo adi(cid:71)vo contratual, cujos efeitos
+tarifários serão incorporados por meio da revisão extraordinária ou quinquenal, nos termos da
+Nota Técnica - ANTT 8115 (34503555) SEI 50500.026576/2025-09 / pg. 14
+
+---
+
+terceira norma do Regulamento das Concessões Rodoviárias, com base em projeto execu(cid:71)vo
+aceito.
+Parágrafo único. Investimentos em consonância com os programas governamentais estabelecidos,
+principalmente voltados à segurança viária, inclusive os associados à tecnologia, conforme
+definições da área competente, poderão ser celebrados por meio de termo adi(cid:52)vo, cujos efeitos
+tarifários serão incorporados no âmbito das revisões extraordinárias. (Grifo nosso)
+41. Portanto, é necessário celebrar um Termo Adi(cid:57)vo ao contrato para incluir as novas
+obrigações no PER, rela(cid:57)vas à inclusão de Controladores de velocidade no Contrato de Concessão do
+Edital nº 04/2023.
+VI.G. VALOR
+42. A Concessionária apresentou versões com e sem desoneração dos orçamentos de
+implantação e conservação. Por representar condição mais vantajosa à Administração Pública, a
+conferência técnica considerou a versão sem desoneração, conforme demonstrado no quadro abaixo:
+SEM COM
+ANÁLISE DATA BASE DOCUMENTOS SEI
+DESONERAÇÃO DESONERAÇÃO
+Carta EVM-REG-250512-0001 (SEI nº
+1ª R$ 3.272.441,94 R$ 3.442.954,12 outubro/2024
+32089025)
+Carta EVM-REG-250811-0002 (SEI nº
+2ª R$ 3.004.720,21 R$ 3.001.441,98 janeiro/2025
+34623696)
+Carta EVM-PRJ-251107-0001 (SEI nº
+3ª R$ 3.029.706,37 R$ 3.033.314,67 julho/2025
+37164557)
+43. Assim, o valor total para execução das obras de implantação de equipamentos de
+fiscalização eletrônica, sinalização e elementos de proteção e segurança (EPS), incluindo 5 (cinco) anos de
+conservação e manutenção da sinalização, é de R$ 3.029.706,37 (três milhões, vinte e nove mil
+setecentos e seis reais e trinta e sete centavos), com data-base julho/2025.
+44. Entretanto, a Resolução ANTT nº 6.000/2022 indica que os preços globais de obras e
+serviços aceitos pela ANTT deverão ser conver(cid:57)dos a preços iniciais do contrato e distribuídos ao longo
+do prazo de concessão, considerando o cronograma físico-financeiro.
+Art. 59. Os preços globais de obras e serviços aceitos pela ANTT deverão ser conver(cid:52)dos a preços
+iniciais do contrato e distribuídos ao longo do prazo de concessão, considerando o cronograma
+(cid:55)sico-financeiro, caso a recomposição do equilíbrio econômico-financeiro seja cabível e ocorra
+pela modalidade tarifária.
+§ 1º Para conversão do orçamento a preços iniciais, deverá ser considerado no reajuste o Índice
+Nacional de Preços ao Consumidor Amplo (IPCA) do mês anterior a proposta de inclusão do
+inves(cid:52)mento subme(cid:52)da a Diretoria, conforme regra de defasagem prevista em contrato de
+concessão.
+45. Portanto, em consonância às disposições acima transcritas, após os valores terem sido
+auferidos pela área competente desta Agência, foram conver(cid:57)dos a preços iniciais do Contrato de
+Concessão (Julho/2023), para que o impacto tarifário decorrente da recomposição do equilíbrio
+econômico-financeiro do Contrato de Concessão.
+46. Para tanto, calculou-se o valor final a preços iniciais no montante de R$ 2.767.992,66 (dois
+milhões, setecentos e sessenta e sete mil novecentos e noventa e dois reais e sessenta e seis
+Nota Técnica - ANTT 8115 (34503555) SEI 50500.026576/2025-09 / pg. 15
+
+
+| ANÁLISE | SEM
+DESONERAÇÃO | COM
+DESONERAÇÃO | DATA BASE | DOCUMENTOS SEI |
+| --- | --- | --- | --- | --- |
+|  | R$ 3.272.441,94 | R$ 3.442.954,12 | outubro/2024 | Carta EVM-REG-250512-0001 (SEI nº
+32089025) |
+|  | R$ 3.004.720,21 | R$ 3.001.441,98 | janeiro/2025 | Carta EVM-REG-250811-0002 (SEI nº
+34623696) |
+|  | R$ 3.029.706,37 | R$ 3.033.314,67 | julho/2025 | Carta EVM-PRJ-251107-0001 (SEI nº
+37164557) |
+
+
+---
+
+centavos).
+Quadro 4 - Valor final a preços iniciais
+(Data-base do
+Descrição: Implantação e IRT
+contrato) Julho/2023
+conservação de radares Data-base do
+Item (IPCA defasado 2
+(controladores de velocidade) na orçamento: Julho/2025
+meses) - Maio Preço Ajustado
+BR-040/MG
+2025
+1 Investimento R$ 3.029.706,37 1,09455 R$ 2.767.992,66
+VI.H. REEQUILÍBRIO ECONÔMICO E FINANCEIRO
+47. Cumpre destacar que, mediante o O(cid:91)cio Circular SEI nº 2551/2025/SUROD/DIR-ANTT (SEI
+nº 33273285), de 27/10/2023, foram encaminhadas às Concessionárias de Rodovias Federais orientações
+quanto a sistemá(cid:57)ca para inclusão de inves(cid:57)mentos rela(cid:57)vos aos controladores de velocidade nos
+contratos, no que tange ao reequilíbrio, foi exarada a seguinte orientação:
+6. Ademais, considerando que a inclusão desses novos controladores de velocidade no PER
+deverão ser objetos de alteração contratual via Termo Adi(cid:52)vo e reequilíbrio econômico-financeiro
+da tarifa via Revisão Extraordinária, conforme preconiza a Instrução Norma(cid:52)va ANTT nº 18/2023,
+os orçamentos desses equipamentos deverão ser elaborados conforme orientações exaradas nas
+Resoluções ANTT nº 3.651/2011 e nº 6.000/2022.
+48. A Resolução ANTT nº 6.032/2023, que trata da gestão econômico-financeira dos contratos
+de concessão, estabelece a forma adequada de manutenção do equilíbrio econômico-financeiro dos
+mesmos, a saber:
+Art. 84. Eventual desequilíbrio econômico-financeiro decorrente de inclusões de obrigações não
+previstas originalmente nos contratos de concessão será calculado por meio do fluxo de caixa
+marginal.
+Parágrafo único. Cada conjunto de eventos de desequilíbrio ou alterações contratuais
+considerados em revisão deverão ser inseridos em fluxo de caixa marginal, observado o WACC
+Regulatório vigente.
+[...]
+Art. 150. A revisão extraordinária da tarifa de pedágio tem por finalidade a recomposição do
+equilíbrio econômico-financeiro do contrato de concessão em razão da ocorrência de eventos de
+risco ou de alterações promovidas no contrato de concessão e será processada de o(cid:81)cio, pela
+Superintendência competente, ou por provocação da concessionária.
+§ 1º A revisão extraordinária será processada a qualquer tempo quando, alterna(cid:71)vamente,
+forem atendidos os seguintes requisitos:
+I - houver interesse público relevante para alterações unilaterais ou consensuais do contrato de
+concessão, inclusive para inclusão, alteração, exclusão ou reprogramação previstos no contrato
+de concessão, ou emergencialidade em razão de evento decorrente de caso fortuito, força
+maior, fato do príncipe ou fato da administração; (Grifo nosso)
+49. Dessa forma, a inclusão de inves(cid:57)mento referente aos controladores de velocidade será
+reconhecida por meio de uma Revisão Extraordinária do Contrato, sendo que o reequilíbrio econômico-
+financeiro (efeito) com a inclusão dos valores na tarifa de pedágio será realizado por meio da Revisão
+Ordinária subsequente.
+Nota Técnica - ANTT 8115 (34503555) SEI 50500.026576/2025-09 / pg. 16
+
+
+| Item | Descrição: Implantação e
+conservação de radares
+(controladores de velocidade) na
+BR-040/MG | Data-base do
+orçamento: Julho/2025 | IRT | (Data-base do
+contrato) Julho/2023 |
+| --- | --- | --- | --- | --- |
+|  |  |  | (IPCA defasado 2
+meses) - Maio
+2025 | Preço Ajustado |
+| 1 | Investimento | R$ 3.029.706,37 | 1,09455 | R$ 2.767.992,66 |
+
+
+---
+
+50. É válido ressaltar que o valor final do reequilíbrio, bem como a forma de distribuição dos
+valores no Fluxo de Caixa Marginal - FCM, devidamente atualizados pelo Índice de Reajuste Tarifário -
+IRT, deverá ser atestado pela Gerência de Gestão e Fiscalização Econômico-Financeira - GEGEF, a fim de
+assegurar a precisão dos cálculos, a conformidade regulatória e a compa(cid:57)bilização com o processo
+principal de recomposição do equilíbrio econômico-financeiro.
+VII. CONSIDERAÇÕES FINAIS
+51. Sobre o caso em análise, conclui-se que o presente processo administra(cid:57)vo encontra-se
+devidamente instruído, contendo documentação robusta e fundamentação clara apresentada pela
+Concessionária EPR Via Mineira.
+52. É importante ressaltar, conforme detalhado nesta Nota Técnica, que a segurança viária é
+uma prioridade para esta Agência, alinhada à polí(cid:57)ca nacional de transportes. Dessa forma, torna-se
+evidente que os radares desempenham um papel fundamental na garan(cid:57)a da segurança viária nas
+rodovias concedidas.
+53. Portanto, a inclusão dos custos relacionados à implantação dos radares, por meio de
+revisão extraordinária, revela-se não apenas uma medida necessária, mas também plenamente
+compa(cid:101)vel com o interesse público e em conformidade com o que foi estabelecido no contrato de
+concessão e no arcabouço regulatório vigente.
+54. No quadro abaixo, apresentamos o resumo dos resultados alcançados na presente análise
+técnica por esta GEGIR.
+Quadro 5 - Quadro Resumo
+ITEM DESCRIÇÃO DESCRIÇÃO/DISPOSITIVO
+Manifestação das Áreas
+VI.B. GEFOP e GEENG manifestam-se favoráveis à inclusão.
+Relacionadas
+- Edital de Concessão e Anexos Não se aplica.
+O contrato prevê a inclusão de obras Extra-PER com a
+VI.C. Contrato de Concessão e Anexos
+possibilidade de alteração contratual.
+VI.D. Arcabouço Regulatório Possui enquadramento regulamentar.
+- Cenários Avaliados Não se aplica.
+- Estoque de Melhorias Não se aplica.
+VI.F. Termo Aditivo Sim, para inclusão dos novos valores e obrigações ao contrato.
+VI.G. Valor Os valores foram aprovados pela GEENG.
+Reequilíbrio Econômico e
+VI.H. Sim, pois há inclusão de novos investimentos.
+Financeiro
+VIII. CONCLUSÃO
+55. Inicialmente, esta GEGIR reconhece a proposta apresentada pela Concessionária EPR Via
+Mineira, por meio da Carta EVM-REG-250512-0001 (SEI nº 32089025), por se tratar de manifestação
+tempestiva e formalizada por representante legalmente constituído.
+56. Ressalta-se que a presente análise baseou-se na veracidade das fontes u(cid:57)lizadas pela
+Concessionária, bem como nos demais documentos juntados aos autos.
+57. Assim, após análise técnica subsidiada pelos autos que compõem o processo,
+manifestamo-nos pelo deferimento do pleito e pela viabilidade técnica e contratual da proposta da
+Nota Técnica - ANTT 8115 (34503555) SEI 50500.026576/2025-09 / pg. 17
+
+
+| ITEM | DESCRIÇÃO | DESCRIÇÃO/DISPOSITIVO |
+| --- | --- | --- |
+| VI.B. | Manifestação das Áreas
+Relacionadas | GEFOP e GEENG manifestam-se favoráveis à inclusão. |
+|  | Edital de Concessão e Anexos | Não se aplica. |
+| VI.C. | Contrato de Concessão e Anexos | O contrato prevê a inclusão de obras Extra-PER com a
+possibilidade de alteração contratual. |
+| VI.D. | Arcabouço Regulatório | Possui enquadramento regulamentar. |
+|  | Cenários Avaliados | Não se aplica. |
+|  | Estoque de Melhorias | Não se aplica. |
+| VI.F. | Termo Aditivo | Sim, para inclusão dos novos valores e obrigações ao contrato. |
+| VI.G. | Valor | Os valores foram aprovados pela GEENG. |
+| VI.H. | Reequilíbrio Econômico e
+Financeiro | Sim, pois há inclusão de novos investimentos. |
+
+
+---
+
+Concessionária. Entendemos que é conveniente, oportuno e de interesse público a implantação de 12
+(doze) redutores de velocidade nas Praças de Pedágio no trecho rodoviário sob a responsabilidade da EPR
+Via Mineira.
+58. O valor total para execução das obras de implantação de equipamentos de fiscalização
+eletrônica, sinalização e elementos de proteção e segurança (EPS), incluindo 5 (cinco) anos de
+conservação e manutenção da sinalização, é de R$ 3.029.706,37 (três milhões, vinte e nove mil
+setecentos e seis reais e trinta e sete centavos), com data-base julho/2025.
+59. Entretanto, a Resolução ANTT nº 6.000/2022 indica que os preços globais de obras e
+serviços aceitos pela ANTT deverão ser conver(cid:57)dos a preços iniciais do contrato e distribuídos ao longo
+do prazo de concessão, considerando o cronograma físico-financeiro.
+60. Para tanto, calculou-se o valor final a preços iniciais no montante de R$ 2.767.992,66 (dois
+milhões, setecentos e sessenta e sete mil novecentos e noventa e dois reais e sessenta e seis
+centavos).
+61. Tal inclusão se dará por meio de Termo Adi(cid:57)vo ao Contrato do Edital de Concessão nº
+04/2023, com o correspondente reequilíbrio econômico do inves(cid:57)mento, a ser formalizado por meio de
+Revisão Extraordinária da Tarifa.
+IX. ENCAMINHAMENTOS
+62. Será encaminhado o(cid:91)cio à Concessionária EPR Via Mineira, comunicando o resultado da
+presente análise e solicitando manifestação acerca da concordância com o teor desta Nota Técnica e do
+procedimento ora estabelecido.
+63. Posteriormente, os autos serão encaminhados à apreciação da COGIP para dar seguimento
+aos trâmites pertinentes à celebração do Termo Aditivo ao Contrato do Edital de Concessão nº 04/2023.
+Atenciosamente,
+(assinado e datado eletronicamente)
+HENRIQUE FERREIRA MARTINS
+Coordenador de Gestão de Investimentos propostos para serem incluídos nos Contratos de Concessão
+De acordo,
+(assinado e datado eletronicamente)
+ALEXANDRE ALVES SOUTO
+Gerente de Gestão de Investimentos Rodoviários
+Documento assinado eletronicamente por ALEXANDRE ALVES SOUTO, Gerente, em 18/12/2025, às
+22:32, conforme horário oficial de Brasília, com fundamento no art. 21, inciso II, da Instrução
+Normativa nº 22/2023 da ANTT.
+Nota Técnica - ANTT 8115 (34503555) SEI 50500.026576/2025-09 / pg. 18
+
+---
+
+Documento assinado eletronicamente por HENRIQUE FERREIRA MARTINS, Coordenador(a), em
+19/12/2025, às 09:03, conforme horário oficial de Brasília, com fundamento no art. 21, inciso II, da
+Instrução Normativa nº 22/2023 da ANTT.
+A autenticidade deste documento pode ser conferida no site
+http://sei.antt.gov.br/sei/controlador_externo.php?
+acao=documento_conferir&id_orgao_acesso_externo=0, informando o código verificador 34503555 e
+o código CRC 8207EE70.
+Referência: Processo nº 50500.026576/2025-09 SEI nº 34503555
+St. de Clubes Esportivos Sul Trecho 3 - Telefone Sede: 61 3410-1000 Ouvidoria ANTT: 166
+CEP 70200-003 Brasília/DF - www.antt.gov.br
+Nota Técnica - ANTT 8115 (34503555) SEI 50500.026576/2025-09 / pg. 19
