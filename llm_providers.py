@@ -7,8 +7,9 @@ import gc
 import os
 import threading
 import time
+from contextlib import contextmanager
 
-from typing import Dict, Optional, Tuple
+from typing import Dict, Iterator, Optional, Tuple
 
 from langchain_openai import ChatOpenAI, OpenAIEmbeddings
 from langchain_community.embeddings import OpenAIEmbeddings as CommunityOpenAIEmbeddings
@@ -25,6 +26,13 @@ os.environ.setdefault("TOKENIZERS_PARALLELISM", "false")
 
 _LOCAL_EMBEDDINGS_LOCK = threading.Lock()
 _LOADED_SENTENCE_MODELS: dict = {}
+
+# Uma vaga por thread de consulta. Chamadas aninhadas no mesmo thread
+# (dois passos, reescrita) nao consomem uma segunda vaga.
+_PROFUNDIDADE_VAGA = threading.local()
+_SEMAFORO_VAGA: Optional[threading.BoundedSemaphore] = None
+_SEMAFORO_VAGA_N = 0
+_SEMAFORO_VAGA_LOCK = threading.Lock()
 
 # Modelos E5 exigem prefixos distintos para consulta e documento.
 # Sem eles a qualidade de recuperacao cai fortemente.
@@ -389,6 +397,91 @@ class LocalEmbeddings:
     def __call__(self, text):
         """Compatibilidade com FAISS: trata chamada como consulta."""
         return self.embed_query(text)
+
+def _semaforo_vagas_locais() -> threading.BoundedSemaphore:
+    """
+    Semaforo do limite RAG_VAGAS_GERACAO_LOCAL.
+
+    Reconstroi o semaforo se o valor da variavel mudar no processo.
+
+    Returns:
+        Semaforo com uma permissao por vaga local.
+    """
+    global _SEMAFORO_VAGA, _SEMAFORO_VAGA_N
+    from config import get_vagas_geracao_local
+
+    n_vagas = get_vagas_geracao_local()
+    with _SEMAFORO_VAGA_LOCK:
+        if _SEMAFORO_VAGA is None or _SEMAFORO_VAGA_N != n_vagas:
+            _SEMAFORO_VAGA = threading.BoundedSemaphore(n_vagas)
+            _SEMAFORO_VAGA_N = n_vagas
+        return _SEMAFORO_VAGA
+
+
+def identificador_da_instancia(llm: object) -> str:
+    """
+    Le o nome de modelo da instancia LangChain, se existir.
+
+    Args:
+        llm: Cliente retornado por LLMManager.get_llm.
+
+    Returns:
+        Nome do modelo ou string vazia.
+    """
+    modelo = getattr(llm, "model_name", "")
+    if isinstance(modelo, str):
+        return modelo
+    return ""
+
+
+@contextmanager
+def vaga_geracao(modelo_usado: Optional[str]) -> Iterator[None]:
+    """
+    Reserva uma vaga de geracao quando o modelo e Ollama local.
+
+    OpenAI e DeepSeek passam direto: o paralelismo e do servico
+    remoto. No Ollama, RAG_VAGAS_GERACAO_LOCAL (padrao 1) limita
+    quantas geracoes este processo dispara ao mesmo tempo. A segunda
+    espera a vez. Subir o numero deixa o processo pronto para mais
+    de uma inferencia em CPU, sem mudar o contrato da consulta.
+
+    Args:
+        modelo_usado: Id do provedor ou do modelo (ollama, qwen2.5:7b,
+            deepseek, gpt-4o).
+
+    Yields:
+        None enquanto a vaga, se houver, estiver reservada.
+    """
+    from contexto_packing import eh_identificador_ollama
+
+    if not eh_identificador_ollama(modelo_usado):
+        yield
+        return
+
+    profundidade = int(getattr(_PROFUNDIDADE_VAGA, "n", 0))
+    if profundidade > 0:
+        _PROFUNDIDADE_VAGA.n = profundidade + 1
+        try:
+            yield
+        finally:
+            _PROFUNDIDADE_VAGA.n = profundidade
+        return
+
+    semaforo = _semaforo_vagas_locais()
+    entrou_na_hora = semaforo.acquire(blocking=False)
+    if not entrou_na_hora:
+        logger.info(
+            "Geracao local aguardando vaga (limite %s)",
+            _SEMAFORO_VAGA_N,
+        )
+        semaforo.acquire()
+    _PROFUNDIDADE_VAGA.n = 1
+    try:
+        yield
+    finally:
+        _PROFUNDIDADE_VAGA.n = 0
+        semaforo.release()
+
 
 def verificar_ollama_disponivel(base_url: Optional[str] = None) -> Tuple[bool, str]:
     """

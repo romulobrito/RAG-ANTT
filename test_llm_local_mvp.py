@@ -85,6 +85,100 @@ def test_cloud_fallback_desligado_em_antt_prod() -> None:
             os.environ["RAG_LLM_CLOUD_FALLBACK"] = ant_fb
 
 
+def test_vagas_geracao_local_padrao_e_teto() -> None:
+    """Padrao e uma vaga; valor invalido cai para 1; teto interno e 8."""
+    from config import get_vagas_geracao_local
+
+    anterior = os.environ.get("RAG_VAGAS_GERACAO_LOCAL")
+    try:
+        os.environ.pop("RAG_VAGAS_GERACAO_LOCAL", None)
+        assert get_vagas_geracao_local() == 1
+        os.environ["RAG_VAGAS_GERACAO_LOCAL"] = "0"
+        assert get_vagas_geracao_local() == 1
+        os.environ["RAG_VAGAS_GERACAO_LOCAL"] = "abc"
+        assert get_vagas_geracao_local() == 1
+        os.environ["RAG_VAGAS_GERACAO_LOCAL"] = "3"
+        assert get_vagas_geracao_local() == 3
+        os.environ["RAG_VAGAS_GERACAO_LOCAL"] = "40"
+        assert get_vagas_geracao_local() == 8
+    finally:
+        if anterior is None:
+            os.environ.pop("RAG_VAGAS_GERACAO_LOCAL", None)
+        else:
+            os.environ["RAG_VAGAS_GERACAO_LOCAL"] = anterior
+
+
+def test_ollama_uma_vaga_por_vez() -> None:
+    """Com limite 1, a segunda geracao local espera a primeira terminar."""
+    import threading
+    import time
+
+    from llm_providers import vaga_geracao
+
+    anterior = os.environ.get("RAG_VAGAS_GERACAO_LOCAL")
+    os.environ["RAG_VAGAS_GERACAO_LOCAL"] = "1"
+    ordem: list = []
+    try:
+        def _trabalho(nome: str) -> None:
+            with vaga_geracao("ollama"):
+                ordem.append(nome + "-ini")
+                time.sleep(0.15)
+                ordem.append(nome + "-fim")
+
+        primeira = threading.Thread(target=_trabalho, args=("a",))
+        segunda = threading.Thread(target=_trabalho, args=("b",))
+        primeira.start()
+        time.sleep(0.05)
+        segunda.start()
+        primeira.join(timeout=2)
+        segunda.join(timeout=2)
+        assert ordem == ["a-ini", "a-fim", "b-ini", "b-fim"]
+    finally:
+        if anterior is None:
+            os.environ.pop("RAG_VAGAS_GERACAO_LOCAL", None)
+        else:
+            os.environ["RAG_VAGAS_GERACAO_LOCAL"] = anterior
+
+
+def test_provedor_externo_nao_espera_vaga() -> None:
+    """OpenAI/DeepSeek nao entram na fila local."""
+    import threading
+
+    from llm_providers import vaga_geracao
+
+    barreira = threading.Barrier(2)
+
+    def _trabalho() -> None:
+        with vaga_geracao("deepseek"):
+            barreira.wait(timeout=2)
+
+    primeira = threading.Thread(target=_trabalho)
+    segunda = threading.Thread(target=_trabalho)
+    primeira.start()
+    segunda.start()
+    primeira.join(timeout=3)
+    segunda.join(timeout=3)
+    assert not primeira.is_alive()
+    assert not segunda.is_alive()
+
+
+def test_vaga_aninhada_no_mesmo_thread() -> None:
+    """Dois passos no mesmo thread nao pedem uma segunda vaga."""
+    from llm_providers import vaga_geracao
+
+    anterior = os.environ.get("RAG_VAGAS_GERACAO_LOCAL")
+    os.environ["RAG_VAGAS_GERACAO_LOCAL"] = "1"
+    try:
+        with vaga_geracao("qwen2.5:7b"):
+            with vaga_geracao("ollama"):
+                assert True
+    finally:
+        if anterior is None:
+            os.environ.pop("RAG_VAGAS_GERACAO_LOCAL", None)
+        else:
+            os.environ["RAG_VAGAS_GERACAO_LOCAL"] = anterior
+
+
 def test_limite_contexto_ollama() -> None:
     """Contexto Ollama usa limite menor que cloud."""
     from antt_rag_unified import (
@@ -106,6 +200,10 @@ def main() -> int:
         test_config_ollama_registrado,
         test_filtro_antt_prod_so_ollama,
         test_cloud_fallback_desligado_em_antt_prod,
+        test_vagas_geracao_local_padrao_e_teto,
+        test_ollama_uma_vaga_por_vez,
+        test_provedor_externo_nao_espera_vaga,
+        test_vaga_aninhada_no_mesmo_thread,
         test_limite_contexto_ollama,
     ]
     falhas = 0

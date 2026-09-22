@@ -307,6 +307,21 @@ def montar_css_institucional(altura_campo_rem: float | None = None) -> str:
     [data-testid="stBottom"] > div {{
         background-color: {BRANCO};
     }}
+    /* Botao Nova conversa e movido para este rodape, abaixo da caixa. */
+    [data-testid="stBottom"] .stButton {{
+        width: 100%;
+        margin: 0.45rem 0 0 0;
+    }}
+    [data-testid="stBottom"] .stButton > button {{
+        width: 100%;
+    }}
+    div[data-testid="stCustomComponentV1"] {{
+        height: 0;
+        min-height: 0;
+        margin: 0;
+        padding: 0;
+        overflow: hidden;
+    }}
     [data-testid="stChatInput"],
     [data-testid="stChatInput"] > div,
     [data-testid="stChatInput"] form,

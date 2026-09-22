@@ -2,7 +2,7 @@
 
 **Classificacao:** plano de desenvolvimento (DeepFeed) --- snapshot para o repositorio.
 
-**Data do snapshot:** 2026-09-11.
+**Data do snapshot:** 2026-09-11. Revisao do recorte de tela e dos padroes de ambiente: 2026-09-22.
 
 **Escopo:** 7 fases (SP-0 a SP-6). Frontend, login e BD ficam no SIGESCANTT. Este arquivo e copia do plano mestre usado no Cursor; a execucao do codigo ainda nao comecou.
 
@@ -38,13 +38,11 @@ Content-Type: application/json
 {
   "pergunta": "Qual o IRI maximo da pista principal na manutencao segundo a INM 34/2024?",
   "filtros": { "tipo_documento": "INM", "ano": 2024, "numero": "34" },
-  "max_documentos": 8,
-  "temperatura": 0.1,
   "correlation_id": "sigesc-ticket-8891"
 }
 ```
 
-3. O RAG valida a key, gera `request_id`, busca no FAISS/BM25, empacota contexto e chama Ollama (`qwen2.5:7b` em CPU). Devolve JSON, por exemplo:
+3. O RAG valida a key, gera `request_id`, aplica os padroes de ambiente (temperatura 0.1, 30 trechos, teto de resposta 4096, provedor `ollama`) porque o SIGESC nao enviou esses campos, busca no FAISS/BM25 e chama Ollama (`qwen2.5:7b` em CPU). Devolve JSON, por exemplo:
 
 ```json
 {
@@ -64,7 +62,7 @@ Content-Type: application/json
     }
   ],
   "tempo_processamento_ms": 28000,
-  "total_documentos_encontrados": 8,
+  "total_documentos_encontrados": 30,
   "embedding_provider": "local",
   "vectorstore_utilizado": "vectorstore_local"
 }
@@ -83,6 +81,48 @@ Se a key faltar: `401`. Se o Ollama estiver fora: `503` e o SIGESC avisa "consul
 - **Auth SIGESC -> RAG:** credencial de servico (header `X-API-Key` / `Authorization: Bearer`), nao SSO. Rede alvo: ClusterIP no Rancher.
 - **LLM:** Ollama local (CPU-only), alinhado ao perfil GETIC/arquitetura. Fallback cloud desligado em perfil de producao (`RAG_LLM_CLOUD_FALLBACK=false`).
 - **Oficio SEI 41978334:** cumprir so o que cabe ao componente de IA (arquitetura desacoplada, API, artefatos, logs tecnicos, riscos de IA, implantabilidade, sustentacao do servico). Itens de SSO/perfis/UI/aceitacao de merito = SIGESC + area de negocio + ANTT.
+
+## Tela do SIGESC e variaveis de ambiente
+
+A barra lateral do Streamlit e bancada de QA. No SIGESC ela se reparte: o que o usuario ve na tela, e o que o Rancher fixa no pod. A tela nao traz botao de OpenAI ou DeepSeek gravado. Ela le `GET /api/status` e so desenha o que o ConfigMap liberou.
+
+### O que a tela mostra
+
+- **Servicos de IA.** No inicio so Ollama, sem lista. DeepSeek ou OpenAI aparecem quando `RAG_LLM_ALLOWED_PROVIDERS` os incluir. A chave nunca vai para o browser.
+- **Atualizar base.** Um botao. A base e a mesma para todos. O backend chama `POST /api/reindex`. Segundo clique com job em andamento recebe 409.
+- **Situacao dos servicos.** O que `GET /api/status` devolver, so dos provedores liberados.
+- **Filtros de busca.** Tipo, ano e numero, no `POST /api/query`.
+- **Ajuda.** Texto do SIGESC. Sem endpoint no RAG.
+- **Processar documento.** Ao lado de Atualizar base, nao da caixa da pergunta. `POST /api/documents` grava o PDF na base comum. A consulta so passa a ve-lo depois de Atualizar base.
+- **Nova conversa e o campo da pergunta.** Sessao do SIGESC. O RAG nao guarda historico.
+
+### O que nao aparece na pergunta
+
+**Como localizar os trechos** (embedding) nao e controle da consulta. O indice FAISS usa um tipo so. Trocar de `local` para OpenAI obriga reindexar a base inteira. Fica em `RAG_EMBEDDING_ALLOWED=local`. So entra na tela de Atualizar base se o ConfigMap listar um segundo valor.
+
+Liberdade de redacao, tamanho da resposta e quantidade de trechos tambem nao sao controle do usuario. O SIGESC omite esses campos. A API preenche pelo ambiente.
+
+### Padroes de ambiente (ConfigMap e Secret)
+
+| Variavel | Onde | Valor inicial |
+| --- | --- | --- |
+| `RAG_LLM_ALLOWED_PROVIDERS` | ConfigMap | `ollama` |
+| `RAG_LLM_MODEL` | ConfigMap | `qwen2.5:7b` |
+| `RAG_LLM_TEMPERATURE` | ConfigMap | `0.1` (nao vai ao teto 1.0) |
+| `RAG_LLM_MAX_TOKENS` | ConfigMap | `4096` (teto) |
+| `RAG_MAX_DOCUMENTOS` | ConfigMap | `30` (teto do contrato: 40) |
+| `RAG_EMBEDDING_ALLOWED` | ConfigMap | `local` |
+| `RAG_VAGAS_GERACAO_LOCAL` | ConfigMap | `1` |
+| `RAG_LLM_CLOUD_FALLBACK` | ConfigMap | `false` |
+| `OLLAMA_BASE_URL` | ConfigMap | `http://ollama-svc:11434/v1` |
+| `RAG_API_KEY` | Secret | gerada pela GETIC/GESIN |
+| `OPENAI_API_KEY` / `OPENROUTER_API_KEY` | Secret | ausentes ate a Agencia liberar |
+
+`RAG_VAGAS_GERACAO_LOCAL` limita geracoes Ollama neste processo. Provedor externo nao entra nessa fila: o paralelismo e do servico. Subir a vaga ou ligar nuvem continua decisao de cota e de assinatura, nao da tela.
+
+Quando a Agencia comprar DeepSeek ou OpenAI: a chave entra no Secret, o ConfigMap passa a listar o provedor, o pod reinicia. A mesma tela mostra a opcao. Provedor fora da lista no `POST /api/query` responde 400. Escolher nuvem envia o trecho de contexto para fora da rede; o rotulo na tela diz isso. O padrao de consulta, enquanto o ConfigMap nao mudar o provedor default, permanece Ollama.
+
+Trechos: o slider de QA vai ate 40 e esse e o teto do contrato. O padrao de servico e 30. O corte interno `_MAX_CHUNKS_LLM` hoje vale 30; na API ele acompanha o teto 40, senao um valor entre 31 e 40 seria descartado. A tela do SIGESC nao expoe o slider.
 
 ## Arquitetura macro considerada nesta construcao
 
@@ -283,7 +323,7 @@ Se o SIGESC **nao** estiver no mesmo cluster (so na figura ele aparece dentro de
 
 - **`GET /api/ready`** separado de `/api/health` (kubelet). A arquitetura mistura liveness e readiness no health.
 - **API Key de servico** (`X-API-Key`). A arquitetura confiava so no ClusterIP; o oficio §2 pede mecanismo na ponta da integracao. Nao e SSO e nao aparece no browser.
-- **`request_id` / `correlation_id`**, filtro `numero`, `max_documentos` default **8** (arquitetura exemplifica 5).
+- **`request_id` / `correlation_id`**, filtro `numero`, `max_documentos` padrao **30** e teto **40** (arquitetura exemplifica 5; a tela nao envia o campo).
 - **Ollama down = 503** (contrato estavel para o SIGESC). A arquitetura ainda cita "busca pura sem sumarizacao" — SP-5 alinha o PDF.
 - **Streamlit** so overlay `qa`, **sem** Ingress `/rag-teste` neste ciclo (a arquitetura deixa Ingress opcional/restrito; o plano nao productiza).
 - **NetworkPolicy** e Prometheus: a arquitetura cita como possivel; este ciclo nao entrega YAML de policy nem stack de metricas (logs com `request_id` bastam para o oficio §5 lado RAG).
@@ -381,16 +421,17 @@ Secoes, nesta ordem:
 5. **Tabela de rotas** (metodo, path, auth, codigo de sucesso, proposito):
    - `GET /api/health` — sem key — 200 — processo vivo
    - `GET /api/ready` — sem key — 200 ou 503 — indice + Ollama (probe kubelet; nao e consulta)
-   - `GET /api/status` — com key — 200 — snapshot (vectorstore, LLM, qtde docs, providers)
-   - `POST /api/query` — com key — 200 — consulta (exemplo INM 34)
+   - `GET /api/status` — com key — 200 — snapshot e menu da tela (provedores liberados, embeddings liberados, Ollama, qtde docs)
+   - `POST /api/query` — com key — 200 — consulta (exemplo INM 34). Provedor fora de `RAG_LLM_ALLOWED_PROVIDERS` = 400
    - `GET /api/documents` — com key — 200 — catalogo (`relatorio_documentos.json`)
-   - `POST /api/reindex` — com key — 202 — job ops; **nao** no caminho do usuario SIGESC
+   - `POST /api/documents` — com key — 201 — Processar documento (PDF na base comum; a consulta so ve depois do reindex)
+   - `POST /api/reindex` — com key — 202 — Atualizar base na tela; base unica; 409 se o lock ja estiver ativo
    - `GET /api/docs` — flag `RAG_SWAGGER` — Swagger; off em prod
-6. **POST /api/query — request:** copiar o HTTP do exemplo ilustrativo deste plano (pergunta IRI, filtros INM/2024/34, `max_documentos` 8, `temperatura` 0.1, `correlation_id`).
+6. **POST /api/query — request:** copiar o HTTP do exemplo ilustrativo deste plano (pergunta IRI, filtros INM/2024/34, `correlation_id`). Temperatura, trechos e tamanho da resposta nao vao no JSON da tela: a API usa `RAG_LLM_TEMPERATURE=0.1`, `RAG_MAX_DOCUMENTOS=30` (teto 40) e `RAG_LLM_MAX_TOKENS=4096`. `provider` so entra se a tela tiver mais de um servico liberado.
 7. **POST /api/query — response:** copiar o JSON do exemplo (`request_id`, fontes, `tempo_processamento_ms` ~28000). Deixar claro que o texto da `resposta` e ilustrativo (o 7B pode errar rotulo; fontes sao obrigatorias).
-8. **Validacao:** `pergunta` min 1 char apos trim; `temperatura` 0.0–1.0 default 0.1; `max_documentos` 1–20 default 8 (alinhar ao k interno; arquitetura dizia 5 — congelar 8 no contrato para o exemplo).
+8. **Validacao:** `pergunta` min 1 char apos trim; `temperatura` 0.0–1.0, omissa = `RAG_LLM_TEMPERATURE` (0.1); `max_documentos` 1–40, omisso = `RAG_MAX_DOCUMENTOS` (30). Acima de 40 = 400. O corte `_MAX_CHUNKS_LLM` sobe de 30 para 40 na implementacao, para o teto do contrato valer. `provider` ausente = `ollama`; valor fora de `RAG_LLM_ALLOWED_PROVIDERS` = 400.
 9. **Erros:** 400 pergunta vazia / fora de faixa; 401 sem/key errada; 503 ready falho ou query sem indice/Ollama; 504 LLM estourou; 500 generico. Corpo = envelope `detail` + `request_id`.
-10. **Fora de escopo:** SSO, `user_id`, upload, crawler, parametros vivos do SIGESC, streaming, GPU.
+10. **Fora de escopo:** SSO, `user_id`, crawler, parametros vivos do SIGESC, streaming, GPU. Processar documento nao esta fora: e `POST /api/documents`.
 11. **Como o SIGESC deve renderizar:** mostrar `resposta` **e** `documentos_consultados` (tipo/numero/ano/trecho). Guardar `request_id` se quiser historico.
 
 #### Passo 2 — `docs/matriz_integracoes.md` (oficio §2)
@@ -398,7 +439,8 @@ Secoes, nesta ordem:
 Uma linha operacional (consulta) e uma linha ops (reindex, so DeepFeed/ANTT ops):
 
 - **Consulta:** origem SIGESCANTT (backend) -> destino RAG-API `POST /api/query`; finalidade consulta normativa; dados = pergunta + filtros + resposta + fontes + ids de correlacao; frequencia sob demanda; auth API Key de servico; PII = nao (sem identificador de fiscal); responsavel origem = OTI/SIGESC; responsavel destino = DeepFeed.
-- **Reindex (ops):** origem operador/ANTT -> `POST /api/reindex`; nao e integracao de usuario; mesma key ou key ops a decidir no SP-2 (no SP-0 documentar como "mesma API Key, rota nao usada pelo modulo de consulta").
+- **Atualizar base:** origem tela SIGESC (backend) -> `POST /api/reindex`. Mesma API Key de servico. Base compartilhada, nao por fiscal. Lock ativo = 409. Embedding do job so se estiver em `RAG_EMBEDDING_ALLOWED` (inicial `local`).
+- **Processar documento:** origem tela SIGESC -> `POST /api/documents`. PDF na base comum. Nao substitui o reindex.
 - **Nao ha** acesso a banco; **nao ha** sincronizacao periodica nesta entrega.
 
 #### Passo 3 — [api/schemas.py](../api/schemas.py) (contrato executavel)
@@ -408,13 +450,13 @@ Pacote `api/` com `__init__.py` vazio ou docstring. **Sem** `app.py` no SP-0. Ti
 Classes minimas (Pydantic v2; se pydantic ainda nao estiver no [requirements.txt](../requirements.txt), acrescentar `pydantic>=2` **sem** fastapi/uvicorn — ou usar dataclasses + validacao no teste. Preferencia: ja adicionar `pydantic>=2` porque o SP-2 vai precisar. Nao adicionar FastAPI ainda.)
 
 - `QueryFilters`: `tipo_documento: Optional[str]`, `ano: Optional[int]`, `numero: Optional[str]`
-- `QueryRequest`: `pergunta: str` (min_length 1); `filtros: Optional[QueryFilters]`; `max_documentos: int` (1–20, default 8); `temperatura: float` (0.0–1.0, default 0.1); `correlation_id: Optional[str]`
+- `QueryRequest`: `pergunta: str` (min_length 1); `filtros: Optional[QueryFilters]`; `provider: Optional[str]` (omisso = env, fora da lista = 400); `max_documentos: Optional[int]` (1–40, omisso = 30); `temperatura: Optional[float]` (0.0–1.0, omissa = 0.1); `correlation_id: Optional[str]`. A tela do SIGESC nao envia `max_documentos` nem `temperatura`.
 - `DocumentHit`: `tipo`, `numero`, `ano`, `trecho`, `caminho` (str); `relevancia: float`
 - `QueryResponse`: todos os campos do JSON ilustrativo, inclusive `request_id: str`
 - `ErrorBody`: `detail: str`, `request_id: Optional[str]`
 - `HealthResponse`: `status: str` (ex. `"ok"`)
 - `ReadyResponse`: `status: str`, `vectorstore: bool`, `ollama: bool`
-- `StatusResponse`: campos livres mas tipados (vectorstore path, llm acessivel, n_docs, embedding_provider, llm_provider)
+- `StatusResponse`: vectorstore path, llm acessivel, n_docs, `provedores_liberados`, modelos de cada um, `embeddings_liberados`, `embedding_provider` do indice atual. A tela monta Servicos de IA e Situacao dos servicos a partir daqui.
 - `DocumentListItem`: tipo, numero, ano, caminho
 - `ReindexAccepted`: `job_id: str`, `status: str` (`"accepted"`)
 
@@ -499,7 +541,7 @@ SP-0 fechado quando:
 
 #### Decisoes a congelar no SP-1
 
-- Defaults do **servico** (usados por `consultar` se o caller nao passar): provider `ollama`, modelo `qwen2.5:7b`, embeddings `local`, `RAG_LLM_CLOUD_FALLBACK=false`. A sidebar do Streamlit pode sobrescrever na QA; a API (SP-2) usa so os defaults de servico / env.
+- Defaults do **servico** (usados por `consultar` se o caller nao passar): provider `ollama` (so o que estiver em `RAG_LLM_ALLOWED_PROVIDERS`), modelo `qwen2.5:7b`, embeddings `local` (`RAG_EMBEDDING_ALLOWED`), `RAG_LLM_TEMPERATURE=0.1`, `RAG_LLM_MAX_TOKENS=4096`, `RAG_MAX_DOCUMENTOS=30` (teto 40), `RAG_VAGAS_GERACAO_LOCAL=1`, `RAG_LLM_CLOUD_FALLBACK=false`. A sidebar do Streamlit pode sobrescrever na QA. A tela do SIGESC nao envia temperatura, trechos nem tamanho da resposta.
 - `consultar` e **sincrono**. Sem streaming no facade. `gerar_resposta_streaming` permanece so na UI, atras de atalho de QA (checkbox), **fora** do contrato SIGESC.
 - Excecoes tipadas (sem `any`): `RagNotReadyError` (indice/Ollama), `RagGenerationError` (usar `classificar_falha_de_geracao` ja existente). SP-2 mapeia para 503/504. Nao engolir falha como texto de "nao encontrei" quando for queda de servico.
 - Cache do vectorstore: singleton no modulo `rag_service` (carregar uma vez por processo), alinhado ao lifespan do FastAPI depois.
@@ -604,7 +646,7 @@ SP-1 fechado quando:
 - CORS: default **off** (ClusterIP). Nao liberar `*` neste ciclo.
 - `request_id`: UUID4 gerado na API se o body nao trouxer (o SP-0 nao obriga no request; so na response). Ecoar `correlation_id` se veio.
 - `tempo_processamento_ms`: medido na API em volta de `consultar`.
-- Reindex: `202` + `{job_id, status: "accepted"}` em background (`BackgroundTasks` ou thread). Se lock ja ativo: `409` com `ErrorBody`. Nao e rota do usuario SIGESC; mesma API Key.
+- Reindex: `202` + `{job_id, status: "accepted"}` em background (`BackgroundTasks` ou thread). Se lock ja ativo: `409` com `ErrorBody`. A tela SIGESC chama esta rota em Atualizar base. Mesma API Key. `embedding_provider` fora de `RAG_EMBEDDING_ALLOWED` = 400.
 - Logs estruturados (uma linha JSON ou `key=value`): timestamp, `request_id`, `correlation_id`, path, status, latencia_ms, provider, modelo, n_docs. **Nao** logar `pergunta` nem a `resposta` por default (`RAG_LOG_QUERY_TEXT=false`).
 - Mapear falhas (corpo sempre `ErrorBody`, sem traceback):
   - validacao Pydantic -> 400
@@ -739,7 +781,7 @@ SP-2 fechado quando:
 - **Ready vs health:** compose considera a API "up" no health (processo). O teste e2e so roda quando `GET /api/ready` = 200 (modelo puxado + indice montado).
 - **Modelo:** documentar `ollama pull qwen2.5:7b` no volume. Smoke em notebook apertado: `llama3.2:3b`. O gate INM 34 prefere 7B se a RAM do host aguentar (~8–10 GiB do modelo + API).
 - **Reindex no container:** a imagem API inclui o que o query precisa (faiss, torch CPU, sentence-transformers, fastapi). Tesseract: incluir se o endpoint `/api/reindex` for usado no compose; se o indice ja vem montado, o e2e de query **nao** depende de OCR. Preferir e2e com `vectorstore_local` ja existente no host.
-- **Segredos:** `.env` gitignored; `.env.example` com `RAG_API_KEY=trocar` e `RAG_LLM_CLOUD_FALLBACK=false`. Sem chaves OpenRouter em prod compose.
+- **Segredos:** `.env` gitignored; `.env.example` com `RAG_API_KEY=trocar`, os padroes da secao "Tela do SIGESC e variaveis de ambiente" (`TEMPERATURE=0.1`, `MAX_TOKENS=4096`, `MAX_DOCUMENTOS=30`, `ALLOWED_PROVIDERS=ollama`, `EMBEDDING_ALLOWED=local`, `VAGAS_GERACAO_LOCAL=1`) e `RAG_LLM_CLOUD_FALLBACK=false`. Sem chaves OpenRouter em prod compose ate a Agencia liberar.
 - **Streamlit:** profile `qa`, porta 8501, chama o **facade no mesmo filesystem** (mesmo mount), nao precisa chamar a API (evita latencia dupla). Nao e produto.
 
 #### Passo 1 — `.dockerignore`
@@ -765,7 +807,7 @@ Mesmo base/deps (ou FROM a api e troca CMD) para nao divergir o facade. `EXPOSE 
 Servicos:
 
 - `ollama`: `image: ollama/ollama`, volume `ollama_models:/root/.ollama`, **sem** `ports` no default, healthcheck `/api/tags`.
-- `rag-api`: build `Dockerfile.api`, `ports: "8000:8000"`, env `OLLAMA_BASE_URL=http://ollama:11434/v1`, `RAG_API_KEY` do `.env`, `RAG_SWAGGER=true`, `RAG_LLM_CLOUD_FALLBACK=false`, mounts `./dados_antt:/app/dados_antt:ro` (rw se reindex), `./vectorstore_local:/app/vectorstore_local`, `./relatorio_documentos.json` se existir. `depends_on` ollama healthy.
+- `rag-api`: build `Dockerfile.api`, `ports: "8000:8000"`, env `OLLAMA_BASE_URL=http://ollama:11434/v1`, `RAG_API_KEY` do `.env`, `RAG_SWAGGER=true`, `RAG_LLM_ALLOWED_PROVIDERS=ollama`, `RAG_LLM_MODEL=qwen2.5:7b`, `RAG_LLM_TEMPERATURE=0.1`, `RAG_LLM_MAX_TOKENS=4096`, `RAG_MAX_DOCUMENTOS=30`, `RAG_EMBEDDING_ALLOWED=local`, `RAG_VAGAS_GERACAO_LOCAL=1`, `RAG_LLM_CLOUD_FALLBACK=false`, mounts `./dados_antt:/app/dados_antt` (rw: Processar documento e reindex gravam; consulta pode ser ro), `./vectorstore_local:/app/vectorstore_local`, `./relatorio_documentos.json` se existir. `depends_on` ollama healthy.
 - `streamlit`: profile `qa`, `ports: "8501:8501"`, mesmos mounts.
 
 Arquivo `.env.example` listando as env. Compose `env_file: .env`.
@@ -845,7 +887,7 @@ SP-3 fechado quando:
 - **Probes:** liveness `GET /api/health`; readiness `GET /api/ready` com `initialDelaySeconds` 60–120. **Errata SP-0:** `/api/ready` **sem** API Key (kubelet nao envia header). Query/status/documents/reindex continuam com key.
 - **Resources** requests=limits no piso da arquitetura: rag-api 2 CPU / 4Gi, ollama 4 CPU / 16Gi. Overlay `qa` acrescenta streamlit 1 CPU / 2Gi (tabela da arquitetura). Prod **sem** Streamlit = 6c / 20Gi; o teto 7c / 22Gi e o piso com QA ligado. Sem `nvidia.com/gpu`.
 - **PVCs** (nomes e montagens da arquitetura; tamanhos placeholder ate a GESIN informar StorageClass): `vectorstore-data` 20Gi -> `/app/vectorstore_local`; `ollama-models` 30Gi -> `/root/.ollama`; `dados-antt` 80Gi -> `/app/dados_antt`. Default RWO; RWX so se overlay `qa` montar o mesmo indice. Sem PVC `logs-metricas` / `backup` neste ciclo (ops ANTT).
-- **Secret** so em `secret.yaml.example`. ConfigMap: `OLLAMA_BASE_URL`, `RAG_LLM_CLOUD_FALLBACK=false`, `RAG_SWAGGER=false` no prod.
+- **Secret** so em `secret.yaml.example` (`RAG_API_KEY`; chaves OpenAI/OpenRouter so quando a Agencia liberar). ConfigMap: `OLLAMA_BASE_URL`, `RAG_LLM_ALLOWED_PROVIDERS=ollama`, `RAG_LLM_MODEL=qwen2.5:7b`, `RAG_LLM_TEMPERATURE=0.1`, `RAG_LLM_MAX_TOKENS=4096`, `RAG_MAX_DOCUMENTOS=30`, `RAG_EMBEDDING_ALLOWED=local`, `RAG_VAGAS_GERACAO_LOCAL=1`, `RAG_LLM_CLOUD_FALLBACK=false`, `RAG_SWAGGER=false` no prod.
 - **Job opcional** `ollama-pull` documentado. Ate o modelo existir, `ready` = 503.
 - **Rollback:** `kubectl rollout undo` do Deployment `rag-api`. Promocao = tag git = digest (oficio §3).
 
@@ -934,7 +976,7 @@ SP-4 fechado quando:
 - **PII:** o RAG nao recebe `user_id` nem nome do fiscal. `correlation_id` e opaco (ticket SIGESC). Logs default sem `pergunta`/`resposta` (`RAG_LOG_QUERY_TEXT=false`).
 - **Carga:** documentar piloto `<20 req/dia`, uma consulta por vez, timeout cliente >= 120s. Nao prometer p95 de nuvem nem 100 RPS.
 - **Streamlit:** QA interno; o guia diz explicitamente que o SIGESC **nao** chama a porta 8501.
-- **Arquitetura.tex:** so delta do contrato (ready, API Key, `numero`, `max_documentos` 8, ClusterIP default, 503). **Nao** reescrever a tabela de 200 h / 30 dias; acrescentar nota de rodape: este ciclo DeepFeed e API+pacote (~15–20 dias) porque UI/SSO/BD sao SIGESC.
+- **Arquitetura.tex:** so delta do contrato (ready, API Key, `numero`, `max_documentos` padrao 30 e teto 40, ClusterIP default, 503). **Nao** reescrever a tabela de 200 h / 30 dias; acrescentar nota de rodape: este ciclo DeepFeed e API+pacote (~15–20 dias) porque UI/SSO/BD sao SIGESC.
 - **Evidencias (§7):** o indice do pacote lista as linhas; o preenchimento com provas e SP-6. SP-5 deixa a coluna "evidencia" como "a anexar no SP-6".
 - **Licencas:** app proprietario DeepFeed (README); terceiros (Ollama, pesos Qwen, sentence-transformers, FAISS, FastAPI) citados no manual. Sem redistribuir pesos no git.
 
@@ -944,9 +986,10 @@ Completar (nao recriar) o arquivo do SP-0. Cada linha operacional tem: origem, d
 
 Linhas:
 
-1. **Consulta normativa** — SIGESCANTT backend -> `POST /api/query` no `rag-api-svc:8000`. Dados ida: `pergunta`, `filtros`, `max_documentos`, `temperatura`, `correlation_id`. Volta: `resposta`, `documentos_consultados`, `modelo_usado`, `provider`, `request_id`, `tempo_processamento_ms`. Frequencia sob demanda. Auth: API Key de servico. PII: nao. Origem OTI/SIGESC; destino DeepFeed/RAG.
-2. **Reindex (ops)** — operador ANTT/DeepFeed -> `POST /api/reindex`. Nao e caminho do fiscal. Mesma API Key. Fora do modulo de consulta do SIGESC.
-3. **Probes** — kubelet -> `GET /api/health` e `GET /api/ready` (sem key). Sem payload de negocio.
+1. **Consulta normativa** — SIGESCANTT backend -> `POST /api/query` no `rag-api-svc:8000`. Dados ida: `pergunta`, `filtros`, `provider` se houver mais de um liberado, `correlation_id`. Temperatura 0.1, 30 trechos e 4096 tokens ficam no ConfigMap. Volta: `resposta`, `documentos_consultados`, `modelo_usado`, `provider`, `request_id`, `tempo_processamento_ms`. Frequencia sob demanda. Auth: API Key de servico. PII: nao. Origem OTI/SIGESC; destino DeepFeed/RAG.
+2. **Atualizar base** — tela SIGESC -> `POST /api/reindex`. Mesma API Key. Base compartilhada. 409 se lock. Embedding so `RAG_EMBEDDING_ALLOWED`.
+3. **Processar documento** — tela SIGESC -> `POST /api/documents`. PDF na base comum. A consulta depende do reindex seguinte.
+4. **Probes** — kubelet -> `GET /api/health` e `GET /api/ready` (sem key). Sem payload de negocio.
 
 Declarar explicitamente **ausencias:** sem acesso a banco SIGESC; sem sincronizacao periodica; sem SSO no RAG; sem crawler neste ciclo.
 
@@ -958,7 +1001,7 @@ Documento curto (GESIN nao precisa do TeX do piloto). Reusar fatos de [docs/pilo
 - **Latencia (I1):** inferencia CPU-only; dezenas de segundos a minutos; primeira carga do 7B ~1 min no piloto. Mitigacao: timeout SIGESC >= 120s; UX de espera no SIGESC (eles implementam); replica 1.
 - **Teto de modelo (I2):** RAM do piso 7c/22GB impede 13B+ estavel. Mitigacao: pin `qwen2.5:7b` (ou 3B se a VM nao aguentar); `RAG_LLM_CLOUD_FALLBACK=false`.
 - **Nao e motor juridico:** resposta e apoio a consulta documental, nao parecer vinculante.
-- **Indice desatualizado:** sem crawler; reindex e ops manual. Risco de norma nova fora do FAISS.
+- **Indice desatualizado:** sem crawler. A tela tem Atualizar base (`POST /api/reindex`), mas sem esse clique norma nova fica fora do FAISS.
 - **Segredo da API Key:** vazamento permite consultar o RAG na rede interna, nao o SSO. Rotacao = Secret Kubernetes (ANTT).
 
 Cada risco: probabilidade qualitativa, impacto, mitigacao, dono (DeepFeed vs SIGESC vs GETIC).
@@ -984,7 +1027,7 @@ Colar comandos **reais** do SP-3/SP-4 (nao pseudocodigo):
 3. **Secret:** criar `RAG_API_KEY` fora do git; rotacao.
 4. **Modelos:** Job `ollama pull` ou procedimento equivalente; ready=503 ate o modelo existir.
 5. **Backup/restore:** os tres PVCs (`vectorstore-data`, `ollama-models`, `dados-antt`). Restore = volume a partir do snapshot + rollout. Sem PVC `backup` neste ciclo (ANTT provisiona se quiser).
-6. **Reindex:** `POST /api/reindex` -> 202; 409 se lock; nao misturar com consulta do fiscal.
+6. **Reindex:** `POST /api/reindex` -> 202; 409 se lock. A tela chama em Atualizar base. A consulta continua em `POST /api/query`. Embedding do job limitado a `RAG_EMBEDDING_ALLOWED`.
 7. **Logs:** onde stdout do pod; campos `request_id` / path / status / latencia; **nao** gravar pergunta/resposta.
 8. **Troubleshoot:** health 200 e ready 503 = Ollama/indice; 401 = key; 504 = LLM longo; liveness reinicia o pod (arquitetura).
 9. **Licencas:** bloco DeepFeed + lista de terceiros (Ollama, Qwen, embeddings, FAISS, FastAPI).
@@ -1011,7 +1054,7 @@ Este e o documento que o OTI implementa contra. Indice:
 Patch pontual, nao reescrita:
 
 - Tabela de endpoints: separar `/api/health` (liveness, sem key) e `/api/ready` (readiness, sem key).
-- Documentar `X-API-Key` nas rotas de negocio; `request_id` / `correlation_id`; filtro `numero`; default `max_documentos` = 8.
+- Documentar `X-API-Key` nas rotas de negocio; `request_id` / `correlation_id`; filtro `numero`; `max_documentos` padrao 30 e teto 40; temperatura padrao 0.1 vinda do ambiente.
 - Ingress `/api/rag/*` permanece **opcional** (consumidor fora do cluster). Default deste ciclo = ClusterIP.
 - Tabela de fallback: Ollama down -> **503**, nao "busca pura".
 - Nota: Streamlit e overlay QA, fora de prod.
@@ -1259,5 +1302,5 @@ Paralelo possivel: Fase 0 com o time SIGESC no dia 1; Fase 5 rascunho enquanto F
 
 - Import circular / Streamlit no processo da API — mitigar na Fase 1.
 - Latencia CPU e timeout do SIGESC — documentar 120s+ e UX de espera no guia (eles implementam).
-- Reindex pesado no mesmo pod da query — manter lock; reindex so ops.
+- Reindex pesado no mesmo pod da query — a tela chama Atualizar base; manter lock (409); nao ha crawler.
 - Contrato README desatualizado vs arquitetura — Fase 0 e a fonte da verdade.

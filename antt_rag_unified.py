@@ -76,6 +76,8 @@ from llm_providers import (
     get_available_providers,
     create_llm_manager,
     get_available_embedding_providers,
+    identificador_da_instancia,
+    vaga_geracao,
     verificar_ollama_disponivel,
 )
 
@@ -4307,10 +4309,11 @@ def _reescrever_query_com_historico(pergunta, historico, llm):
 
     try:
         chain = prompt | llm
-        resultado = chain.invoke({
-            "historico": texto_historico,
-            "pergunta": pergunta,
-        })
+        with vaga_geracao(identificador_da_instancia(llm)):
+            resultado = chain.invoke({
+                "historico": texto_historico,
+                "pergunta": pergunta,
+            })
         reescrita = resultado.content.strip() if hasattr(resultado, "content") else str(resultado).strip()
 
         # Limpar lixo que o LLM pode adicionar
@@ -4332,6 +4335,22 @@ def _reescrever_query_com_historico(pergunta, historico, llm):
 
 
 def gerar_resposta(pergunta, documentos, llm, modelo_usado="gpt-4"):
+    """
+    Gera uma resposta e, no Ollama, ocupa uma vaga local ate o fim.
+
+    Provedor externo nao entra na fila. O paralelismo desse caso fica
+    no servico remoto.
+
+    Returns:
+        Tupla (texto, modelo_usado) produzida pelo corpo da geracao.
+    """
+    with vaga_geracao(modelo_usado):
+        return _gerar_resposta_sem_vaga(
+            pergunta, documentos, llm, modelo_usado
+        )
+
+
+def _gerar_resposta_sem_vaga(pergunta, documentos, llm, modelo_usado="gpt-4"):
     """Gera uma resposta baseada nos documentos recuperados usando templates adaptativos."""
     if not documentos:
         return "Nao encontrei documentos relevantes para esta pergunta. Por favor, reformule sua consulta ou forneca mais detalhes.", modelo_usado
@@ -4855,9 +4874,29 @@ def gerar_resposta_streaming(pergunta, documentos, llm, modelo_usado="gpt-4"):
     """
     Gera resposta via streaming (yield de tokens).
 
-    Retorna um generator de strings para uso com st.write_stream.
-    Ao final, o texto completo pode ser acessado via atributo .texto_completo
-    do generator (apos consumo total).
+    No Ollama a vaga local permanece ocupada ate o gerador terminar.
+    Provedor externo nao entra nessa fila.
+
+    Args:
+        pergunta: Pergunta do usuario.
+        documentos: Lista de Document.
+        llm: Instancia do LLM LangChain.
+        modelo_usado: Identificador do provedor.
+
+    Yields:
+        str: Tokens incrementais da resposta.
+    """
+    with vaga_geracao(modelo_usado):
+        yield from _gerar_resposta_streaming_sem_vaga(
+            pergunta, documentos, llm, modelo_usado
+        )
+
+
+def _gerar_resposta_streaming_sem_vaga(
+    pergunta, documentos, llm, modelo_usado="gpt-4"
+):
+    """
+    Corpo do streaming, chamado ja dentro da vaga local quando couber.
 
     Args:
         pergunta: Pergunta do usuario.
@@ -5128,6 +5167,15 @@ def interface_usuario_unificada():
                 "Inferencia local via Ollama (CPU). Ideal para ambiente ANTT "
                 "sem API externa. Respostas podem demorar 20-60 s."
             )
+
+        if st.button(
+            "Atualizar base",
+            use_container_width=True,
+            help="Inclui na consulta os documentos novos ou "
+                 "alterados. Leva alguns minutos.",
+        ):
+            st.session_state["_reindexando"] = True
+            st.rerun()
         
         # Status das APIs
         st.subheader("Situação dos serviços")
@@ -5257,55 +5305,6 @@ def interface_usuario_unificada():
                 st.warning(
                     "Não foi possível verificar a credencial da OpenAI."
                 )
-        
-        st.divider()
-
-        btn_col_a, btn_col_b = st.columns(2)
-        with btn_col_a:
-            if st.button("Nova conversa", use_container_width=True,
-                          help="Apaga as perguntas e respostas desta sessão."):
-                st.session_state.chat_history = []
-                if "mensagens_chat" in st.session_state:
-                    st.session_state.mensagens_chat = []
-                st.session_state.pop("pergunta_exemplo", None)
-                st.session_state.pop("processar_automatico", None)
-                st.rerun()
-
-        with btn_col_b:
-            if st.button("Atualizar base", use_container_width=True,
-                          help="Inclui na consulta os documentos novos ou "
-                               "alterados. Leva alguns minutos."):
-                st.session_state["_reindexando"] = True
-                st.rerun()
-
-        if st.button(
-            "Reprocessar tabelas em imagem",
-            use_container_width=True,
-            help=(
-                "Relê as tabelas que estão em imagem. Use quando um número "
-                "da resposta estiver errado. Veja a seção Ajuda."
-            ),
-        ):
-            st.session_state["_limpar_ocr_e_reindexar"] = True
-            st.rerun()
-
-        # Executar limpeza OCR + reindexacao
-        if st.session_state.get("_limpar_ocr_e_reindexar"):
-            del st.session_state["_limpar_ocr_e_reindexar"]
-            import glob as _glob_mod
-
-            cache_dir = _OCR_CACHE_DIR
-            cache_files = _glob_mod.glob(os.path.join(cache_dir, "*.txt"))
-            for f in cache_files:
-                try:
-                    os.remove(f)
-                except OSError:
-                    pass
-            st.info(
-                f"Leitura anterior das tabelas em imagem descartada "
-                f"({len(cache_files)} arquivo(s)). Atualizando a base..."
-            )
-            st.session_state["_reindexando"] = True
 
         # Executar reindexacao (precisa estar fora do button para manter o spinner)
         if st.session_state.get("_reindexando"):
@@ -5386,26 +5385,9 @@ Se souber o documento, cite-o na pergunta para melhorar a precisão.
 - Uma norma que você sabe que existe não é encontrada
 - O modelo de localização dos trechos (embeddings) foi alterado
 
-Reconstrói o índice a partir dos textos já convertidos e reaproveita o
-cache de OCR quando ele estiver válido. Use esta opção após trocar o
-embedding local. Leva alguns minutos.
-
-**Quando usar Reprocessar tabelas em imagem**
-
-Parte das tabelas das normas (parâmetros de IRI, deflexão, prazos) está
-nos documentos como imagem. O sistema converte essas imagens em texto e
-guarda o resultado para não refazer o trabalho a cada consulta.
-
-Use este botão quando **um valor numérico da resposta estiver errado**
-em relação ao documento original. Por exemplo:
-
-- Valores trocados entre colunas ou entre fases
-- Casa decimal deslocada (60 no lugar de 6,0)
-- Uma coluna ou linha da tabela ausente na resposta
-
-Não é uma rotina de manutenção. É bem mais demorado que Atualizar base
-e só deve ser acionado diante de erro observado em tabela. Para
-divergência de texto corrido, use Atualizar base.
+Reconstrói o índice a partir dos textos já convertidos. Tabelas que estão
+em imagem são lidas de novo quando a leitura guardada está desatualizada
+ou com qualidade baixa. Leva alguns minutos.
 
 **Se a resposta parecer incompleta**
 
@@ -5519,6 +5501,48 @@ divergência de texto corrido, use Atualizar base.
     pergunta = st.chat_input(
         "Digite sua pergunta sobre documentos da ANTT",
         disabled=not vectorstore_loaded,
+    )
+
+    # O Streamlit prende o chat_input no rodape. O marcador e o script
+    # levam este botao para dentro desse rodape, abaixo da caixa.
+    st.markdown(
+        '<span id="marcador-nova-conversa"></span>',
+        unsafe_allow_html=True,
+    )
+    if st.button(
+        "Nova conversa",
+        key="btn_nova_conversa",
+        use_container_width=True,
+        help="Apaga as perguntas e respostas desta sessão.",
+    ):
+        st.session_state.chat_history = []
+        if "mensagens_chat" in st.session_state:
+            st.session_state.mensagens_chat = []
+        st.session_state.pop("pergunta_exemplo", None)
+        st.session_state.pop("processar_automatico", None)
+        st.rerun()
+
+    import streamlit.components.v1 as components
+
+    components.html(
+        """
+        <script>
+        const doc = window.parent.document;
+        const mark = doc.getElementById("marcador-nova-conversa");
+        const bottom = doc.querySelector('[data-testid="stBottom"]');
+        if (mark && bottom) {
+          const marcador = mark.closest(".element-container");
+          const botao = marcador ? marcador.nextElementSibling : null;
+          if (botao && botao.parentElement !== bottom) {
+            bottom.appendChild(botao);
+          }
+          if (marcador && marcador.parentElement) {
+            marcador.remove();
+          }
+        }
+        </script>
+        """,
+        height=0,
     )
 
     # Sugestoes sempre montadas no script (mesmo apos a primeira resposta).

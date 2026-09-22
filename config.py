@@ -123,6 +123,41 @@ def cloud_fallback_enabled() -> bool:
     return get_deploy_profile() != "antt_prod"
 
 
+def get_vagas_geracao_local() -> int:
+    """
+    Quantas geracoes Ollama este processo mantem ao mesmo tempo.
+
+    RAG_VAGAS_GERACAO_LOCAL padrao 1 (piloto em CPU). Valor maior so
+    cabe com nucleo e RAM para mais de uma inferencia, e com o
+    processo Ollama aceitando esse paralelismo. Provedor externo
+    ignora este limite: a concorrencia fica no servico remoto.
+    Teto interno: 8.
+
+    Returns:
+        Inteiro entre 1 e 8.
+    """
+    raw = os.environ.get("RAG_VAGAS_GERACAO_LOCAL", "1").strip()
+    if not raw:
+        return 1
+    try:
+        valor = int(raw)
+    except ValueError:
+        logger.warning(
+            "RAG_VAGAS_GERACAO_LOCAL invalido (%s); usando 1",
+            raw,
+        )
+        return 1
+    if valor < 1:
+        return 1
+    if valor > 8:
+        logger.warning(
+            "RAG_VAGAS_GERACAO_LOCAL %s acima do teto; usando 8",
+            valor,
+        )
+        return 8
+    return valor
+
+
 # Configurações dos provedores de LLM
 LLM_PROVIDERS = {
     "openai": {
