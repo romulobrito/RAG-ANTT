@@ -212,7 +212,7 @@ LLM local (Ollama) & Sim & Pod Ollama no Rancher \\
 Faixa de modelo & 3B--7B quantizados & Piso técnico: 7~cores / 22~GB RAM, sem GPU \\
 Dados no perímetro & Sim & Sim (sem saída obrigatória para API externa) \\
 Orquestração K8s / Rancher & Não & Sim \\
-Carga concorrente & Uma vaga local por processo (padrão); provedor externo sem fila neste backend & Mais vagas em CPU, ou GPU, dependem de cota da Agência \\
+Vários usuários ao mesmo tempo & A API aceita as chamadas em paralelo. A espera surge só na geração local em CPU (padrão: uma por vez). Provedor externo não cria essa fila & O mesmo no cluster: não é limite de infraestrutura do serviço. No Ollama a CPU redige uma geração por vez; no provedor, o paralelismo é do serviço \\
 \bottomrule
 \end{tabularx}
 \end{table}
@@ -312,11 +312,11 @@ Sem alteração desse teto (nós com GPU, quotas de RAM adequadas e runtime com 
 
 \subsection{Atendimento simultâneo}
 
-O backend distingue dois caminhos de geração. Eles não compartilham a mesma fila.
+Várias pessoas podem usar a ferramenta ao mesmo tempo. Isso \textbf{não} é uma limitação de infraestrutura: a API aceita as chamadas em paralelo, a rede e o índice não serializam a consulta, e o backend não recusa o segundo usuário. O que impede duas redações locais ao mesmo tempo é a \textbf{CPU ocupada pelo modelo}. Uma geração do 7B em CPU usa o processador até terminar; a segunda espera essa geração, não um recurso que falte no cluster.
 
-\textbf{Ollama em CPU.} A variável \texttt{RAG\_VAGAS\_GERACAO\_LOCAL} define quantas gerações locais este processo mantém ao mesmo tempo. O padrão do piloto é \textbf{1}: a segunda pessoa é aceita e espera a vez, no mesmo processo, até a primeira terminar. O código já admite um inteiro maior (teto interno 8). Subir esse número deixa o backend pronto para mais de uma inferência em CPU, desde que a Agência provisione núcleo e memória e o processo Ollama aceite mais de uma geração (\texttt{OLLAMA\_NUM\_PARALLEL} no serviço local, compatível com a mesma quantidade). Sem essa cota, vagas extras apenas disputam a mesma CPU e a mesma RAM do modelo 7B. Várias réplicas ou uma GPU continuam fora deste ciclo e dependem de capacidade no Rancher.
+\textbf{Ollama em CPU.} A variável \texttt{RAG\_VAGAS\_GERACAO\_LOCAL} só organiza essa espera. O padrão do piloto é \textbf{1}: a segunda pessoa é aceita e fica na vez, no mesmo processo, até a primeira terminar. O código já admite um inteiro maior (teto interno 8), e o processo Ollama pode aceitar mais de uma geração (\texttt{OLLAMA\_NUM\_PARALLEL}). Subir a vaga não remove o gargalo: as gerações extras disputam a mesma CPU e a mesma RAM do modelo. Réplicas ou GPU fariam gerações de verdade em paralelo, e isso sim depende de capacidade no Rancher. Não é o caso deste piloto, e não é o que produz a fila de hoje.
 
-\textbf{Provedor externo (OpenAI ou DeepSeek).} Essas chamadas \textbf{não} entram na fila local. O processamento paralelo é por conta do serviço: várias pessoas podem gerar ao mesmo tempo até o limite de taxa e de crédito da conta. A busca nos documentos permanece no perímetro; o pedido de redação, com o trecho de contexto, sai para a internet. No perfil de produção fechado com a Agência esse caminho permanece desligado (\texttt{RAG\_LLM\_CLOUD\_FALLBACK=false}).
+\textbf{Provedor externo (OpenAI ou DeepSeek).} Por esse caminho \textbf{não há gargalo de multiusuário}. As chamadas não entram na fila local. Várias pessoas geram ao mesmo tempo, e o processamento paralelo é por conta do serviço, até o limite de taxa e de crédito da conta. A busca nos documentos permanece no perímetro; só o pedido de redação, com o trecho de contexto, sai para a internet. No perfil de produção fechado com a Agência esse caminho permanece desligado (\texttt{RAG\_LLM\_CLOUD\_FALLBACK=false}). Desligá-lo é uma escolha de perímetro, não uma falta de capacidade do backend.
 
 % =============================================================================
 \section{Implicações práticas no perfil de operação}
@@ -327,7 +327,7 @@ O backend distingue dois caminhos de geração. Eles não compartilham a mesma f
   \item Modelos \textbf{13B ou superiores} são considerados inviáveis nesse perfil sem GPU e sem aumento de RAM no ambiente de operação;
   \item A primeira carga do modelo 7B no piloto levou da ordem de $\sim$1~minuto em pergunta curta; consultas RAG longas aumentam ainda mais o tempo de resposta --- latência coerente com inferência CPU-only;
   \item Enquanto a infraestrutura provisionada permanecer CPU-only, o LLM local deve ser dimensionado para o teto 3B--7B, e expectativas de qualidade devem ser calibradas em relação a esse teto --- ou a Agência deve autorizar/provisionar GPU e memória compatíveis com modelos mais robustos;
-  \item Várias pessoas podem consultar ao mesmo tempo. No Ollama local o padrão é uma geração por vez neste processo (\texttt{RAG\_VAGAS\_GERACAO\_LOCAL}); em provedor externo o paralelismo é do serviço, e não desta fila.
+  \item Várias pessoas podem consultar ao mesmo tempo. A espera no Ollama local não é falta de infraestrutura: a API aceita as chamadas, e a CPU redige uma geração por vez (\texttt{RAG\_VAGAS\_GERACAO\_LOCAL}). Pelo provedor externo esse gargalo não existe; o paralelismo é do serviço.
 \end{itemize}
 
 % =============================================================================
@@ -367,7 +367,7 @@ O piloto demonstrou que é \textbf{viável} operar LLM local via Ollama no fluxo
 
 Portanto, a limitação ao uso de LLMs locais mais robustos decorre das \textbf{condições de infraestrutura do ambiente de operação que o desenvolvimento visou simular}, e não de uma recusa a priori de modelos maiores nem de atritos locais de estação. A evolução da qualidade do LLM local na ANTT depende, em primeiro lugar, do \textbf{provisionamento} (GPU e/ou mais RAM no cluster Rancher) alinhado aos requisitos de compliance e desempenho da Agência.
 
-O mesmo vale para o atendimento simultâneo. O backend já separa os caminhos: no Ollama, \texttt{RAG\_VAGAS\_GERACAO\_LOCAL} (padrão uma vaga) segura a fila local e pode ser elevado quando houver CPU e RAM; em OpenAI ou DeepSeek não há essa fila, e o processamento paralelo fica por conta do serviço. O perfil de produção da Agência segue no modelo local.
+O atendimento simultâneo não se confunde com essa limitação de infraestrutura. O backend já recebe várias pessoas ao mesmo tempo. No Ollama, a fila local (padrão: uma vaga) existe porque a geração ocupa a CPU, não porque o serviço ou o cluster recusem a segunda chamada. Em OpenAI ou DeepSeek esse gargalo não aparece: o processamento paralelo fica por conta do provedor. O perfil de produção da Agência segue no modelo local, e por isso a fila permanece.
 
 % =============================================================================
 \vspace{1cm}
@@ -376,6 +376,6 @@ O mesmo vale para o atendimento simultâneo. O backend já separa os caminhos: n
 \end{center}
 \vspace{0.5cm}
 
-\noindent\textit{Documento vivo: atualizar quando mudarem o perfil de infraestrutura ANTT, o hardware usado na simulação do deploy ou o teto de modelo local suportado. Última revisão: setembro de 2026 (premissa: desenvolvimento como simulação do perfil de operação; gargalos restritos a esse perfil; fila local de geração e paralelismo do provedor externo).}
+\noindent\textit{Documento vivo: atualizar quando mudarem o perfil de infraestrutura ANTT, o hardware usado na simulação do deploy ou o teto de modelo local suportado. Última revisão: setembro de 2026 (premissa: desenvolvimento como simulação do perfil de operação; gargalos restritos a esse perfil; espera multiusuário só na geração local em CPU, inexistente no provedor externo).}
 
 \end{document}
