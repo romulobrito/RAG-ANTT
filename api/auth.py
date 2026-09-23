@@ -9,9 +9,15 @@ from __future__ import annotations
 
 import hmac
 import os
-from fastapi import Request
+from typing import Optional
+
+from fastapi import Request, Security
+from fastapi.security import APIKeyHeader
 
 from api.erros import ErroHttp
+
+# Declarado no OpenAPI para o Swagger mostrar o cadeado Authorize.
+cabecalho_api_key = APIKeyHeader(name="X-API-Key", auto_error=False)
 
 
 def chave_configurada() -> str:
@@ -44,16 +50,24 @@ def _chave_recebida(request: Request) -> str:
     return ""
 
 
-def dependencia_api_key(request: Request) -> None:
+def dependencia_api_key(
+    request: Request,
+    chave_cabecalho: Optional[str] = Security(cabecalho_api_key),
+) -> None:
     """
     Exige a API Key de servico.
 
+    O parametro chave_cabecalho existe para o Swagger desenhar o cadeado.
+    A leitura real continua em X-API-Key ou Authorization Bearer.
+
     Args:
         request: Pedido HTTP.
+        chave_cabecalho: Valor injetado pelo Swagger. Nao substitui o Bearer.
 
     Raises:
         ErroHttp: 503 se a env estiver vazia; 401 se a key nao bater.
     """
+    del chave_cabecalho
     configurada = chave_configurada()
     if not configurada:
         raise ErroHttp(503, "api_key_not_configured")

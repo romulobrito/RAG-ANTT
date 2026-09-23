@@ -82,6 +82,19 @@ def get_ollama_api_key() -> str:
     return os.environ.get("OLLAMA_API_KEY", "ollama").strip() or "ollama"
 
 
+def get_ollama_timeout_segundos() -> int:
+    """
+    Segundos que o cliente espera cada chamada ao Ollama.
+
+    RAG_OLLAMA_TIMEOUT padrao 900. Piso 30, teto 3600.
+    O modelo de 7B em CPU passa de 300 segundos nesta consulta.
+
+    Returns:
+        Inteiro entre 30 e 3600.
+    """
+    return _inteiro_ambiente("RAG_OLLAMA_TIMEOUT", 900, 30, 3600)
+
+
 def get_deploy_profile() -> str:
     """
     Perfil de deploy: dev, homolog ou antt_prod.
@@ -216,13 +229,13 @@ def get_llm_model() -> str:
     """
     Modelo de geracao quando o chamador nao escolhe um.
 
-    RAG_LLM_MODEL padrao qwen2.5:7b.
+    RAG_LLM_MODEL padrao llama3.2:3b, o modelo local mais simples.
 
     Returns:
         Nome do modelo no Ollama ou no provedor configurado.
     """
-    raw = os.environ.get("RAG_LLM_MODEL", "qwen2.5:7b").strip()
-    return raw or "qwen2.5:7b"
+    raw = os.environ.get("RAG_LLM_MODEL", "llama3.2:3b").strip()
+    return raw or "llama3.2:3b"
 
 
 def get_llm_temperature() -> float:
@@ -330,9 +343,21 @@ LLM_PROVIDERS = {
         "base_url": None,  # URL padrão da OpenAI
         "requires_api_key": True,
         "models": {
-            "gpt-4o": "gpt-4o",
-            "gpt-4": "gpt-4",
-            "gpt-3.5-turbo": "gpt-3.5-turbo"
+            # Padrao OpenAI: segue instrucao, 1M de contexto, sem
+            # passo de raciocinio. Barato para esta consulta.
+            "gpt-4.1-mini": "gpt-4.1-mini",
+            # Mais barato. Contexto de 128k cabe nesta consulta.
+            "gpt-4o-mini": "gpt-4o-mini",
+            # Menor custo, para volume. 1M de contexto.
+            "gpt-4.1-nano": "gpt-4.1-nano",
+            # Eficiente, com raciocinio opcional. 1M de contexto.
+            "gpt-6-luna": "gpt-6-luna",
+            # 4.1 completo: mais capaz que o mini, ainda sem ser o topo.
+            "gpt-4.1": "gpt-4.1",
+            # Equilibrio entre capacidade e custo, com raciocinio.
+            "gpt-6-sol": "gpt-6-sol",
+            # Mais potente, com raciocinio. O mais caro da lista.
+            "gpt-6-astra": "gpt-6-astra",
         },
         "embedding_model": "text-embedding-ada-002",
         "get_api_key": get_openai_api_key
@@ -344,17 +369,17 @@ LLM_PROVIDERS = {
         # A primeira chave e usada como padrao quando nenhum modelo e
         # informado. Slugs verificados no catalogo do OpenRouter.
         "models": {
-            # V4 Flash: 1M de contexto e custo menor que o V3 antigo.
+            # Padrao DeepSeek: 1M de contexto. Respondeu a INM 34 na API.
             "deepseek-v4-flash": "deepseek/deepseek-v4-flash",
+            # Escreve a resposta direto, sem passo de raciocinio.
+            "deepseek-chat": "deepseek/deepseek-chat",
+            # Geracao intermediaria, mantida para comparacao.
+            "deepseek-v3.2": "deepseek/deepseek-v3.2",
             # V4 Pro: maior capacidade, para consultas mais exigentes.
             "deepseek-v4-pro": "deepseek/deepseek-v4-pro",
-            # V3.2: geracao intermediaria, mantida para comparacao.
-            "deepseek-v3.2": "deepseek/deepseek-v3.2",
-            # V3: modelo usado ate entao, mantido para regressao.
-            "deepseek-chat": "deepseek/deepseek-chat",
             # R1: raciocinio explicito. O slug ":free" foi descontinuado
             # pelo OpenRouter; usar a variante paga.
-            "deepseek-r1": "deepseek/deepseek-r1"
+            "deepseek-r1": "deepseek/deepseek-r1",
         },
         "embedding_model": "text-embedding-ada-002",  # Ainda usa OpenAI para embeddings
         "get_api_key": get_openrouter_api_key,
@@ -369,7 +394,7 @@ LLM_PROVIDERS = {
         "base_url": None,  # Resolvido em runtime via get_ollama_base_url()
         "requires_api_key": False,
         "models": {
-            # Padrao CPU no notebook / GETIC.
+            # Padrao do servico: o modelo local mais simples.
             "llama3.2:3b": "llama3.2:3b",
             # Homologacao de qualidade (mais RAM/latencia).
             "qwen2.5:7b": "qwen2.5:7b",
@@ -379,7 +404,7 @@ LLM_PROVIDERS = {
         "embedding_model": "text-embedding-ada-002",
         "get_api_key": get_ollama_api_key,
         "get_base_url": get_ollama_base_url,
-        "request_timeout": 300,
+        "request_timeout": 900,
     },
 }
 
@@ -389,9 +414,9 @@ CHUNK_SIZE = 1500
 CHUNK_OVERLAP = 200
 
 # Configurações padrão (pode ser alterado via interface)
-DEFAULT_LLM_PROVIDER = "deepseek"
-# V4 Flash e o padrao: contexto de 1M de tokens e custo menor que o V3.
-DEFAULT_LLM_MODEL = "deepseek-v4-flash"
+DEFAULT_LLM_PROVIDER = "ollama"
+# Modelo local mais simples. O 7B fica na lista para quando a maquina aguentar.
+DEFAULT_LLM_MODEL = "llama3.2:3b"
 # Embedding OpenAI (quando o provedor de embeddings e "openai").
 DEFAULT_EMBEDDING_MODEL = "text-embedding-ada-002"
 # Embedding local open source. Escolhido pelo A/B em CPU
@@ -431,6 +456,7 @@ __all__ = [
     "get_openrouter_api_key",
     "get_ollama_base_url",
     "get_ollama_api_key",
+    "get_ollama_timeout_segundos",
     "get_deploy_profile",
     "get_allowed_llm_providers",
     "cloud_fallback_enabled",

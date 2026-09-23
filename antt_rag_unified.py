@@ -721,7 +721,7 @@ def extract_tables_with_context(pdf_path, metrics=None):
     
     try:
         # Usar o LLMManager para criar o LLM
-        llm_manager = create_llm_manager("openai", "gpt-4")  # Usar OpenAI para processamento de tabelas
+        llm_manager = create_llm_manager("openai", "gpt-4.1-mini")
         llm = llm_manager.get_llm()
         
         if metrics:

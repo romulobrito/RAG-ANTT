@@ -158,10 +158,22 @@ def test_omissao_de_trechos_usa_30(monkeypatch: pytest.MonkeyPatch) -> None:
     assert capturado["temperature"] == 0.1
     assert capturado["max_tokens"] == 4096
     assert capturado["provider"] == "ollama"
-    assert capturado["model"] == "qwen2.5:7b"
+    assert capturado["model"] == "llama3.2:3b"
     assert resultado.resposta == "resposta de teste"
     assert resultado.documentos_consultados[0].numero == "34"
     assert resultado.total_documentos_encontrados == 1
+
+
+def test_deepseek_usa_o_modelo_dele(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Provedor DeepSeek nao herda o nome do modelo local."""
+    monkeypatch.delenv("RAG_LLM_MODEL", raising=False)
+    monkeypatch.delenv("RAG_LLM_ALLOWED_PROVIDERS", raising=False)
+    capturado = _instalar_dublagens(monkeypatch)
+
+    consultar("Qual o IRI maximo?", provider="deepseek")
+
+    assert capturado["provider"] == "deepseek"
+    assert capturado["model"] == "deepseek-v4-flash"
 
 
 def test_incluir_documento_grava_pdf(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

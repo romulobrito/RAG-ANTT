@@ -193,7 +193,7 @@ def interface_usuario_unificada():
                 index=0
             )
         else:
-            selected_model = "gpt-4"
+            selected_model = "gpt-4.1-mini"
         
         # Informação sobre fallback automático
         if selected_provider == "openai":

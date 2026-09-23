@@ -45,6 +45,18 @@ def _resultado() -> QueryResult:
     )
 
 
+def test_swagger_declara_cadeado(cliente: TestClient) -> None:
+    """OpenAPI declara X-API-Key nas rotas de negocio e nao no health."""
+    resposta = cliente.get("/openapi.json")
+    assert resposta.status_code == 200
+    corpo = resposta.json()
+    esquemas = corpo["components"]["securitySchemes"]
+    nomes = [item.get("name") for item in esquemas.values()]
+    assert "X-API-Key" in nomes
+    assert corpo["paths"]["/api/status"]["get"].get("security")
+    assert "security" not in corpo["paths"]["/api/health"]["get"]
+
+
 def test_health_sem_key(cliente: TestClient) -> None:
     """Health responde 200 sem header."""
     resposta = cliente.get("/api/health")

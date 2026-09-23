@@ -19,6 +19,7 @@ from config import (
     cloud_fallback_enabled,
     get_allowed_llm_providers,
     get_ollama_base_url,
+    get_ollama_timeout_segundos,
     logger,
 )
 
@@ -587,14 +588,26 @@ class LLMManager:
             get_base = self.config.get("get_base_url", get_ollama_base_url)
             llm_kwargs["base_url"] = get_base()
             llm_kwargs["api_key"] = self.api_key or "ollama"
-            timeout = int(self.config.get("request_timeout", 300))
+            timeout = get_ollama_timeout_segundos()
             llm_kwargs["timeout"] = timeout
             llm_kwargs["max_retries"] = 1
         else:
             # Para OpenAI, usa o parâmetro padrão
             llm_kwargs["api_key"] = self.api_key
         
-        logger.info(f"Inicializando LLM: {self.config['name']} - {model_name}")
+        if "timeout" in llm_kwargs:
+            logger.info(
+                "Inicializando LLM: %s - %s (timeout %ss)",
+                self.config["name"],
+                model_name,
+                llm_kwargs["timeout"],
+            )
+        else:
+            logger.info(
+                "Inicializando LLM: %s - %s",
+                self.config["name"],
+                model_name,
+            )
         
         return ChatOpenAI(**llm_kwargs)
     
@@ -781,5 +794,5 @@ def create_llm_manager(provider="deepseek", model=None, embedding_provider="loca
         # Fallback historico: DeepSeek/outros -> OpenAI
         if provider != "openai":
             logger.warning("Tentando fallback para OpenAI...")
-            return LLMManager(provider="openai", model="gpt-4o", embedding_provider=embedding_provider)
+            return LLMManager(provider="openai", model="gpt-4.1-mini", embedding_provider=embedding_provider)
         raise 

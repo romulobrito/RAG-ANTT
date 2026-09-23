@@ -16,10 +16,12 @@ import sys
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from config import (
+    DEFAULT_LLM_MODEL,
     DEFAULT_LLM_PROVIDER,
     LLM_PROVIDERS,
     cloud_fallback_enabled,
     get_allowed_llm_providers,
+    get_ollama_timeout_segundos,
 )
 from llm_providers import get_available_providers
 
@@ -32,9 +34,25 @@ def test_provedores_cloud_inalterados() -> None:
     assert LLM_PROVIDERS["deepseek"].get("requires_api_key") is True
 
 
-def test_default_provider_ainda_deepseek() -> None:
-    """Padrao de geracao continua DeepSeek ate decisao explicita."""
-    assert DEFAULT_LLM_PROVIDER == "deepseek"
+def test_padrao_e_ollama_simples() -> None:
+    """Omissao usa o modelo local mais simples."""
+    assert DEFAULT_LLM_PROVIDER == "ollama"
+    assert DEFAULT_LLM_MODEL == "llama3.2:3b"
+
+
+def test_timeout_ollama_le_ambiente() -> None:
+    """RAG_OLLAMA_TIMEOUT sobe o limite e o piso segura valor baixo."""
+    anterior = os.environ.get("RAG_OLLAMA_TIMEOUT")
+    try:
+        os.environ["RAG_OLLAMA_TIMEOUT"] = "1200"
+        assert get_ollama_timeout_segundos() == 1200
+        os.environ["RAG_OLLAMA_TIMEOUT"] = "10"
+        assert get_ollama_timeout_segundos() == 30
+    finally:
+        if anterior is None:
+            os.environ.pop("RAG_OLLAMA_TIMEOUT", None)
+        else:
+            os.environ["RAG_OLLAMA_TIMEOUT"] = anterior
 
 
 def test_config_ollama_registrado() -> None:

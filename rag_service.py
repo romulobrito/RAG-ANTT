@@ -15,6 +15,7 @@ from typing import Dict, List, Mapping, Optional, Sequence
 
 from config import (
     DB_FAISS_PATH,
+    LLM_PROVIDERS,
     get_allowed_llm_providers,
     get_embedding_allowed,
     get_llm_max_tokens,
@@ -174,6 +175,31 @@ def _normalizar_embedding(embedding_provider: Optional[str]) -> str:
             )
         )
     return escolhido
+
+
+def _modelo_compativel(provedor: str, modelo: Optional[str]) -> str:
+    """
+    Mantem o modelo se ele pertence ao provedor.
+
+    Um nome de outro provedor (llama no DeepSeek, por exemplo) cai
+    no primeiro modelo cadastrado desse provedor.
+
+    Args:
+        provedor: Identificador ja resolvido.
+        modelo: Nome pedido, ou None.
+
+    Returns:
+        Nome presente no catalogo do provedor, quando houver catalogo.
+    """
+    bloco = LLM_PROVIDERS.get(provedor)
+    modelos = bloco.get("models") if isinstance(bloco, dict) else None
+    if not isinstance(modelos, dict) or not modelos:
+        escolhido = (modelo or get_llm_model()).strip()
+        return escolhido or get_llm_model()
+    nome = (modelo or "").strip()
+    if nome in modelos:
+        return nome
+    return next(iter(modelos))
 
 
 def _resolver_provedor(provider: Optional[str]) -> str:
@@ -431,7 +457,7 @@ def recuperar_trechos(
     if historico:
         try:
             provedor = _resolver_provedor(provider)
-            modelo_efetivo = (modelo or get_llm_model()).strip() or get_llm_model()
+            modelo_efetivo = _modelo_compativel(provedor, modelo or get_llm_model())
             gerente = create_llm_manager(provedor, modelo_efetivo)
             llm_reescrita = gerente.get_llm(
                 temperature=_resolver_temperatura(temperatura),
@@ -521,7 +547,7 @@ def consultar(
     provedor = _resolver_provedor(provider)
     temperatura_efetiva = _resolver_temperatura(temperatura)
     teto_tokens = _resolver_max_tokens(max_tokens)
-    modelo_efetivo = (modelo or get_llm_model()).strip() or get_llm_model()
+    modelo_efetivo = _modelo_compativel(provedor, modelo or get_llm_model())
     pacote = recuperar_trechos(
         pergunta,
         filtros=filtros,
