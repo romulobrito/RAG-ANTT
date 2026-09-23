@@ -13,6 +13,11 @@ pdfplumber
 openpyxl
 img2table
 python-dotenv==1.0.0
+# Contrato HTTP (Fase 0) e servidor (Fase 2). Nao subir o langchain.
+pydantic>=2
+fastapi>=0.115,<1
+uvicorn[standard]>=0.32,<1
+python-multipart>=0.0.9
 openai>=1.0.0
 tenacity
 pytesseract

@@ -31,6 +31,7 @@ from antt_rag_unified import (
     gerar_resposta,
     mensagem_de_falha_de_geracao,
     pesquisar_documentos,
+    reindexacao_ocupada,
     reindexar_base_completa,
 )
 from llm_providers import (
@@ -654,6 +655,41 @@ def listar_anos(relatorio_path: str = _RELATORIO) -> List[str]:
         if re.fullmatch(r"(?:19|20)\d{2}", item.ano)
     }
     return sorted(encontrados, reverse=True)
+
+
+def reindexacao_em_andamento() -> bool:
+    """
+    True se o lock de reindexacao esta ativo.
+
+    So leitura. Quem adquire o lock continua sendo reindexar_base_completa.
+    A tela de QA nao usa esta funcao.
+
+    Returns:
+        True quando outra atualizacao da base ainda corre.
+    """
+    return reindexacao_ocupada()
+
+
+def aquecer_indice(embedding_provider: Optional[str] = None) -> bool:
+    """
+    Carrega o indice no cache deste processo.
+
+    Falha de abertura nao derruba o chamador: a API segue no ar e o
+    ready responde indisponivel.
+
+    Args:
+        embedding_provider: Embedding do indice. Omitido usa o ambiente.
+
+    Returns:
+        True se o indice ficou em cache.
+    """
+    try:
+        embedding = _normalizar_embedding(embedding_provider)
+        _obter_vectorstore(embedding)
+    except Exception as exc:
+        logger.warning("Indice nao aquecido: %s", exc)
+        return False
+    return True
 
 
 def disparar_reindexacao(

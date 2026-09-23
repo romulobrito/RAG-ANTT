@@ -1307,6 +1307,25 @@ def _adquirir_lock_reindexacao() -> bool:
         return False
 
 
+def reindexacao_ocupada() -> bool:
+    """
+    Diz se outra reindexacao ainda segura o lock.
+
+    Nao cria nem apaga o arquivo. Lock com mais de 1 hora e tratado
+    como orfao, do mesmo modo que a aquisicao.
+
+    Returns:
+        True quando o lock existe e tem menos de 1 hora.
+    """
+    if not os.path.exists(_LOCK_REINDEXACAO):
+        return False
+    try:
+        idade_segundos = time.time() - os.path.getmtime(_LOCK_REINDEXACAO)
+    except OSError:
+        return True
+    return idade_segundos <= 3600
+
+
 def _liberar_lock_reindexacao():
     """Remove o arquivo de lock."""
     try:

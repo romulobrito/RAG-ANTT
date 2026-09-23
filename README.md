@@ -268,36 +268,66 @@ A interface web fornece:
 
 ### API REST
 
-O sistema pode ser integrado via API REST:
+A API HTTP fica em `http://localhost:8000` a partir da Fase 2. O Streamlit em `http://localhost:8501` e a bancada interna de QA. O SIGESCANTT nao consome o Streamlit.
 
-#### Endpoints Disponíveis
+Contrato: [docs/api_contrato.md](docs/api_contrato.md).
 
-| Endpoint | Método | Descrição |
+#### Endpoints
+
+| Endpoint | Metodo | Descricao |
 |----------|--------|-----------|
-| `/api/query` | POST | Realiza consulta |
-| `/api/documents` | GET | Lista documentos |
-| `/api/status` | GET | Status do sistema |
+| `/api/health` | GET | Processo vivo, sem API Key |
+| `/api/ready` | GET | Indice e Ollama, sem API Key |
+| `/api/status` | GET | Provedores liberados e quantidade de documentos |
+| `/api/query` | POST | Consulta normativa |
+| `/api/documents` | GET | Catalogo de documentos |
+| `/api/documents` | POST | Grava um PDF. A consulta so o ve depois do reindex |
+| `/api/reindex` | POST | Atualizar base |
 
-#### Exemplo de Uso com Python
+#### Exemplo de uso com Python
 
 ```python
 import requests
 
 class RAGClient:
-    def __init__(self, base_url="http://localhost:8501"):
+    def __init__(self, base_url="http://localhost:8000", api_key=""):
         self.base_url = base_url
+        self.api_key = api_key
 
-    def query(self, question):
+    def query(self, pergunta):
         response = requests.post(
-            f"{self.base_url}/api/query",
-            json={"question": question}
+            "{0}/api/query".format(self.base_url),
+            headers={"X-API-Key": self.api_key},
+            json={"pergunta": pergunta},
         )
         return response.json()
 
     def get_documents(self):
-        response = requests.get(f"{self.base_url}/api/documents")
+        response = requests.get(
+            "{0}/api/documents".format(self.base_url),
+            headers={"X-API-Key": self.api_key},
+        )
         return response.json()
 ```
+
+Subir a API em desenvolvimento, sem Docker:
+
+```bash
+export RAG_API_KEY=dev-local
+export RAG_SWAGGER=true
+uvicorn api.app:app --host 0.0.0.0 --port 8000 --timeout-keep-alive 120
+```
+
+Consulta de exemplo (timeout de 120 segundos no cliente):
+
+```bash
+curl --max-time 120 -s -X POST http://localhost:8000/api/query \
+  -H "X-API-Key: dev-local" \
+  -H "Content-Type: application/json" \
+  -d '{"pergunta":"Qual o IRI maximo da pista principal na manutencao segundo a INM 34/2024?","filtros":{"tipo_documento":"INM","ano":2024,"numero":"34"},"correlation_id":"sigesc-ticket-8891"}'
+```
+
+`GET http://localhost:8000/api/health` nao leva API Key.
 
 ## Troubleshooting
 
