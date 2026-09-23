@@ -35,7 +35,7 @@ import re
 import unicodedata
 from typing import Dict, List, Sequence, Tuple
 from pathlib import Path
-from types import SimpleNamespace
+from types import ModuleType, SimpleNamespace
 from contexto_compartimentado import (
     id_fonte_documento as _id_fonte_documento,
     montar_contexto_compartimentado as _montar_contexto_compartimentado,
@@ -5024,12 +5024,25 @@ def extrair_citacoes_da_resposta(resposta):
     logger.info(f"Citações encontradas: {citacoes_normalizadas}")
     return citacoes_normalizadas 
 
+def _publicar_modulo_em_execucao(modulo: ModuleType) -> None:
+    """Aponta antt_rag_unified para o script que o Streamlit esta executando.
+
+    No rerun, o Streamlit apaga apenas sys.modules["__main__"] e cria
+    outro modulo. O alias da execucao anterior permanece e nao recebe
+    as funcoes definidas nesta passagem.
+    """
+    import sys
+
+    if modulo.__name__ != "__main__":
+        return
+    sys.modules["antt_rag_unified"] = modulo
+
+
 def main() -> None:
     """Sobe a tela de QA. O nucleo permanece importavel sem Streamlit."""
     import sys
 
-    if __name__ == "__main__":
-        sys.modules.setdefault("antt_rag_unified", sys.modules[__name__])
+    _publicar_modulo_em_execucao(sys.modules[__name__])
     from ui.app import interface_usuario_unificada
 
     try:

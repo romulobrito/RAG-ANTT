@@ -10,7 +10,7 @@ import json
 import subprocess
 import sys
 from pathlib import Path
-from types import SimpleNamespace
+from types import ModuleType, SimpleNamespace
 from typing import Dict, List
 
 import pytest
@@ -111,6 +111,33 @@ def _instalar_dublagens(monkeypatch: pytest.MonkeyPatch) -> Dict[str, object]:
     monkeypatch.setattr("rag_service.create_llm_manager", GerenteFalso)
     limpar_cache_vectorstore()
     return capturado
+
+
+def test_publicar_modulo_substitui_alias_antigo() -> None:
+    """Rerun do Streamlit nao pode manter o modulo da execucao anterior."""
+    import antt_rag_unified
+
+    real = sys.modules["antt_rag_unified"]
+    try:
+        antigo = ModuleType("__main__")
+        sys.modules["antt_rag_unified"] = antigo
+        atual = ModuleType("__main__")
+        setattr(atual, "reindexacao_ocupada", lambda: False)
+        antt_rag_unified._publicar_modulo_em_execucao(atual)
+        assert sys.modules["antt_rag_unified"] is atual
+        assert hasattr(sys.modules["antt_rag_unified"], "reindexacao_ocupada")
+    finally:
+        sys.modules["antt_rag_unified"] = real
+
+
+def test_publicar_modulo_ignora_import_normal() -> None:
+    """Importar o nucleo como biblioteca nao troca o modulo carregado."""
+    import antt_rag_unified
+
+    real = sys.modules["antt_rag_unified"]
+    outro = ModuleType("antt_rag_unified")
+    antt_rag_unified._publicar_modulo_em_execucao(outro)
+    assert sys.modules["antt_rag_unified"] is real
 
 
 def test_import_do_nucleo_nao_carrega_streamlit() -> None:
