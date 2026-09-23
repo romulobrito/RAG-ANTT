@@ -3,9 +3,12 @@ Testes do catalogo de tipos gerado a partir da base de conhecimento.
 """
 
 import json
+from typing import Sequence
 
+from scripts.gerar_relatorio import _extrair_metadados_do_nome, _varrer_filesystem
 from tipos_documento import (
     atualizar_catalogo_tipos,
+    classificar_documento_sem_padrao,
     detectar_referencias_documento,
     extrair_nome_do_cabecalho,
     limpar_cache_catalogo_tipos,
@@ -163,3 +166,130 @@ def test_compat_montar_catalogo_tipos_override():
     assert resolver_sigla_tipo("resolucao", cat) == "RES"
     assert "XYZ" in listar_siglas_tipo(cat)
     assert nome_amigavel_tipo("RES", cat) == "Resolucao"
+
+
+def test_alias_repetido_fica_com_maior_n_docs():
+    """Alias compartilhado fica com a sigla que tem mais documentos."""
+    cat = montar_catalogo_de_tipos(
+        {
+            "INC": {
+                "nome": "instrucao normativa",
+                "aliases": [
+                    "inc",
+                    "instrucao normativa",
+                    "instrucao normativa complementar",
+                ],
+                "n_docs": 2,
+            },
+            "INM": {
+                "nome": "instrucao normativa",
+                "aliases": ["in", "inm", "instrucao normativa"],
+                "n_docs": 11,
+            },
+        }
+    )
+    assert resolver_sigla_tipo("instrucao normativa", cat) == "INM"
+    assert resolver_sigla_tipo("inc", cat) == "INC"
+    assert resolver_sigla_tipo("instrucao normativa complementar", cat) == "INC"
+
+
+def _modelo_indisponivel(trecho: str, siglas: Sequence[str]) -> str:
+    """Substitui o modelo local por uma falha."""
+    raise RuntimeError("sem modelo")
+
+
+def test_entrada_sem_padrao_entra_como_outros(tmp_path):
+    """Arquivo da entrada sem nome padrao e indexado como OUTROS."""
+    base = tmp_path / "dados_antt"
+    entrada = base / "entrada"
+    entrada.mkdir(parents=True)
+    rascunho = entrada / "rascunho.md"
+    rascunho.write_text(
+        "INSTRUCAO NORMATIVA\n",
+        encoding="utf-8",
+    )
+    (entrada / "INM-00000034-2024.md").write_text(
+        "INSTRUCAO NORMATIVA No 34\n",
+        encoding="utf-8",
+    )
+    tipos = varrer_tipos_na_base(str(base), sugerir_sigla=_modelo_indisponivel)
+    assert "ENTRADA" not in tipos
+    assert "INM" in tipos
+    assert "OUTROS" in tipos
+    encontrados = _varrer_filesystem(str(base))
+    assert "rascunho.md" in encontrados
+    assert "INM-00000034-2024.md" in encontrados
+    meta = _extrair_metadados_do_nome(
+        "rascunho.md",
+        str(rascunho),
+        sugerir_sigla=_modelo_indisponivel,
+    )
+    assert meta["tipo"] == "OUTROS"
+    assert meta["numero"] == ""
+    assert meta["ano"] == ""
+
+
+def test_cabecalho_classifica_sem_modelo(tmp_path):
+    """Cabecalho conhecido vira sigla, numero e ano sem chamar o modelo."""
+    def _proibido(trecho: str, siglas: Sequence[str]) -> str:
+        raise AssertionError("modelo nao deveria ser chamado")
+
+    base = tmp_path / "dados_antt" / "entrada"
+    base.mkdir(parents=True)
+    caminho = base / "ato.md"
+    caminho.write_text(
+        "Resolucao No 6.057, de 1 de janeiro de 2024\n",
+        encoding="utf-8",
+    )
+    catalogo = montar_catalogo_de_tipos(
+        {
+            "RES": {
+                "nome": "resolucao",
+                "aliases": ["resolucao", "res"],
+                "n_docs": 4,
+            }
+        }
+    )
+    resultado = classificar_documento_sem_padrao(
+        str(caminho),
+        catalogo=catalogo,
+        sugerir_sigla=_proibido,
+    )
+    assert resultado.tipo == "RES"
+    assert resultado.numero == "6057"
+    assert resultado.ano == "2024"
+
+
+def test_modelo_invalido_ou_falho_cai_em_outros(tmp_path):
+    """Sigla fora da lista ou excecao do modelo vira OUTROS."""
+    base = tmp_path / "dados_antt" / "entrada"
+    base.mkdir(parents=True)
+    caminho = base / "solto.md"
+    caminho.write_text("Memorando interno sem ato.\n", encoding="utf-8")
+    catalogo = montar_catalogo_de_tipos(
+        {
+            "RES": {
+                "nome": "resolucao",
+                "aliases": ["resolucao", "res"],
+                "n_docs": 1,
+            }
+        }
+    )
+
+    def _invalida(trecho: str, siglas: Sequence[str]) -> str:
+        return "ZZZ"
+
+    invalido = classificar_documento_sem_padrao(
+        str(caminho),
+        catalogo=catalogo,
+        sugerir_sigla=_invalida,
+    )
+    assert invalido.tipo == "OUTROS"
+    assert invalido.numero == ""
+
+    falho = classificar_documento_sem_padrao(
+        str(caminho),
+        catalogo=catalogo,
+        sugerir_sigla=_modelo_indisponivel,
+    )
+    assert falho.tipo == "OUTROS"

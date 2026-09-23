@@ -18,9 +18,13 @@ import unicodedata
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from functools import lru_cache
-from typing import Dict, Iterable, List, Mapping, Optional, Sequence, Tuple
+from typing import Callable, Dict, Iterable, List, Mapping, Optional, Sequence, Tuple
 
-from config import TIPOS_DOCUMENTO_ALIASES_CURTOS, TIPOS_DOCUMENTO_IGNORAR_DIRS
+from config import (
+    TIPO_DOCUMENTO_OUTROS,
+    TIPOS_DOCUMENTO_ALIASES_CURTOS,
+    TIPOS_DOCUMENTO_IGNORAR_DIRS,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -49,6 +53,14 @@ _PADRAO_TITULO_ATO = re.compile(
 
 _NOME_CATALOGO = ".catalogo_tipos.json"
 _MAX_BYTES_CABECALHO = 4000
+_PADRAO_NUMERO_ATO = re.compile(
+    r"(?:^|\s)n(?:o|\.)?\s*(\d{1,3}(?:\.\d{3})+|\d+)\b"
+)
+_PADRAO_ANO_ATO = re.compile(r"\b((?:19|20)\d{2})\b")
+_PADRAO_PROCESSO_SEI = re.compile(r"^\d{5}\.\d{7}")
+
+SugeridorSigla = Callable[[str, Sequence[str]], str]
+_CACHE_CLASSIFICACAO: Dict[str, "ClassificacaoDocumento"] = {}
 
 
 @dataclass(frozen=True)
@@ -79,6 +91,20 @@ def normalizar_alias_tipo(valor: str) -> str:
 def caminho_arquivo_catalogo(base_dir: str = "dados_antt") -> str:
     """Caminho do JSON persistido do catalogo."""
     return os.path.join(base_dir, _NOME_CATALOGO)
+
+
+def _pasta_entrada(caminho: str) -> bool:
+    """
+    True se o caminho esta sob dados_antt/entrada.
+
+    Args:
+        caminho: Diretorio ou arquivo.
+
+    Returns:
+        True quando alguma parte do caminho e a pasta entrada.
+    """
+    partes = caminho.replace("\\", "/").split("/")
+    return "entrada" in [parte.lower() for parte in partes if parte]
 
 
 def _dirs_ignorados() -> set:
@@ -227,12 +253,193 @@ def _ler_cabecalho(caminho: str) -> str:
         return ""
 
 
-def varrer_tipos_na_base(base_dir: str = "dados_antt") -> Dict[str, Dict[str, object]]:
+@dataclass(frozen=True)
+class ClassificacaoDocumento:
+    """
+    Tipo, numero e ano de um arquivo sem o nome SIGLA-numero-ano.
+
+    Attributes:
+        tipo: Sigla do catalogo, ou OUTROS.
+        numero: Numero extraido do texto. Vazio se o texto nao trouxe.
+        ano: Ano de quatro digitos extraido do texto. Vazio se nao houver.
+    """
+
+    tipo: str
+    numero: str
+    ano: str
+
+
+def limpar_cache_classificacao() -> None:
+    """Esvazia a classificacao guardada neste processo."""
+    _CACHE_CLASSIFICACAO.clear()
+
+
+def _extrair_numero_e_ano(texto: str) -> Tuple[str, str]:
+    """
+    Le numero e ano no inicio do ato.
+
+    Args:
+        texto: Cabecalho do markdown.
+
+    Returns:
+        Par (numero sem pontos, ano). Strings vazias quando ausentes.
+    """
+    amostra = normalizar_alias_tipo(texto)[:1500]
+    numero = ""
+    match_numero = _PADRAO_NUMERO_ATO.search(amostra)
+    if match_numero:
+        numero = match_numero.group(1).replace(".", "")
+    match_ano = _PADRAO_ANO_ATO.search(amostra)
+    ano = match_ano.group(1) if match_ano else ""
+    return numero, ano
+
+
+def _catalogo_persistido(base_dir: str) -> CatalogoTiposDocumento:
+    """
+    Le o catalogo gravado, sem varrer a base de novo.
+
+    Args:
+        base_dir: Raiz dados_antt.
+
+    Returns:
+        Catalogo do JSON, ou catalogo vazio se o arquivo nao existir.
+    """
+    carregado = carregar_catalogo_do_arquivo(os.path.abspath(base_dir))
+    if carregado is not None:
+        return carregado
+    return montar_catalogo_de_tipos({})
+
+
+def _siglas_permitidas(catalogo: CatalogoTiposDocumento) -> List[str]:
+    """Siglas do catalogo mais OUTROS, sem repetir."""
+    saida: List[str] = []
+    for sigla in list(catalogo.siglas) + [TIPO_DOCUMENTO_OUTROS]:
+        chave = sigla.strip().upper()
+        if chave and chave not in saida:
+            saida.append(chave)
+    return saida
+
+
+def _sugerir_sigla_modelo_local(trecho: str, siglas: Sequence[str]) -> str:
+    """
+    Pede ao modelo local uma sigla da lista fechada.
+
+    Args:
+        trecho: Inicio do documento.
+        siglas: Siglas aceitas, incluindo OUTROS.
+
+    Returns:
+        Sigla em maiusculas.
+
+    Raises:
+        Exception: Se o modelo nao responder ou o JSON for ilegivel.
+    """
+    from config import get_llm_model, get_llm_provider_padrao
+    from llm_providers import create_llm_manager
+
+    permitidas = [item.strip().upper() for item in siglas if item.strip()]
+    exemplo = '{"sigla":"OUTROS"}'
+    prompt = "\n".join([
+        "Classifique o documento regulatorio da ANTT.",
+        "Responda somente com JSON ASCII nesta forma: {0}".format(exemplo),
+        "A sigla deve ser uma destas: {0}.".format(", ".join(permitidas)),
+        "Trecho:",
+        trecho[:800],
+    ])
+    gerente = create_llm_manager(get_llm_provider_padrao(), get_llm_model())
+    llm = gerente.get_llm(temperature=0.0, max_tokens=80)
+    if llm is None:
+        raise RuntimeError("Modelo local indisponivel.")
+    resposta = llm.invoke(prompt)
+    conteudo = getattr(resposta, "content", str(resposta))
+    if not isinstance(conteudo, str):
+        conteudo = str(conteudo)
+    inicio = conteudo.find("{")
+    fim = conteudo.rfind("}")
+    if inicio < 0 or fim <= inicio:
+        raise ValueError("Resposta sem JSON.")
+    dados = json.loads(conteudo[inicio : fim + 1])
+    if not isinstance(dados, dict):
+        raise ValueError("JSON sem objeto.")
+    sigla = str(dados.get("sigla") or "").strip().upper()
+    if sigla not in permitidas:
+        return TIPO_DOCUMENTO_OUTROS
+    return sigla
+
+
+def classificar_documento_sem_padrao(
+    caminho: str,
+    base_dir: str = "dados_antt",
+    catalogo: Optional[CatalogoTiposDocumento] = None,
+    sugerir_sigla: Optional[SugeridorSigla] = None,
+) -> ClassificacaoDocumento:
+    """
+    Classifica um markdown da entrada que nao se chama SIGLA-numero-ano.
+
+    A sigla sai do cabecalho quando o catalogo ja conhece o ato. Sem isso,
+    o modelo local escolhe uma sigla da lista. Falha ou sigla fora da lista
+    vira OUTROS. Numero e ano so entram se o texto os trouxe.
+
+    Args:
+        caminho: Caminho do .md.
+        base_dir: Raiz da base, usada para ler o catalogo gravado.
+        catalogo: Catalogo explicito. Omitido le o JSON da base.
+        sugerir_sigla: Substitui o modelo local. Testes passam uma funcao.
+
+    Returns:
+        ClassificacaoDocumento.
+    """
+    absoluto = os.path.abspath(caminho)
+    usar_cache = catalogo is None and sugerir_sigla is None
+    if usar_cache and absoluto in _CACHE_CLASSIFICACAO:
+        return _CACHE_CLASSIFICACAO[absoluto]
+
+    nome_base = os.path.splitext(os.path.basename(caminho))[0]
+    if _PADRAO_PROCESSO_SEI.match(nome_base):
+        resultado = ClassificacaoDocumento("SEI", nome_base, "")
+    elif "nota_tecnica" in nome_base.lower():
+        resultado = ClassificacaoDocumento("NT", nome_base, "")
+    else:
+        cat = catalogo if catalogo is not None else _catalogo_persistido(base_dir)
+        cabecalho = _ler_cabecalho(caminho)
+        numero, ano = _extrair_numero_e_ano(cabecalho)
+        nome = extrair_nome_do_cabecalho(cabecalho)
+        sigla = resolver_sigla_tipo(nome, cat) if nome else None
+        if not sigla:
+            permitidas = _siglas_permitidas(cat)
+            try:
+                sugerir = sugerir_sigla or _sugerir_sigla_modelo_local
+                bruta = sugerir(cabecalho, permitidas)
+                sigla = str(bruta or "").strip().upper()
+            except Exception as exc:
+                logger.warning(
+                    "Classificacao por modelo falhou (%s): %s",
+                    caminho,
+                    exc,
+                )
+                sigla = TIPO_DOCUMENTO_OUTROS
+            if sigla not in permitidas:
+                sigla = TIPO_DOCUMENTO_OUTROS
+        resultado = ClassificacaoDocumento(sigla, numero, ano)
+
+    if usar_cache:
+        _CACHE_CLASSIFICACAO[absoluto] = resultado
+    return resultado
+
+
+def varrer_tipos_na_base(
+    base_dir: str = "dados_antt",
+    sugerir_sigla: Optional[SugeridorSigla] = None,
+) -> Dict[str, Dict[str, object]]:
     """
     Varre .md da base e agrega tipos presentes (com pelo menos 1 arquivo).
 
+    Arquivo na entrada sem o nome SIGLA-numero-ano entra pela classificacao
+    do cabecalho, do modelo local ou do grupo OUTROS.
+
     Args:
         base_dir: Raiz dos documentos.
+        sugerir_sigla: Substitui o modelo local na classificacao da entrada.
 
     Returns:
         Dict sigla -> {nome, aliases, n_docs}.
@@ -246,9 +453,11 @@ def varrer_tipos_na_base(base_dir: str = "dados_antt") -> Dict[str, Dict[str, ob
     for dirpath, dirnames, filenames in os.walk(abs_base):
         dirnames[:] = [
             d for d in dirnames
-            if d.lower() not in _dirs_ignorados() and not d.startswith(".")
+            if d.lower() == "entrada"
+            or (d.lower() not in _dirs_ignorados() and not d.startswith("."))
         ]
-        if _caminho_ignorado(dirpath, abs_base):
+        na_entrada = _pasta_entrada(dirpath)
+        if _caminho_ignorado(dirpath, abs_base) and not na_entrada:
             continue
         for fname in filenames:
             if not fname.endswith(".md"):
@@ -256,13 +465,25 @@ def varrer_tipos_na_base(base_dir: str = "dados_antt") -> Dict[str, Dict[str, ob
             if fname.startswith("."):
                 continue
             caminho = os.path.join(dirpath, fname)
-            sigla = _inferir_sigla(caminho, abs_base, fname)
+            if na_entrada and not _PADRAO_NOME_ARQUIVO.match(fname):
+                classificacao = classificar_documento_sem_padrao(
+                    caminho,
+                    base_dir=abs_base,
+                    sugerir_sigla=sugerir_sigla,
+                )
+                sigla = classificacao.tipo
+            else:
+                sigla = _inferir_sigla(caminho, abs_base, fname)
             if not sigla:
                 continue
 
-            cabecalho = _ler_cabecalho(caminho)
-            nome = extrair_nome_do_cabecalho(cabecalho)
-            aliases = _aliases_de_nome(nome or sigla, sigla)
+            if sigla == TIPO_DOCUMENTO_OUTROS:
+                nome = "outros"
+                aliases = ["outros"]
+            else:
+                cabecalho = _ler_cabecalho(caminho)
+                nome = extrair_nome_do_cabecalho(cabecalho)
+                aliases = _aliases_de_nome(nome or sigla, sigla)
 
             if nome is None:
                 nome_llm, aliases_llm = _sugerir_aliases_llm(sigla, cabecalho)
@@ -317,22 +538,40 @@ def montar_catalogo_de_tipos(
         Catalogo tipado para parser/UI.
     """
     alias_para_sigla: Dict[str, str] = {}
+    alias_n_docs: Dict[str, int] = {}
     sigla_para_nome: Dict[str, str] = {}
+
+    def registrar_alias(chave: str, sigla: str, n_docs: int) -> None:
+        """
+        Guarda o alias. Em colisao, fica a sigla com mais documentos.
+
+        Args:
+            chave: Alias normalizado.
+            sigla: Sigla candidata.
+            n_docs: Quantidade de documentos dessa sigla.
+        """
+        if not chave:
+            return
+        atual = alias_n_docs.get(chave)
+        if atual is None or n_docs > atual:
+            alias_para_sigla[chave] = sigla
+            alias_n_docs[chave] = n_docs
 
     for sigla_raw, meta in tipos.items():
         sigla = str(sigla_raw).strip().upper()
         if not sigla:
             continue
         nome = str(meta.get("nome") or sigla).strip() or sigla
+        try:
+            n_docs = int(meta.get("n_docs") or 0)
+        except (TypeError, ValueError):
+            n_docs = 0
         sigla_para_nome[sigla] = nome
-        alias_para_sigla[normalizar_alias_tipo(sigla)] = sigla
+        registrar_alias(normalizar_alias_tipo(sigla), sigla, n_docs)
         aliases = meta.get("aliases") or ()
         if isinstance(aliases, (list, tuple)):
             for alias in aliases:
-                chave = normalizar_alias_tipo(str(alias))
-                if chave:
-                    # Em colisao, primeira sigla vista mantem o alias.
-                    alias_para_sigla.setdefault(chave, sigla)
+                registrar_alias(normalizar_alias_tipo(str(alias)), sigla, n_docs)
 
     return CatalogoTiposDocumento(
         alias_para_sigla=alias_para_sigla,

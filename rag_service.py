@@ -8,6 +8,7 @@ A API futura e a tela de QA chamam estas funcoes. A geracao em fluxo
 from __future__ import annotations
 
 import os
+import re
 import uuid
 from dataclasses import dataclass
 from typing import Dict, List, Mapping, Optional, Sequence
@@ -368,6 +369,116 @@ def _filtro_texto(
     return texto
 
 
+@dataclass
+class TrechosRecuperados:
+    """Trechos da mesma busca usada pela tela e por consultar."""
+
+    pergunta_busca: str
+    documentos: List[object]
+    embedding_provider: str
+    vectorstore_utilizado: str
+
+
+def recuperar_trechos(
+    pergunta: str,
+    filtros: Optional[Mapping[str, object]] = None,
+    max_documentos: Optional[int] = None,
+    embedding_provider: Optional[str] = None,
+    historico: Optional[Sequence[Mapping[str, str]]] = None,
+    provider: Optional[str] = None,
+    modelo: Optional[str] = None,
+    temperatura: Optional[float] = None,
+    max_tokens: Optional[int] = None,
+) -> TrechosRecuperados:
+    """
+    Busca os trechos da consulta, com o mesmo corte da API.
+
+    k omitido vale 30. k explicito fica entre 1 e 40. A geracao
+    posterior nao descarta 31 a 40: o teto interno acompanha 40.
+
+    Args:
+        pergunta: Texto da pergunta.
+        filtros: tipo_documento, ano e numero, todos opcionais.
+        max_documentos: Quantidade de trechos.
+        embedding_provider: Como localizar os trechos.
+        historico: Trocas anteriores. Quando presente, reescreve a busca.
+        provider: Provedor usado so na reescrita.
+        modelo: Modelo usado so na reescrita.
+        temperatura: Liberdade de redacao da reescrita.
+        max_tokens: Teto de tokens da reescrita.
+
+    Returns:
+        TrechosRecuperados com a pergunta usada na busca e os documentos.
+
+    Raises:
+        PerguntaInvalidaError: Pergunta vazia ou k fora da faixa.
+        ProvedorNaoLiberadoError: Embedding nao liberado.
+        RagNotReadyError: Indice ou busca indisponivel.
+    """
+    if not isinstance(pergunta, str) or not pergunta.strip():
+        raise PerguntaInvalidaError("Pergunta vazia.")
+
+    k = _resolver_max_documentos(max_documentos)
+    embedding = _normalizar_embedding(embedding_provider)
+    vectorstore = _obter_vectorstore(embedding)
+    caminho_indice = str(
+        getattr(vectorstore, "_vectorstore_path", "")
+        or _caminho_indice(embedding)
+    )
+
+    pergunta_busca = pergunta.strip()
+    if historico:
+        try:
+            provedor = _resolver_provedor(provider)
+            modelo_efetivo = (modelo or get_llm_model()).strip() or get_llm_model()
+            gerente = create_llm_manager(provedor, modelo_efetivo)
+            llm_reescrita = gerente.get_llm(
+                temperature=_resolver_temperatura(temperatura),
+                max_tokens=_resolver_max_tokens(max_tokens),
+            )
+            pergunta_busca = _reescrever_query_com_historico(
+                pergunta_busca,
+                list(historico),
+                llm_reescrita,
+            )
+        except (ProvedorNaoLiberadoError, PerguntaInvalidaError):
+            raise
+        except Exception as exc:
+            logger.warning("Reescrita da pergunta falhou: %s", exc)
+
+    tipo = _filtro_texto(filtros, "tipo_documento")
+    numero = _filtro_texto(filtros, "numero")
+    ano: Optional[object] = None
+    if filtros is not None and filtros.get("ano") is not None:
+        ano_bruto = filtros.get("ano")
+        if not (isinstance(ano_bruto, str) and ano_bruto.strip() in ("", "Todos")):
+            ano = ano_bruto
+
+    try:
+        documentos = pesquisar_documentos(
+            pergunta_busca,
+            vectorstore,
+            k=k,
+            tipo_documento=tipo,
+            ano=ano,
+            numero=numero,
+            embedding_provider=embedding,
+        )
+    except Exception as exc:
+        raise RagNotReadyError(
+            "Busca indisponivel: {0}".format(exc)
+        ) from exc
+
+    if not isinstance(documentos, list):
+        documentos = list(documentos)
+    return TrechosRecuperados(
+        pergunta_busca=pergunta_busca,
+        documentos=documentos,
+        embedding_provider=embedding,
+        vectorstore_utilizado=caminho_indice,
+    )
+
+
 def consultar(
     pergunta: str,
     filtros: Optional[Mapping[str, object]] = None,
@@ -406,62 +517,23 @@ def consultar(
         RagNotReadyError: Indice ou modelo indisponivel.
         RagGenerationError: Falha ao redigir.
     """
-    if not isinstance(pergunta, str) or not pergunta.strip():
-        raise PerguntaInvalidaError("Pergunta vazia.")
-
     provedor = _resolver_provedor(provider)
     temperatura_efetiva = _resolver_temperatura(temperatura)
-    k = _resolver_max_documentos(max_documentos)
     teto_tokens = _resolver_max_tokens(max_tokens)
-    embedding = _normalizar_embedding(embedding_provider)
     modelo_efetivo = (modelo or get_llm_model()).strip() or get_llm_model()
-
-    vectorstore = _obter_vectorstore(embedding)
-    caminho_indice = str(
-        getattr(vectorstore, "_vectorstore_path", "")
-        or _caminho_indice(embedding)
+    pacote = recuperar_trechos(
+        pergunta,
+        filtros=filtros,
+        max_documentos=max_documentos,
+        embedding_provider=embedding_provider,
+        historico=historico,
+        provider=provedor,
+        modelo=modelo_efetivo,
+        temperatura=temperatura_efetiva,
+        max_tokens=teto_tokens,
     )
-
-    pergunta_busca = pergunta.strip()
-    if historico:
-        try:
-            gerente = create_llm_manager(provedor, modelo_efetivo)
-            llm_reescrita = gerente.get_llm(
-                temperature=temperatura_efetiva,
-                max_tokens=teto_tokens,
-            )
-            pergunta_busca = _reescrever_query_com_historico(
-                pergunta_busca,
-                list(historico),
-                llm_reescrita,
-            )
-        except ProvedorNaoLiberadoError:
-            raise
-        except Exception as exc:
-            logger.warning("Reescrita da pergunta falhou: %s", exc)
-
-    tipo = _filtro_texto(filtros, "tipo_documento")
-    numero = _filtro_texto(filtros, "numero")
-    ano: Optional[object] = None
-    if filtros is not None and filtros.get("ano") is not None:
-        ano_bruto = filtros.get("ano")
-        if not (isinstance(ano_bruto, str) and ano_bruto.strip() in ("", "Todos")):
-            ano = ano_bruto
-
-    try:
-        documentos = pesquisar_documentos(
-            pergunta_busca,
-            vectorstore,
-            k=k,
-            tipo_documento=tipo,
-            ano=ano,
-            numero=numero,
-            embedding_provider=embedding,
-        )
-    except Exception as exc:
-        raise RagNotReadyError(
-            "Busca indisponivel: {0}".format(exc)
-        ) from exc
+    pergunta_busca = pacote.pergunta_busca
+    documentos = pacote.documentos
 
     try:
         gerente_resposta = create_llm_manager(provedor, modelo_efetivo)
@@ -490,8 +562,8 @@ def consultar(
         provider=provedor,
         documentos_consultados=hits,
         total_documentos_encontrados=len(hits),
-        embedding_provider=embedding,
-        vectorstore_utilizado=caminho_indice,
+        embedding_provider=pacote.embedding_provider,
+        vectorstore_utilizado=pacote.vectorstore_utilizado,
     )
 
 
@@ -561,6 +633,27 @@ def listar_documentos(
             )
         )
     return itens
+
+
+def listar_anos(relatorio_path: str = _RELATORIO) -> List[str]:
+    """
+    Anos de quatro digitos presentes no catalogo, do mais novo ao mais antigo.
+
+    Ano vazio ou fora do seculo 20/21 fica de fora. A tela usa esta lista
+    no filtro, no lugar de um intervalo fixo.
+
+    Args:
+        relatorio_path: Caminho de relatorio_documentos.json.
+
+    Returns:
+        Anos unicos, ordenados de forma decrescente.
+    """
+    encontrados = {
+        item.ano
+        for item in listar_documentos(relatorio_path)
+        if re.fullmatch(r"(?:19|20)\d{2}", item.ano)
+    }
+    return sorted(encontrados, reverse=True)
 
 
 def disparar_reindexacao(

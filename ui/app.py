@@ -33,7 +33,9 @@ from rag_service import (
     ProvedorNaoLiberadoError,
     disparar_reindexacao,
     incluir_documento,
+    listar_anos,
     obter_status,
+    recuperar_trechos,
 )
 from tipos_documento import listar_siglas_tipo
 from ui.theme import (
@@ -51,13 +53,11 @@ from ui.theme import (
     rotulos_altura_campo_pergunta,
 )
 from antt_rag_unified import (
-    _reescrever_query_com_historico,
     carregar_vectorstore_com_provider,
     detectar_documentos_novos,
     extrair_citacoes_da_resposta,
     gerar_resposta,
     gerar_resposta_streaming,
-    pesquisar_documentos,
     resposta_indica_falha,
 )
 
@@ -414,8 +414,9 @@ def interface_usuario_unificada():
         
         ano_filtro = st.selectbox(
             "Ano:",
-            options=["Todos"] + [str(year) for year in range(2024, 2019, -1)],
-            help="Restringe a busca ao ano escolhido."
+            options=["Todos"] + listar_anos(),
+            help="Restringe a busca ao ano escolhido. "
+                 "A lista sai dos anos que ja estao na base."
         )
         
         numero_filtro = st.text_input(
@@ -698,34 +699,36 @@ ou com qualidade baixa. Leva alguns minutos.
                         )
                         return
                     
-                    # Aplicar filtros
-                    filtro_tipo = None if tipo_documento == "Todos" else tipo_documento
-                    filtro_ano = None if ano_filtro == "Todos" else ano_filtro
-                    filtro_numero = numero_filtro if numero_filtro.strip() else None
-                    
-                    # Reescrever query se houver historico de conversa
+                    # Mesma busca do consultar. O streaming fica so na tela.
                     pergunta_original = pergunta_para_processar
-                    if st.session_state.chat_history:
-                        pergunta_para_processar = _reescrever_query_com_historico(
-                            pergunta_para_processar,
-                            st.session_state.chat_history,
-                            llm,
-                        )
-                        if pergunta_para_processar != pergunta_original:
-                            st.info(
-                                f"Pergunta contextualizada: **{pergunta_para_processar}**"
-                            )
-
-                    # Buscar documentos
-                    documentos = pesquisar_documentos(
+                    filtro_ano = None if ano_filtro == "Todos" else ano_filtro
+                    pacote_busca = recuperar_trechos(
                         pergunta_para_processar,
-                        vectorstore,
-                        k=num_documentos,
-                        tipo_documento=filtro_tipo,
-                        ano=filtro_ano,
-                        numero=filtro_numero,
-                        embedding_provider=selected_embedding_provider
+                        filtros={
+                            "tipo_documento": (
+                                None if tipo_documento == "Todos" else tipo_documento
+                            ),
+                            "ano": filtro_ano,
+                            "numero": (
+                                numero_filtro if numero_filtro.strip() else None
+                            ),
+                        },
+                        max_documentos=int(num_documentos),
+                        embedding_provider=selected_embedding_provider,
+                        historico=list(st.session_state.chat_history),
+                        provider=provider_usado,
+                        modelo=selected_model,
+                        temperatura=float(temperatura),
+                        max_tokens=int(max_tokens),
                     )
+                    pergunta_para_processar = pacote_busca.pergunta_busca
+                    documentos = pacote_busca.documentos
+                    if pergunta_para_processar != pergunta_original:
+                        st.info(
+                            "Pergunta contextualizada: **{0}**".format(
+                                pergunta_para_processar
+                            )
+                        )
                     
                     if documentos:
                         logger.info(f"DEBUG: Gerando resposta com {len(documentos)} documentos")

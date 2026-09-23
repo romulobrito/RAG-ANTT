@@ -408,10 +408,14 @@ TIPOS_DOCUMENTO_ALIASES_CURTOS = {
 # Se True, tenta LLM quando o cabecalho nao entrega nome (custo/latencia).
 TIPOS_DOCUMENTO_USAR_LLM_ALIASES = False
 
+# Grupo dos arquivos da entrada que nao casam com uma sigla conhecida.
+TIPO_DOCUMENTO_OUTROS = "OUTROS"
+
 # Pastas sob dados_antt/ que nao sao tipos documentais.
 TIPOS_DOCUMENTO_IGNORAR_DIRS = (
     "tabelas_auxiliares",
     ".ocr_cache",
+    "entrada",
 )
 
 # Configurações do Streamlit
@@ -449,6 +453,7 @@ __all__ = [
     "LOCAL_EMBEDDING_MODEL",
     "TIPOS_DOCUMENTO_ALIASES_CURTOS",
     "TIPOS_DOCUMENTO_USAR_LLM_ALIASES",
+    "TIPO_DOCUMENTO_OUTROS",
     "TIPOS_DOCUMENTO_IGNORAR_DIRS",
     "STREAMLIT_PAGE_TITLE",
     "STREAMLIT_PAGE_ICON",

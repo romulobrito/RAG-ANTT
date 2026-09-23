@@ -3,12 +3,19 @@ import json
 import glob
 import re
 import sys
+from typing import Optional
 
 _RAIZ = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if _RAIZ not in sys.path:
     sys.path.insert(0, _RAIZ)
 
-from tipos_documento import atualizar_catalogo_tipos, listar_siglas_tipo
+from tipos_documento import (
+    SugeridorSigla,
+    atualizar_catalogo_tipos,
+    classificar_documento_sem_padrao,
+    limpar_cache_classificacao,
+    listar_siglas_tipo,
+)
 
 DIR_DADOS = "dados_antt"
 
@@ -22,7 +29,11 @@ _PADRAO_NOME = re.compile(
 )
 
 
-def _extrair_metadados_do_nome(nome_arquivo: str, caminho: str) -> dict:
+def _extrair_metadados_do_nome(
+    nome_arquivo: str,
+    caminho: str,
+    sugerir_sigla: Optional[SugeridorSigla] = None,
+) -> dict:
     """
     Extrai tipo, numero e ano a partir do nome do arquivo .md.
 
@@ -67,6 +78,34 @@ def _extrair_metadados_do_nome(nome_arquivo: str, caminho: str) -> dict:
         tipo = "NT"
         numero = nome_base
     else:
+        if pasta_pai.lower() == "entrada":
+            base_dir = os.path.dirname(os.path.dirname(caminho)) or DIR_DADOS
+            classificacao = classificar_documento_sem_padrao(
+                caminho,
+                base_dir=base_dir,
+                sugerir_sigla=sugerir_sigla,
+            )
+            tipo = classificacao.tipo
+            numero = classificacao.numero
+            ano = classificacao.ano
+            if numero and ano:
+                titulo = "{0} {1}/{2}".format(tipo, numero, ano)
+            elif numero:
+                titulo = "{0} {1}".format(tipo, numero)
+            else:
+                titulo = nome_base.replace("_", " ").replace("-", "/")
+            return {
+                "titulo": titulo,
+                "ementa": "",
+                "data": "",
+                "tipo": tipo,
+                "numero": numero,
+                "ano": ano,
+                "orgao": "ANTT",
+                "url": "",
+                "arquivo_html": "",
+                "arquivo_md": caminho,
+            }
         tipo = pasta_pai.upper() if pasta_pai else "DOC"
         numero = nome_base
 
@@ -97,11 +136,13 @@ def _varrer_filesystem(diretorio: str) -> dict:
     """
     resultado: dict = {}
     for dirpath, _dirs, filenames in os.walk(diretorio):
-        if "tabelas_auxiliares" in dirpath.replace("\\", "/").split("/"):
+        partes = dirpath.replace("\\", "/").split("/")
+        if "tabelas_auxiliares" in partes:
             continue
         for fname in filenames:
-            if fname.endswith(".md") and fname not in resultado:
-                resultado[fname] = os.path.join(dirpath, fname)
+            if not fname.endswith(".md") or fname in resultado:
+                continue
+            resultado[fname] = os.path.join(dirpath, fname)
     return resultado
 
 
@@ -118,6 +159,7 @@ def gerar_relatorio_documentos():
         list[dict]: Lista de documentos catalogados.
     """
     print(f"Gerando relatorio de documentos em {DIR_DADOS}...")
+    limpar_cache_classificacao()
 
     if not os.path.exists(DIR_DADOS):
         print(f"Erro: Diretorio {DIR_DADOS} nao encontrado.")

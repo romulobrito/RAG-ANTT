@@ -6,6 +6,7 @@ Nao abrem FAISS nem chamam Ollama.
 
 from __future__ import annotations
 
+import json
 import subprocess
 import sys
 from pathlib import Path
@@ -21,6 +22,7 @@ from rag_service import (
     consultar,
     incluir_documento,
     limpar_cache_vectorstore,
+    listar_anos,
 )
 
 RAIZ = Path(__file__).resolve().parent.parent
@@ -169,6 +171,22 @@ def test_incluir_documento_grava_pdf(tmp_path: Path, monkeypatch: pytest.MonkeyP
     assert caminho.endswith(".pdf")
     assert Path(caminho).is_file()
     assert Path(caminho).read_bytes().startswith(b"%PDF")
+
+
+def test_listar_anos_ignora_vazio_e_ordena(tmp_path: Path) -> None:
+    """O filtro de ano sai do catalogo, do mais novo para o mais antigo."""
+    relatorio = tmp_path / "relatorio_documentos.json"
+    relatorio.write_text(
+        json.dumps([
+            {"ano": "2020", "tipo": "RES", "arquivo_md": "a.md"},
+            {"ano": "", "tipo": "OUTROS", "arquivo_md": "b.md"},
+            {"ano": "2024", "tipo": "INM", "arquivo_md": "c.md"},
+            {"ano": "2024", "tipo": "RES", "arquivo_md": "d.md"},
+            {"ano": "antigo", "tipo": "SEI", "arquivo_md": "e.md"},
+        ]),
+        encoding="utf-8",
+    )
+    assert listar_anos(str(relatorio)) == ["2024", "2020"]
 
 
 def test_incluir_documento_rejeita_nao_pdf() -> None:

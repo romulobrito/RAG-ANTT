@@ -4106,7 +4106,8 @@ def _normalize_text_ascii_lower(value: str) -> str:
         return value.lower()
 
 _MAX_CONTEXT_CHARS = 50000
-_MAX_CHUNKS_LLM = 30
+# Teto do contrato (RAG_MAX_DOCUMENTOS vai ate 40). Omissao continua 30.
+_MAX_CHUNKS_LLM = 40
 # Limite mais baixo para modelos locais em CPU (evita timeout/OOM).
 _LIMITE_CONTEXTO_OLLAMA = 24000
 

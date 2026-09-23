@@ -113,9 +113,9 @@ Liberdade de redacao, tamanho da resposta e quantidade de trechos tambem nao sao
 | `RAG_MAX_DOCUMENTOS` | ConfigMap | `30` (teto do contrato: 40) |
 | `RAG_EMBEDDING_ALLOWED` | ConfigMap | `local` |
 | `RAG_VAGAS_GERACAO_LOCAL` | ConfigMap | `1` |
-| `RAG_HISTORICO_TURNOS` | ConfigMap | `5` (teto interno: 20) |
-| `RAG_HISTORICO_REESCRITA` | ConfigMap | `3` (teto interno: 10) |
-| `RAG_HISTORICO_CHARS_RESPOSTA` | ConfigMap | `300` (teto interno: 2000; piso: 50) |
+| `RAG_HISTORICO_TURNOS` | ConfigMap | `10` (teto interno: 20) |
+| `RAG_HISTORICO_REESCRITA` | ConfigMap | `8` (teto interno: 10) |
+| `RAG_HISTORICO_CHARS_RESPOSTA` | ConfigMap | `1000` (teto interno: 2000; piso: 50) |
 | `RAG_LLM_CLOUD_FALLBACK` | ConfigMap | `false` |
 | `OLLAMA_BASE_URL` | ConfigMap | `http://ollama-svc:11434/v1` |
 | `RAG_API_KEY` | Secret | gerada pela GETIC/GESIN |
@@ -125,15 +125,15 @@ Liberdade de redacao, tamanho da resposta e quantidade de trechos tambem nao sao
 
 Continuidade da mesma conversa tambem nao e controle da tela. O RAG nao grava as trocas. Na primeira pergunta o `historico` vem omitido. Na seguinte, o SIGESC (ou a sessao do Streamlit de QA) reenvia o que ja tem. O servico corta pelo ambiente e nao responde 400 por excesso:
 
-- `RAG_HISTORICO_TURNOS`: quantas trocas ficam. Padrao 5. Abaixo de 1 vira 1; acima de 20 vira 20; valor invalido volta a 5. O que passar do limite sai pelo mais antigo.
-- `RAG_HISTORICO_REESCRITA`: quantas dessas trocas entram na reescrita da pergunta. Padrao 3. Intervalo 1 a 10. Se for maior do que o que esta guardado, usa so o que existe.
-- `RAG_HISTORICO_CHARS_RESPOSTA`: caracteres da resposta anterior nessa reescrita. Padrao 300. Abaixo de 50 vira 50; acima de 2000 vira 2000.
+- `RAG_HISTORICO_TURNOS`: quantas trocas ficam. Padrao 10. Abaixo de 1 vira 1; acima de 20 vira 20; valor invalido volta a 10. O que passar do limite sai pelo mais antigo.
+- `RAG_HISTORICO_REESCRITA`: quantas dessas trocas entram na reescrita da pergunta. Padrao 8. Intervalo 1 a 10. Se for maior do que o que esta guardado, usa so o que existe.
+- `RAG_HISTORICO_CHARS_RESPOSTA`: caracteres da resposta anterior nessa reescrita. Padrao 1000. Abaixo de 50 vira 50; acima de 2000 vira 2000.
 
 A pergunta atual vai inteira. So a resposta anterior e cortada. Subir esses numeros alonga a chamada extra de reescrita; o padrao de hoje permanece se o ConfigMap nao definir as variaveis.
 
 Quando a Agencia comprar DeepSeek ou OpenAI: a chave entra no Secret, o ConfigMap passa a listar o provedor, o pod reinicia. A mesma tela mostra a opcao. Provedor fora da lista no `POST /api/query` responde 400. Escolher nuvem envia o trecho de contexto para fora da rede; o rotulo na tela diz isso. O padrao de consulta, enquanto o ConfigMap nao mudar o provedor default, permanece Ollama.
 
-Trechos: o slider de QA vai ate 40 e esse e o teto do contrato. O padrao de servico e 30. O corte interno `_MAX_CHUNKS_LLM` hoje vale 30; na API ele acompanha o teto 40, senao um valor entre 31 e 40 seria descartado. A tela do SIGESC nao expoe o slider.
+Trechos: o slider de QA vai ate 40 e esse e o teto do contrato. O padrao de servico e 30. O corte interno `_MAX_CHUNKS_LLM` vale 40, o teto do contrato. Pedido omitido continua 30. Um valor entre 31 e 40 deixa de ser descartado na geracao. A tela do SIGESC nao expoe o slider.
 
 ## Arquitetura macro considerada nesta construcao
 
@@ -438,7 +438,7 @@ Secoes, nesta ordem:
    - `POST /api/documents` — com key — 201 — Processar documento (PDF na base comum; a consulta so ve depois do reindex)
    - `POST /api/reindex` — com key — 202 — Atualizar base na tela; base unica; 409 se o lock ja estiver ativo
    - `GET /api/docs` — flag `RAG_SWAGGER` — Swagger; off em prod
-6. **POST /api/query — request:** copiar o HTTP do exemplo ilustrativo deste plano (pergunta IRI, filtros INM/2024/34, `correlation_id`). Temperatura, trechos e tamanho da resposta nao vao no JSON da tela: a API usa `RAG_LLM_TEMPERATURE=0.1`, `RAG_MAX_DOCUMENTOS=30` (teto 40) e `RAG_LLM_MAX_TOKENS=4096`. `provider` so entra se a tela tiver mais de um servico liberado. `historico` fica de fora na primeira pergunta. Numa continuacao, o backend pode reenviar as trocas recentes; o servico aplica `RAG_HISTORICO_TURNOS=5`, `RAG_HISTORICO_REESCRITA=3` e `RAG_HISTORICO_CHARS_RESPOSTA=300` e nao persiste essa lista.
+6. **POST /api/query — request:** copiar o HTTP do exemplo ilustrativo deste plano (pergunta IRI, filtros INM/2024/34, `correlation_id`). Temperatura, trechos e tamanho da resposta nao vao no JSON da tela: a API usa `RAG_LLM_TEMPERATURE=0.1`, `RAG_MAX_DOCUMENTOS=30` (teto 40) e `RAG_LLM_MAX_TOKENS=4096`. `provider` so entra se a tela tiver mais de um servico liberado. `historico` fica de fora na primeira pergunta. Numa continuacao, o backend pode reenviar as trocas recentes; o servico aplica `RAG_HISTORICO_TURNOS=10`, `RAG_HISTORICO_REESCRITA=8` e `RAG_HISTORICO_CHARS_RESPOSTA=1000` e nao persiste essa lista.
 7. **POST /api/query — response:** copiar o JSON do exemplo (`request_id`, fontes, `tempo_processamento_ms` ~28000). Deixar claro que o texto da `resposta` e ilustrativo (o 7B pode errar rotulo; fontes sao obrigatorias).
 8. **Validacao:** `pergunta` min 1 char apos trim; `temperatura` 0.0–1.0, omissa = `RAG_LLM_TEMPERATURE` (0.1); `max_documentos` 1–40, omisso = `RAG_MAX_DOCUMENTOS` (30). Acima de 40 = 400. O corte `_MAX_CHUNKS_LLM` sobe de 30 para 40 na implementacao, para o teto do contrato valer. `provider` ausente = `ollama`; valor fora de `RAG_LLM_ALLOWED_PROVIDERS` = 400.
 9. **Erros:** 400 pergunta vazia / fora de faixa; 401 sem/key errada; 503 ready falho ou query sem indice/Ollama; 504 LLM estourou; 500 generico. Corpo = envelope `detail` + `request_id`.
@@ -553,7 +553,7 @@ SP-0 fechado quando:
 
 #### Decisoes a congelar no SP-1
 
-- Defaults do **servico** (usados por `consultar` se o caller nao passar): provider `ollama` (so o que estiver em `RAG_LLM_ALLOWED_PROVIDERS`), modelo `qwen2.5:7b`, embeddings `local` (`RAG_EMBEDDING_ALLOWED`), `RAG_LLM_TEMPERATURE=0.1`, `RAG_LLM_MAX_TOKENS=4096`, `RAG_MAX_DOCUMENTOS=30` (teto 40), `RAG_VAGAS_GERACAO_LOCAL=1`, `RAG_LLM_CLOUD_FALLBACK=false`, `RAG_HISTORICO_TURNOS=5`, `RAG_HISTORICO_REESCRITA=3`, `RAG_HISTORICO_CHARS_RESPOSTA=300`. A sidebar do Streamlit pode sobrescrever temperatura, trechos e tamanho na QA. A tela do SIGESC nao envia esses campos nem os limites de historico. `consultar` aplica o corte de historico quando o request traz trocas anteriores; a sessao do Streamlit usa os mesmos getters.
+- Defaults do **servico** (usados por `consultar` se o caller nao passar): provider `ollama` (so o que estiver em `RAG_LLM_ALLOWED_PROVIDERS`), modelo `qwen2.5:7b`, embeddings `local` (`RAG_EMBEDDING_ALLOWED`), `RAG_LLM_TEMPERATURE=0.1`, `RAG_LLM_MAX_TOKENS=4096`, `RAG_MAX_DOCUMENTOS=30` (teto 40), `RAG_VAGAS_GERACAO_LOCAL=1`, `RAG_LLM_CLOUD_FALLBACK=false`, `RAG_HISTORICO_TURNOS=10`, `RAG_HISTORICO_REESCRITA=8`, `RAG_HISTORICO_CHARS_RESPOSTA=1000`. A sidebar do Streamlit pode sobrescrever temperatura, trechos e tamanho na QA. A tela do SIGESC nao envia esses campos nem os limites de historico. `consultar` aplica o corte de historico quando o request traz trocas anteriores; a sessao do Streamlit usa os mesmos getters.
 - `consultar` e **sincrono**. Sem streaming no facade. `gerar_resposta_streaming` permanece so na UI, atras de atalho de QA (checkbox), **fora** do contrato SIGESC.
 - Excecoes tipadas (sem `any`): `RagNotReadyError` (indice/Ollama), `RagGenerationError` (usar `classificar_falha_de_geracao` ja existente). SP-2 mapeia para 503/504. Nao engolir falha como texto de "nao encontrei" quando for queda de servico.
 - Cache do vectorstore: singleton no modulo `rag_service` (carregar uma vez por processo), alinhado ao lifespan do FastAPI depois.
@@ -793,7 +793,7 @@ SP-2 fechado quando:
 - **Ready vs health:** compose considera a API "up" no health (processo). O teste e2e so roda quando `GET /api/ready` = 200 (modelo puxado + indice montado).
 - **Modelo:** documentar `ollama pull qwen2.5:7b` no volume. Smoke em notebook apertado: `llama3.2:3b`. O gate INM 34 prefere 7B se a RAM do host aguentar (~8–10 GiB do modelo + API).
 - **Reindex no container:** a imagem API inclui o que o query precisa (faiss, torch CPU, sentence-transformers, fastapi). Tesseract: incluir se o endpoint `/api/reindex` for usado no compose; se o indice ja vem montado, o e2e de query **nao** depende de OCR. Preferir e2e com `vectorstore_local` ja existente no host.
-- **Segredos:** `.env` gitignored; `.env.example` com `RAG_API_KEY=trocar`, os padroes da secao "Tela do SIGESC e variaveis de ambiente" (`TEMPERATURE=0.1`, `MAX_TOKENS=4096`, `MAX_DOCUMENTOS=30`, `ALLOWED_PROVIDERS=ollama`, `EMBEDDING_ALLOWED=local`, `VAGAS_GERACAO_LOCAL=1`, `HISTORICO_TURNOS=5`, `HISTORICO_REESCRITA=3`, `HISTORICO_CHARS_RESPOSTA=300`) e `RAG_LLM_CLOUD_FALLBACK=false`. Sem chaves OpenRouter em prod compose ate a Agencia liberar.
+- **Segredos:** `.env` gitignored; `.env.example` com `RAG_API_KEY=trocar`, os padroes da secao "Tela do SIGESC e variaveis de ambiente" (`TEMPERATURE=0.1`, `MAX_TOKENS=4096`, `MAX_DOCUMENTOS=30`, `ALLOWED_PROVIDERS=ollama`, `EMBEDDING_ALLOWED=local`, `VAGAS_GERACAO_LOCAL=1`, `HISTORICO_TURNOS=10`, `HISTORICO_REESCRITA=8`, `HISTORICO_CHARS_RESPOSTA=1000`) e `RAG_LLM_CLOUD_FALLBACK=false`. Sem chaves OpenRouter em prod compose ate a Agencia liberar.
 - **Streamlit:** profile `qa`, porta 8501, chama o **facade no mesmo filesystem** (mesmo mount), nao precisa chamar a API (evita latencia dupla). Nao e produto.
 
 #### Passo 1 — `.dockerignore`
@@ -819,7 +819,7 @@ Mesmo base/deps (ou FROM a api e troca CMD) para nao divergir o facade. `EXPOSE 
 Servicos:
 
 - `ollama`: `image: ollama/ollama`, volume `ollama_models:/root/.ollama`, **sem** `ports` no default, healthcheck `/api/tags`.
-- `rag-api`: build `Dockerfile.api`, `ports: "8000:8000"`, env `OLLAMA_BASE_URL=http://ollama:11434/v1`, `RAG_API_KEY` do `.env`, `RAG_SWAGGER=true`, `RAG_LLM_ALLOWED_PROVIDERS=ollama`, `RAG_LLM_MODEL=qwen2.5:7b`, `RAG_LLM_TEMPERATURE=0.1`, `RAG_LLM_MAX_TOKENS=4096`, `RAG_MAX_DOCUMENTOS=30`, `RAG_EMBEDDING_ALLOWED=local`, `RAG_VAGAS_GERACAO_LOCAL=1`, `RAG_HISTORICO_TURNOS=5`, `RAG_HISTORICO_REESCRITA=3`, `RAG_HISTORICO_CHARS_RESPOSTA=300`, `RAG_LLM_CLOUD_FALLBACK=false`, mounts `./dados_antt:/app/dados_antt` (rw: Processar documento e reindex gravam; consulta pode ser ro), `./vectorstore_local:/app/vectorstore_local`, `./relatorio_documentos.json` se existir. `depends_on` ollama healthy.
+- `rag-api`: build `Dockerfile.api`, `ports: "8000:8000"`, env `OLLAMA_BASE_URL=http://ollama:11434/v1`, `RAG_API_KEY` do `.env`, `RAG_SWAGGER=true`, `RAG_LLM_ALLOWED_PROVIDERS=ollama`, `RAG_LLM_MODEL=qwen2.5:7b`, `RAG_LLM_TEMPERATURE=0.1`, `RAG_LLM_MAX_TOKENS=4096`, `RAG_MAX_DOCUMENTOS=30`, `RAG_EMBEDDING_ALLOWED=local`, `RAG_VAGAS_GERACAO_LOCAL=1`, `RAG_HISTORICO_TURNOS=10`, `RAG_HISTORICO_REESCRITA=8`, `RAG_HISTORICO_CHARS_RESPOSTA=1000`, `RAG_LLM_CLOUD_FALLBACK=false`, mounts `./dados_antt:/app/dados_antt` (rw: Processar documento e reindex gravam; consulta pode ser ro), `./vectorstore_local:/app/vectorstore_local`, `./relatorio_documentos.json` se existir. `depends_on` ollama healthy.
 - `streamlit`: profile `qa`, `ports: "8501:8501"`, mesmos mounts.
 
 Arquivo `.env.example` listando as env. Compose `env_file: .env`.
@@ -899,7 +899,7 @@ SP-3 fechado quando:
 - **Probes:** liveness `GET /api/health`; readiness `GET /api/ready` com `initialDelaySeconds` 60–120. **Errata SP-0:** `/api/ready` **sem** API Key (kubelet nao envia header). Query/status/documents/reindex continuam com key.
 - **Resources** requests=limits no piso da arquitetura: rag-api 2 CPU / 4Gi, ollama 4 CPU / 16Gi. Overlay `qa` acrescenta streamlit 1 CPU / 2Gi (tabela da arquitetura). Prod **sem** Streamlit = 6c / 20Gi; o teto 7c / 22Gi e o piso com QA ligado. Sem `nvidia.com/gpu`.
 - **PVCs** (nomes e montagens da arquitetura; tamanhos placeholder ate a GESIN informar StorageClass): `vectorstore-data` 20Gi -> `/app/vectorstore_local`; `ollama-models` 30Gi -> `/root/.ollama`; `dados-antt` 80Gi -> `/app/dados_antt`. Default RWO; RWX so se overlay `qa` montar o mesmo indice. Sem PVC `logs-metricas` / `backup` neste ciclo (ops ANTT).
-- **Secret** so em `secret.yaml.example` (`RAG_API_KEY`; chaves OpenAI/OpenRouter so quando a Agencia liberar). ConfigMap: `OLLAMA_BASE_URL`, `RAG_LLM_ALLOWED_PROVIDERS=ollama`, `RAG_LLM_MODEL=qwen2.5:7b`, `RAG_LLM_TEMPERATURE=0.1`, `RAG_LLM_MAX_TOKENS=4096`, `RAG_MAX_DOCUMENTOS=30`, `RAG_EMBEDDING_ALLOWED=local`, `RAG_VAGAS_GERACAO_LOCAL=1`, `RAG_HISTORICO_TURNOS=5`, `RAG_HISTORICO_REESCRITA=3`, `RAG_HISTORICO_CHARS_RESPOSTA=300`, `RAG_LLM_CLOUD_FALLBACK=false`, `RAG_SWAGGER=false` no prod.
+- **Secret** so em `secret.yaml.example` (`RAG_API_KEY`; chaves OpenAI/OpenRouter so quando a Agencia liberar). ConfigMap: `OLLAMA_BASE_URL`, `RAG_LLM_ALLOWED_PROVIDERS=ollama`, `RAG_LLM_MODEL=qwen2.5:7b`, `RAG_LLM_TEMPERATURE=0.1`, `RAG_LLM_MAX_TOKENS=4096`, `RAG_MAX_DOCUMENTOS=30`, `RAG_EMBEDDING_ALLOWED=local`, `RAG_VAGAS_GERACAO_LOCAL=1`, `RAG_HISTORICO_TURNOS=10`, `RAG_HISTORICO_REESCRITA=8`, `RAG_HISTORICO_CHARS_RESPOSTA=1000`, `RAG_LLM_CLOUD_FALLBACK=false`, `RAG_SWAGGER=false` no prod.
 - **Job opcional** `ollama-pull` documentado. Ate o modelo existir, `ready` = 503.
 - **Rollback:** `kubectl rollout undo` do Deployment `rag-api`. Promocao = tag git = digest (oficio §3).
 
