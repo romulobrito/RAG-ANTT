@@ -11,6 +11,7 @@ streamlit==1.38.0
 faiss-cpu==1.8.0.post1
 pdfplumber
 openpyxl
+python-docx==1.1.2
 img2table
 python-dotenv==1.0.0
 # Contrato HTTP (Fase 0) e servidor (Fase 2). Nao subir o langchain.

@@ -43,6 +43,14 @@ services:
       RAG_LLM_MAX_TOKENS: "4096"
       RAG_MAX_DOCUMENTOS: "30"
       RAG_EMBEDDING_ALLOWED: local
+      RAG_EMBEDDING_PROVIDER: local
+      RAG_INCREMENTAL_UPLOAD_ENABLED: ${RAG_INCREMENTAL_UPLOAD_ENABLED:-true}
+      RAG_UPLOAD_FORMATS: pdf,docx,xlsx
+      RAG_UPLOAD_MAX_BYTES: ${RAG_UPLOAD_MAX_BYTES:-52428800}
+      RAG_INBOX_SCAN_ENABLED: ${RAG_INBOX_SCAN_ENABLED:-true}
+      RAG_INBOX_SCAN_SECONDS: ${RAG_INBOX_SCAN_SECONDS:-30}
+      RAG_INBOX_FORMATS: pdf
+      RAG_OPS_API_KEY: ${RAG_OPS_API_KEY:-}
       RAG_VAGAS_GERACAO_LOCAL: "1"
       RAG_HISTORICO_TURNOS: "10"
       RAG_HISTORICO_REESCRITA: "8"
@@ -68,6 +76,10 @@ services:
       dockerfile: Dockerfile.streamlit
     restart: unless-stopped
     environment:
+      RAG_API_INTERNAL_URL: http://rag-api:8000
+      RAG_API_KEY: ${RAG_API_KEY:-}
+      RAG_UI_REINDEX_COMPLETA: "false"
+      RAG_UI_EMBEDDING_SELECTOR: "false"
       OLLAMA_BASE_URL: http://ollama:11434/v1
       RAG_LLM_ALLOWED_PROVIDERS: ollama
       RAG_LLM_MODEL: ${RAG_LLM_MODEL:-llama3.2:3b}
@@ -90,6 +102,8 @@ services:
       - huggingface_cache:/home/rag/.cache/huggingface
     depends_on:
       ollama:
+        condition: service_healthy
+      rag-api:
         condition: service_healthy
 
 volumes:

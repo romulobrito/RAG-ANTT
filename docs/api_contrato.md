@@ -29,12 +29,44 @@ O cliente SIGESC usa timeout de pelo menos 120 segundos. A consulta e sincrona. 
 | --- | --- | --- | --- | --- |
 | GET | `/api/health` | nao | 200 | Processo vivo |
 | GET | `/api/ready` | nao | 200 ou 503 | Indice e Ollama. Probe do cluster. Nao e consulta |
-| GET | `/api/status` | sim | 200 | Provedores liberados, embeddings, Ollama e quantidade de documentos |
+| GET | `/api/status` | sim | 200 | Provedores, embeddings, formatos de upload/inbox, jobs e quantidade de documentos |
 | POST | `/api/query` | sim | 200 | Consulta. Provedor fora de `RAG_LLM_ALLOWED_PROVIDERS` responde 400 |
 | GET | `/api/documents` | sim | 200 | Catalogo (`relatorio_documentos.json`) |
-| POST | `/api/documents` | sim | 201 | Grava o PDF na base comum. A consulta so o ve depois do reindex |
-| POST | `/api/reindex` | sim | 202 | Atualizar base. Base unica. Lock ativo responde 409 |
+| POST | `/api/documents` | sim | 202 | Recebe PDF, DOCX ou XLSX e devolve `job_id` |
+| GET | `/api/jobs/{job_id}` | sim | 200 ou 404 | Estado persistido da conversao/indexacao |
+| POST | `/api/reindex` | servico + ops | 202 | Rebuild completo tecnico. Lock ativo responde 409 |
 | GET | `/api/docs` | flag | 200 | Swagger, so se `RAG_SWAGGER=true`. Desligado em producao |
+
+### 5.1 Upload e job incremental
+
+O backend envia multipart no campo `arquivo`. A extensao e a assinatura
+binaria precisam concordar. Limite padrao: 50 MiB.
+
+```bash
+curl -s -X POST http://rag-api-svc:8000/api/documents \
+  -H "X-API-Key: <segredo-do-servico>" \
+  -F "arquivo=@nota.docx"
+```
+
+Resposta 202:
+
+```json
+{
+  "job_id": "f97bb134-170d-4894-8056-403c5a470e60",
+  "status": "queued",
+  "nome": "nota.docx",
+  "formato": "docx"
+}
+```
+
+O SIGESC consulta `GET /api/jobs/{job_id}` ate `succeeded`,
+`succeeded_with_warnings` ou `failed`. A pergunta seguinte ao sucesso ja
+consulta documentos antigos e novos na mesma geracao.
+
+A pasta `dados_antt/entrada` e uma inbox exclusiva para PDF. O produtor
+grava `<nome>.pdf.part` e renomeia para `<nome>.pdf` quando terminar. DOCX
+e XLSX entram somente pela API. Mesmo nome ou mesmo SHA-256 responde conflito
+e nao gera novos vetores.
 
 ## 6. POST /api/query — request
 
@@ -104,9 +136,11 @@ Corpo unico, sem stacktrace:
 
 | Codigo | Quando |
 | --- | --- |
-| 400 | Pergunta vazia, valor fora da faixa ou provedor nao liberado |
+| 400 | Pergunta/arquivo invalido, valor fora da faixa ou provedor nao liberado |
 | 401 | Sem key ou key errada |
-| 409 | Reindex com lock ja ativo |
+| 403 | Rebuild completo sem `X-Ops-Key` quando configurada |
+| 409 | Nome/hash duplicado ou reindex com lock ativo |
+| 413 | Upload acima do limite |
 | 503 | Ready falho, ou consulta sem indice ou sem Ollama |
 | 504 | O modelo estourou o tempo |
 | 500 | Falha generica |

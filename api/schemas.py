@@ -143,6 +143,10 @@ class StatusResponse(BaseModel):
     provedores_liberados: List[ProvedorLiberado]
     embeddings_liberados: List[str]
     embedding_provider: str
+    formatos_upload: List[str] = Field(default_factory=list)
+    formatos_inbox: List[str] = Field(default_factory=list)
+    indexacao_automatica: bool = False
+    reindexacao_em_andamento: bool = False
 
 
 class DocumentListItem(BaseModel):
@@ -163,3 +167,39 @@ class ReindexAccepted(BaseModel):
 
     job_id: str
     status: Literal["accepted"] = "accepted"
+
+
+class DocumentUploadAccepted(BaseModel):
+    """Upload validado e persistido para processamento assincrono."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    job_id: str
+    status: Literal["queued"] = "queued"
+    nome: str
+    formato: Literal["pdf", "docx", "xlsx"]
+
+
+class IngestionJobResponse(BaseModel):
+    """Estado persistido de um job de ingestao."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    job_id: str
+    status: Literal[
+        "queued",
+        "running",
+        "succeeded",
+        "succeeded_with_warnings",
+        "failed",
+    ]
+    nome: str
+    formato: Literal["pdf", "docx", "xlsx"]
+    origem: Literal["api", "inbox"]
+    mensagem: str
+    avisos: List[str] = Field(default_factory=list)
+    geracao: Optional[str] = None
+    chunks: Optional[int] = None
+    caminho: Optional[str] = None
+    created_at: str
+    updated_at: str

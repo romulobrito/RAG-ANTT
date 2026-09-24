@@ -1110,6 +1110,38 @@ def carregar_vectorstore_com_provider(embedding_provider="local"):
             "Instale sentence-transformers ou configure chave OpenAI."
         )
 
+    try:
+        from ingestao.geracoes import ler_manifest, resolver_geracao_ativa
+
+        ativa = resolver_geracao_ativa(
+            "vectorstore_local",
+            permitir_legado=True,
+        )
+        if ativa.id == "legacy":
+            if embedding_provider in ("local", "free"):
+                vectorstore_path = ativa.caminho
+        else:
+            manifest = ler_manifest(ativa)
+            provedor_indice = str(
+                manifest.get("embedding_provider") or "local"
+            )
+            esperado = (
+                "local" if embedding_provider == "free" else embedding_provider
+            )
+            if provedor_indice != esperado:
+                raise Exception(
+                    "Indice usa embedding {0}; ambiente pediu {1}. "
+                    "Execute rebuild completo.".format(
+                        provedor_indice,
+                        esperado,
+                    )
+                )
+            vectorstore_path = ativa.caminho
+    except Exception as exc:
+        if os.path.isfile(os.path.join("vectorstore_local", "current.json")):
+            raise
+        logger.debug("Indice versionado ainda nao disponivel: %s", exc)
+
     # --- 2. Carregar ou criar vectorstore ------------------------------
     if os.path.exists(vectorstore_path):
         logger.info(f"Carregando vectorstore de {vectorstore_path}...")
@@ -1275,7 +1307,7 @@ def detectar_documentos_novos(diretorio: str = "dados_antt",
 
 
 _LOCK_REINDEXACAO = os.path.join(
-    os.path.dirname(os.path.abspath(__file__)), ".reindexando.lock"
+    "dados_antt", ".locks", "indexacao.lock"
 )
 
 
@@ -1303,10 +1335,16 @@ def _adquirir_lock_reindexacao() -> bool:
             return False
 
     try:
-        with open(_LOCK_REINDEXACAO, "w") as f:
+        os.makedirs(os.path.dirname(_LOCK_REINDEXACAO), exist_ok=True)
+        descritor = os.open(
+            _LOCK_REINDEXACAO,
+            os.O_CREAT | os.O_EXCL | os.O_WRONLY,
+            0o600,
+        )
+        with os.fdopen(descritor, "w", encoding="ascii") as f:
             f.write(str(os.getpid()))
         return True
-    except OSError:
+    except (FileExistsError, OSError):
         return False
 
 
@@ -1407,6 +1445,13 @@ def _substituir_vectorstore(origem: str, destino: str) -> None:
 def _reindexar_base_impl(embedding_provider: str) -> tuple:
     """Implementacao interna do pipeline de reindexacao (protegida por lock)."""
     import shutil
+    from ingestao.geracoes import (
+        ativar_geracao,
+        criar_diretorio_geracao,
+        escrever_catalogo,
+        escrever_manifest,
+        remover_geracoes_antigas,
+    )
 
     n_pdfs = 0
 
@@ -1443,13 +1488,16 @@ def _reindexar_base_impl(embedding_provider: str) -> tuple:
     # antes de ter o novo pronto deixaria a base indisponivel durante toda a
     # reindexacao e sem nenhuma versao consultavel caso ela falhasse.
     vpath = "vectorstore_local"
-    vpath_temporario = f"{vpath}.novo"
-    shutil.rmtree(vpath_temporario, ignore_errors=True)
+    candidata = criar_diretorio_geracao(vpath)
 
     # 4) Criar embeddings e reconstruir vectorstore
     try:
-        embeddings = _criar_embeddings_local()
+        if embedding_provider == "openai":
+            embeddings = _criar_embeddings_openai()
+        else:
+            embeddings = _criar_embeddings_local()
         if embeddings is None:
+            shutil.rmtree(candidata.caminho, ignore_errors=True)
             return (
                 False,
                 "Erro ao reconstruir vectorstore: falha ao carregar embeddings locais. "
@@ -1457,12 +1505,29 @@ def _reindexar_base_impl(embedding_provider: str) -> tuple:
                 "'pip install -U sentence-transformers accelerate' e use "
                 "'Limpar Cache OCR e Reindexar'."
             )
-        sucesso = criar_vectorstore_local(embeddings, destino=vpath_temporario)
+        sucesso = criar_vectorstore_local(embeddings, destino=candidata.caminho)
         if not sucesso:
-            shutil.rmtree(vpath_temporario, ignore_errors=True)
+            shutil.rmtree(candidata.caminho, ignore_errors=True)
             return False, "Falha ao criar vectorstore"
 
-        _substituir_vectorstore(vpath_temporario, vpath)
+        escrever_catalogo(candidata, docs)
+        documentos_manifest = [
+            {
+                "nome": os.path.basename(str(doc.get("arquivo_md") or "")),
+                "caminho": str(doc.get("arquivo_md") or ""),
+                "sha256": "",
+                "chunks": 0,
+            }
+            for doc in docs
+            if isinstance(doc, dict)
+        ]
+        escrever_manifest(
+            candidata,
+            documentos_manifest,
+            embedding_provider=embedding_provider,
+        )
+        ativar_geracao(candidata, vpath)
+        remover_geracoes_antigas(vpath, manter=2)
 
         # O indice lexical em memoria referencia os chunks da versao anterior.
         limpar_cache_indice_lexical()
@@ -1471,13 +1536,76 @@ def _reindexar_base_impl(embedding_provider: str) -> tuple:
             msg_final += f" ({n_pdfs} PDF(s) convertido(s))"
         return True, msg_final
     except Exception as exc:
-        shutil.rmtree(vpath_temporario, ignore_errors=True)
+        shutil.rmtree(candidata.caminho, ignore_errors=True)
         msg = f"Erro ao reconstruir vectorstore: {exc}"
         logger.error(msg)
         return False, msg
 
 
-def criar_vectorstore_local(embeddings, destino: str = "vectorstore_local"):
+def criar_chunks_documento(doc_info: dict) -> list:
+    """Converte uma entrada de catalogo nos chunks usados pelo indice.
+
+    A mesma funcao atende rebuild completo e inclusao incremental para evitar
+    diferencas de metadados, tabela, contexto ou qualidade.
+    """
+    from langchain_core.documents import Document
+
+    arquivo_md = str(doc_info.get("arquivo_md", "") or "")
+    if not arquivo_md or not os.path.exists(arquivo_md):
+        return []
+    with open(arquivo_md, "r", encoding="utf-8") as arquivo:
+        conteudo = arquivo.read()
+
+    tipo_doc = str(doc_info.get("tipo", "") or "")
+    numero_doc = str(doc_info.get("numero", "") or "")
+    ano_doc = str(doc_info.get("ano", "") or "")
+    if tipo_doc and numero_doc and ano_doc:
+        conteudo = _mesclar_tabelas_auxiliares(
+            conteudo,
+            tipo_doc,
+            numero_doc,
+            ano_doc,
+        )
+    conteudo = _enriquecer_imagens_documento(conteudo)
+    meta_base = {
+        "tipo_documento": tipo_doc,
+        "nome_tipo": tipo_doc,
+        "numero": numero_doc,
+        "ano": ano_doc,
+        "caminho": arquivo_md,
+        "titulo": doc_info.get("titulo", ""),
+        "ementa": doc_info.get("ementa", ""),
+        "orgao": doc_info.get("orgao", ""),
+        "formato_origem": doc_info.get("formato_origem", "md"),
+        "secao": doc_info.get("secao", ""),
+        "pagina_ou_aba": doc_info.get("pagina_ou_aba", ""),
+        "origem_tabela": doc_info.get("origem_tabela", ""),
+        "metodo_extracao": doc_info.get("metodo_extracao", ""),
+        "avisos_extracao": doc_info.get("avisos_extracao", []),
+    }
+    chunks_texto = _dividir_por_estrutura(
+        conteudo,
+        chunk_max=CHUNK_SIZE,
+        chunk_overlap=CHUNK_OVERLAP,
+    )
+    contextualizados = contextualizar_chunks(chunks_texto, meta_base)
+    total = len(contextualizados)
+    resultado = []
+    for indice, (texto, meta_extra) in enumerate(contextualizados):
+        meta = meta_base.copy()
+        meta["chunk"] = indice + 1
+        meta["total_chunks"] = total
+        meta.update(meta_extra)
+        meta["fonte_qualidade"] = classificar_fonte_qualidade(texto, meta)
+        resultado.append(Document(page_content=texto, metadata=meta))
+    return resultado
+
+
+def criar_vectorstore_local(
+    embeddings,
+    destino: str = "vectorstore_local",
+    catalogo_path: str = "relatorio_documentos.json",
+):
     """
     Cria o vectorstore local a partir do catalogo de documentos.
 
@@ -1498,15 +1626,15 @@ def criar_vectorstore_local(embeddings, destino: str = "vectorstore_local"):
         logger.info("🚀 Iniciando criação do vectorstore local...")
         
         # Carregar dados do relatório
-        with open("relatorio_documentos.json", 'r', encoding='utf-8') as f:
+        with open(catalogo_path, 'r', encoding='utf-8') as f:
             dados_documentos = json.load(f)
         
         logger.info(f"📄 Carregados {len(dados_documentos)} documentos do relatório")
         
         # Criar documentos para o vectorstore (com deduplicacao por nome de arquivo)
-        documentos = []
         nomes_processados: set = set()
         duplicados_ignorados = 0
+        splits = []
 
         for doc_info in dados_documentos:
             arquivo_md = doc_info.get("arquivo_md", "")
@@ -1522,34 +1650,7 @@ def criar_vectorstore_local(embeddings, destino: str = "vectorstore_local"):
             nomes_processados.add(nome_arquivo)
 
             try:
-                with open(arquivo_md, "r", encoding="utf-8") as f:
-                    conteudo = f.read()
-
-                tipo_doc = doc_info.get("tipo", "")
-                numero_doc = doc_info.get("numero", "")
-                ano_doc = doc_info.get("ano", "")
-                if tipo_doc and numero_doc and ano_doc:
-                    conteudo = _mesclar_tabelas_auxiliares(
-                        conteudo, tipo_doc, numero_doc, ano_doc
-                    )
-
-                conteudo = _enriquecer_imagens_documento(conteudo)
-
-                doc = Document(
-                    page_content=conteudo,
-                    metadata={
-                        "tipo_documento": doc_info.get("tipo", ""),
-                        "nome_tipo": doc_info.get("tipo", ""),
-                        "numero": doc_info.get("numero", ""),
-                        "ano": doc_info.get("ano", ""),
-                        "caminho": arquivo_md,
-                        "titulo": doc_info.get("titulo", ""),
-                        "ementa": doc_info.get("ementa", ""),
-                        "orgao": doc_info.get("orgao", ""),
-                    },
-                )
-                documentos.append(doc)
-
+                splits.extend(criar_chunks_documento(doc_info))
             except Exception as e:
                 logger.warning(f"Erro ao ler {arquivo_md}: {e}")
 
@@ -1558,39 +1659,6 @@ def criar_vectorstore_local(embeddings, destino: str = "vectorstore_local"):
                 f"Deduplicacao: {duplicados_ignorados} documentos duplicados ignorados"
             )
         
-        logger.info(f"📚 Preparados {len(documentos)} documentos para indexação")
-        
-        # Dividir documentos em chunks por fronteiras estruturais (artigos/secoes)
-        logger.info("Dividindo documentos em chunks por estrutura (artigos/secoes)...")
-        splits = []
-
-        for doc in documentos:
-            texto = doc.page_content
-            meta_base = doc.metadata.copy()
-
-            chunks_texto = _dividir_por_estrutura(
-                texto,
-                chunk_max=CHUNK_SIZE,
-                chunk_overlap=CHUNK_OVERLAP,
-            )
-
-            # Contextualizar: cada chunk recebe a trilha estrutural do
-            # documento (norma, assunto, anexo/secao, cabecalho da tabela).
-            # Sem isso, blocos tabulares formados apenas por rotulos curtos e
-            # numeros ficam invisiveis para perguntas em linguagem natural.
-            chunks_contextualizados = contextualizar_chunks(chunks_texto, meta_base)
-
-            total = len(chunks_contextualizados)
-            for idx, (chunk_txt, meta_extra) in enumerate(chunks_contextualizados):
-                meta = meta_base.copy()
-                meta["chunk"] = idx + 1
-                meta["total_chunks"] = total
-                meta.update(meta_extra)
-                meta["fonte_qualidade"] = classificar_fonte_qualidade(
-                    chunk_txt, meta
-                )
-                splits.append(Document(page_content=chunk_txt, metadata=meta))
-
         logger.info(f"Criados {len(splits)} chunks estruturais")
         total_tabulares = sum(
             1 for d in splits if d.metadata.get("contem_tabelas") == "Sim"

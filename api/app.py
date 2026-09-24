@@ -18,10 +18,12 @@ from antt_rag_unified import mensagem_de_falha_de_geracao
 from api.auth import dependencia_api_key
 from api.erros import ErroHttp
 from api.schemas import (
+    DocumentUploadAccepted,
     DocumentHit,
     DocumentListItem,
     ErrorBody,
     HealthResponse,
+    IngestionJobResponse,
     ProvedorLiberado,
     QueryRequest,
     QueryResponse,
@@ -122,7 +124,36 @@ async def _vida(aplicacao: FastAPI) -> AsyncIterator[None]:
     """
     del aplicacao
     rag_service.aquecer_indice()
-    yield
+    worker_iniciado = False
+    scanner_iniciado = False
+    try:
+        from config import incremental_upload_enabled, inbox_scan_enabled
+
+        if incremental_upload_enabled():
+            from ingestao.geracoes import bootstrap_indice_legado
+            from ingestao.jobs import iniciar_worker
+
+            bootstrap_indice_legado()
+            iniciar_worker()
+            worker_iniciado = True
+            if inbox_scan_enabled():
+                from ingestao.scanner import iniciar_scanner
+
+                iniciar_scanner()
+                scanner_iniciado = True
+    except Exception:
+        logger.exception("Falha ao iniciar ingestao incremental")
+    try:
+        yield
+    finally:
+        if scanner_iniciado:
+            from ingestao.scanner import parar_scanner
+
+            parar_scanner()
+        if worker_iniciado:
+            from ingestao.jobs import parar_worker
+
+            parar_worker()
 
 
 def criar_aplicacao() -> FastAPI:
@@ -206,6 +237,10 @@ def criar_aplicacao() -> FastAPI:
             provedores_liberados=provedores,
             embeddings_liberados=list(retrato.embeddings_liberados),
             embedding_provider=retrato.embedding_provider,
+            formatos_upload=list(retrato.formatos_upload or []),
+            formatos_inbox=list(retrato.formatos_inbox or []),
+            indexacao_automatica=retrato.indexacao_automatica,
+            reindexacao_em_andamento=retrato.reindexacao_em_andamento,
         )
 
     @aplicacao.post(
@@ -323,23 +358,60 @@ def criar_aplicacao() -> FastAPI:
 
     @aplicacao.post(
         "/api/documents",
+        response_model=None,
         dependencies=[Depends(dependencia_api_key)],
     )
     async def documents_incluir(
         arquivo: UploadFile = File(...),
     ) -> JSONResponse:
         """
-        Grava o PDF na pasta de entrada.
-
-        A consulta so passa a ve-lo depois de Atualizar base.
+        Aceita PDF, DOCX ou XLSX e cria um job incremental.
         """
         conteudo = await arquivo.read()
         nome = arquivo.filename or ""
+        from config import incremental_upload_enabled
+
+        if incremental_upload_enabled():
+            from ingestao.formatos import DocumentoInvalidoError
+            from ingestao.jobs import submeter_upload
+            from ingestao.indice_incremental import DocumentoDuplicadoError
+
+            try:
+                criado = submeter_upload(conteudo, nome)
+            except DocumentoInvalidoError as exc:
+                codigo = 413 if "tamanho" in str(exc).lower() else 400
+                raise ErroHttp(codigo, str(exc)) from exc
+            except DocumentoDuplicadoError as exc:
+                raise ErroHttp(409, str(exc)) from exc
+            aceito = DocumentUploadAccepted(
+                job_id=criado.job_id,
+                nome=criado.nome,
+                formato=criado.formato,
+            )
+            return JSONResponse(
+                status_code=202,
+                content=aceito.model_dump(),
+            )
         try:
             caminho = rag_service.incluir_documento(conteudo, nome)
         except PerguntaInvalidaError as exc:
             raise ErroHttp(400, str(exc)) from exc
         return JSONResponse(status_code=201, content={"caminho": caminho})
+
+    @aplicacao.get(
+        "/api/jobs/{job_id}",
+        response_model=IngestionJobResponse,
+        dependencies=[Depends(dependencia_api_key)],
+    )
+    def ingestion_job(job_id: str) -> IngestionJobResponse:
+        """Retorna o estado persistido de uma ingestao."""
+        from ingestao.jobs import JobNaoEncontradoError, obter_job
+
+        try:
+            dados = obter_job(job_id)
+        except JobNaoEncontradoError as exc:
+            raise ErroHttp(404, "job_nao_encontrado") from exc
+        return IngestionJobResponse.model_validate(dados)
 
     @aplicacao.post(
         "/api/reindex",
@@ -347,6 +419,7 @@ def criar_aplicacao() -> FastAPI:
     )
     def reindex(
         background: BackgroundTasks,
+        request: Request,
         embedding_provider: Optional[str] = None,
     ) -> JSONResponse:
         """
@@ -354,6 +427,9 @@ def criar_aplicacao() -> FastAPI:
 
         Lock ativo responde 409. A tela de QA continua sincrona.
         """
+        ops_key = os.environ.get("RAG_OPS_API_KEY", "").strip()
+        if ops_key and request.headers.get("X-Ops-Key", "") != ops_key:
+            raise ErroHttp(403, "reindex_completo_nao_autorizado")
         try:
             embedding = rag_service._normalizar_embedding(embedding_provider)
         except ProvedorNaoLiberadoError as exc:

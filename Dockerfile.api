@@ -54,6 +54,7 @@ RUN mkdir -p /home/rag/.cache/huggingface \
     && chown -R rag:rag /home/rag
 
 COPY --chown=rag:rag api /app/api
+COPY --chown=rag:rag ingestao /app/ingestao
 COPY --chown=rag:rag ui /app/ui
 COPY --chown=rag:rag .streamlit /app/.streamlit
 COPY --chown=rag:rag scripts/__init__.py scripts/gerar_relatorio.py /app/scripts/

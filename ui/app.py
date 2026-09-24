@@ -9,9 +9,11 @@ A busca sincrona da API passa por rag_service.consultar.
 import html
 import os
 import re
+import time
 import unicodedata
 from typing import Dict
 
+import requests
 import streamlit as st
 
 from config import (
@@ -19,6 +21,7 @@ from config import (
     STREAMLIT_LAYOUT,
     STREAMLIT_PAGE_ICON,
     STREAMLIT_PAGE_TITLE,
+    get_embedding_provider,
     get_historico_turnos_guardados,
     get_openai_api_key,
     logger,
@@ -32,7 +35,6 @@ from llm_providers import (
 from rag_service import (
     ProvedorNaoLiberadoError,
     disparar_reindexacao,
-    incluir_documento,
     listar_anos,
     obter_status,
     recuperar_trechos,
@@ -60,6 +62,52 @@ from antt_rag_unified import (
     gerar_resposta_streaming,
     resposta_indica_falha,
 )
+
+
+def _enviar_documento_para_api(conteudo: bytes, nome: str) -> Dict[str, object]:
+    """Envia documento ao unico escritor e acompanha o job ate o fim."""
+    base = os.environ.get(
+        "RAG_API_INTERNAL_URL",
+        "http://rag-api:8000",
+    ).rstrip("/")
+    chave = os.environ.get("RAG_API_KEY", "").strip()
+    if not chave:
+        raise RuntimeError("RAG_API_KEY nao configurada no servidor da tela.")
+    cabecalhos = {"X-API-Key": chave}
+    resposta = requests.post(
+        "{0}/api/documents".format(base),
+        headers=cabecalhos,
+        files={"arquivo": (nome, conteudo)},
+        timeout=60,
+    )
+    if resposta.status_code != 202:
+        raise RuntimeError(
+            "Upload recusado ({0}): {1}".format(
+                resposta.status_code,
+                resposta.text[:300],
+            )
+        )
+    corpo = resposta.json()
+    job_id = str(corpo.get("job_id") or "")
+    if not job_id:
+        raise RuntimeError("API nao devolveu job_id.")
+    limite = time.monotonic() + 900
+    while time.monotonic() < limite:
+        estado_http = requests.get(
+            "{0}/api/jobs/{1}".format(base, job_id),
+            headers=cabecalhos,
+            timeout=30,
+        )
+        if estado_http.status_code != 200:
+            raise RuntimeError("Falha ao consultar o job.")
+        estado = estado_http.json()
+        status = str(estado.get("status") or "")
+        if status in ("succeeded", "succeeded_with_warnings"):
+            return dict(estado)
+        if status == "failed":
+            raise RuntimeError(str(estado.get("mensagem") or "Job falhou."))
+        time.sleep(1)
+    raise RuntimeError("Tempo limite aguardando a indexacao.")
 
 
 # Cores institucionais por tipo documental (tokens do Design System gov.br,
@@ -207,14 +255,18 @@ def interface_usuario_unificada():
                 "sem API externa. Respostas podem demorar 20-60 s."
             )
 
-        if st.button(
-            "Atualizar base",
-            use_container_width=True,
-            help="Inclui na consulta os documentos novos ou "
-                 "alterados. Leva alguns minutos.",
-        ):
-            st.session_state["_reindexando"] = True
-            st.rerun()
+        mostrar_reindex = os.environ.get(
+            "RAG_UI_REINDEX_COMPLETA",
+            "false",
+        ).strip().lower() in ("1", "true", "sim", "yes", "on")
+        if mostrar_reindex:
+            if st.button(
+                "Reindexacao completa (operacao tecnica)",
+                use_container_width=True,
+                help="Reconstrucao integral reservada a equipe tecnica.",
+            ):
+                st.session_state["_reindexando"] = True
+                st.rerun()
         
         # Status das APIs
         st.subheader("Situação dos serviços")
@@ -302,21 +354,39 @@ def interface_usuario_unificada():
         # Seleção do provedor de embeddings
         st.markdown("**Localização dos documentos**")
         embedding_providers = get_available_embedding_providers()
-        
-        # Criar lista de opções com descrições claras
-        embedding_options = list(embedding_providers.keys())
-        embedding_labels = [embedding_providers[key]["name"] for key in embedding_options]
-        
-        selected_embedding_provider = st.selectbox(
-            "Como localizar os trechos:",
-            options=embedding_options,
-            format_func=lambda x: embedding_providers[x]["name"],
-            index=0,  # Padrão é processamento local
-            help="Local funciona sem internet. OpenAI usa serviço externo."
-        )
+
+        mostrar_embedding = os.environ.get(
+            "RAG_UI_EMBEDDING_SELECTOR",
+            "false",
+        ).strip().lower() in ("1", "true", "sim", "yes", "on")
+        if mostrar_embedding:
+            embedding_options = list(embedding_providers.keys())
+            selected_embedding_provider = st.selectbox(
+                "Como localizar os trechos:",
+                options=embedding_options,
+                format_func=lambda x: embedding_providers[x]["name"],
+                index=0,
+                help=(
+                    "Controle tecnico. Trocar o embedding exige rebuild "
+                    "completo do indice."
+                ),
+            )
+        else:
+            selected_embedding_provider = get_embedding_provider()
+            st.caption(
+                "Localizacao dos trechos definida pela equipe tecnica: {0}.".format(
+                    embedding_providers.get(
+                        selected_embedding_provider,
+                        {},
+                    ).get("name", selected_embedding_provider)
+                )
+            )
         
         # Mostrar descrição detalhada da opção selecionada
-        selected_info = embedding_providers[selected_embedding_provider]
+        selected_info = embedding_providers.get(
+            selected_embedding_provider,
+            {"name": selected_embedding_provider},
+        )
         
         if selected_embedding_provider == "local":
             st.caption(
@@ -1057,25 +1127,30 @@ ou com qualidade baixa. Leva alguns minutos.
     with st.sidebar:
         with st.expander("Processar novo documento"):
             uploaded_file = st.file_uploader(
-                "Envie um PDF para adicionar à base de conhecimento:",
-                type=["pdf"],
-                help="O arquivo passará a ser considerado nas próximas consultas."
+                "Envie PDF, DOCX ou XLSX para a base de conhecimento:",
+                type=["pdf", "docx", "xlsx"],
+                help=(
+                    "O arquivo sera convertido e indexado automaticamente. "
+                    "A pasta compartilhada aceita somente PDF."
+                ),
             )
 
             if uploaded_file and st.button(
-                "Processar PDF", use_container_width=True
+                "Adicionar documento", use_container_width=True
             ):
-                try:
-                    caminho_pdf = incluir_documento(
-                        uploaded_file.getvalue(),
-                        uploaded_file.name,
-                    )
-                    st.caption(
-                        "PDF incluido na base comum ({0}). "
-                        "A consulta passa a ve-lo depois de Atualizar base.".format(
-                            caminho_pdf
+                with st.spinner(
+                    "Documento recebido. Convertendo e atualizando o indice."
+                ):
+                    try:
+                        estado_job = _enviar_documento_para_api(
+                            uploaded_file.getvalue(),
+                            uploaded_file.name,
                         )
-                    )
-                except Exception as e:
-                    st.error(f"Erro ao processar PDF: {str(e)}")
+                        st.success("Documento disponivel para consulta.")
+                        avisos = estado_job.get("avisos")
+                        if isinstance(avisos, list):
+                            for aviso in avisos:
+                                st.warning(str(aviso))
+                    except Exception as e:
+                        st.error(f"Erro ao processar documento: {str(e)}")
 

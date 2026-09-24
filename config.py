@@ -308,6 +308,78 @@ def get_embedding_allowed() -> List[str]:
     return itens or ["local"]
 
 
+def get_embedding_provider() -> str:
+    """Retorna o unico embedding ativo do indice.
+
+    O valor precisa estar na lista liberada. Uma troca exige rebuild
+    completo e nunca e decidida pelo usuario da consulta.
+    """
+    permitidos = get_embedding_allowed()
+    bruto = os.environ.get("RAG_EMBEDDING_PROVIDER", permitidos[0]).strip()
+    escolhido = bruto or permitidos[0]
+    if escolhido not in permitidos:
+        logger.warning(
+            "RAG_EMBEDDING_PROVIDER %s nao liberado; usando %s",
+            escolhido,
+            permitidos[0],
+        )
+        return permitidos[0]
+    return escolhido
+
+
+def get_upload_formats() -> List[str]:
+    """Retorna formatos aceitos pelo upload autenticado."""
+    bruto = os.environ.get("RAG_UPLOAD_FORMATS", "pdf,docx,xlsx")
+    permitidos = {"pdf", "docx", "xlsx"}
+    formatos = [
+        item.strip().lower()
+        for item in bruto.split(",")
+        if item.strip().lower() in permitidos
+    ]
+    return formatos or ["pdf", "docx", "xlsx"]
+
+
+def get_inbox_formats() -> List[str]:
+    """Retorna formatos observados na caixa de entrada compartilhada."""
+    bruto = os.environ.get("RAG_INBOX_FORMATS", "pdf")
+    formatos = [
+        item.strip().lower()
+        for item in bruto.split(",")
+        if item.strip().lower() == "pdf"
+    ]
+    return formatos or ["pdf"]
+
+
+def incremental_upload_enabled() -> bool:
+    """Indica se uploads devem criar jobs de indexacao automatica."""
+    bruto = os.environ.get(
+        "RAG_INCREMENTAL_UPLOAD_ENABLED",
+        "false",
+    ).strip().lower()
+    return bruto in ("1", "true", "sim", "yes", "on")
+
+
+def inbox_scan_enabled() -> bool:
+    """Indica se a API deve observar PDFs recebidos por volume."""
+    bruto = os.environ.get("RAG_INBOX_SCAN_ENABLED", "false").strip().lower()
+    return bruto in ("1", "true", "sim", "yes", "on")
+
+
+def get_inbox_scan_seconds() -> int:
+    """Retorna o intervalo da varredura da caixa de entrada."""
+    return _inteiro_ambiente("RAG_INBOX_SCAN_SECONDS", 30, 5, 3600)
+
+
+def get_upload_max_bytes() -> int:
+    """Retorna o tamanho maximo de um documento enviado."""
+    return _inteiro_ambiente(
+        "RAG_UPLOAD_MAX_BYTES",
+        50 * 1024 * 1024,
+        1024,
+        200 * 1024 * 1024,
+    )
+
+
 def get_llm_provider_padrao() -> str:
     """
     Provedor de geracao quando o chamador nao envia um.
@@ -468,6 +540,13 @@ __all__ = [
     "get_llm_max_tokens",
     "get_max_documentos",
     "get_embedding_allowed",
+    "get_embedding_provider",
+    "get_upload_formats",
+    "get_inbox_formats",
+    "incremental_upload_enabled",
+    "inbox_scan_enabled",
+    "get_inbox_scan_seconds",
+    "get_upload_max_bytes",
     "get_llm_provider_padrao",
     "LLM_PROVIDERS",
     "DB_FAISS_PATH",

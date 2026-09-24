@@ -11,18 +11,22 @@ import os
 import re
 import uuid
 from dataclasses import dataclass
-from typing import Dict, List, Mapping, Optional, Sequence
+from typing import Dict, List, Mapping, Optional, Sequence, Tuple
 
 from config import (
     DB_FAISS_PATH,
     LLM_PROVIDERS,
     get_allowed_llm_providers,
     get_embedding_allowed,
+    get_embedding_provider,
+    get_inbox_formats,
     get_llm_max_tokens,
     get_llm_model,
     get_llm_provider_padrao,
     get_llm_temperature,
     get_max_documentos,
+    get_upload_formats,
+    incremental_upload_enabled,
     logger,
 )
 from antt_rag_unified import (
@@ -99,6 +103,10 @@ class StatusServico:
     provedores_liberados: List[str]
     embeddings_liberados: List[str]
     embedding_provider: str
+    formatos_upload: List[str] = None
+    formatos_inbox: List[str] = None
+    indexacao_automatica: bool = False
+    reindexacao_em_andamento: bool = False
 
 
 @dataclass
@@ -121,9 +129,9 @@ class ReindexResult:
     mensagem: str
 
 
-_CACHE_VECTORSTORE: Dict[str, object] = {}
+_CACHE_VECTORSTORE: Dict[str, Tuple[str, object]] = {}
 _PASTA_ENTRADA = os.path.join("dados_antt", "entrada")
-_RELATORIO = "relatorio_documentos.json"
+_RELATORIO = os.environ.get("RAG_CATALOG_PATH", "relatorio_documentos.json")
 _TRECHO_MAXIMO = 500
 
 
@@ -146,6 +154,12 @@ def _caminho_indice(embedding_provider: str) -> str:
     Returns:
         Caminho relativo do indice.
     """
+    try:
+        from ingestao.geracoes import resolver_geracao_ativa
+
+        return resolver_geracao_ativa().caminho
+    except Exception:
+        pass
     if embedding_provider == "openai":
         return DB_FAISS_PATH
     return "vectorstore_local"
@@ -299,16 +313,22 @@ def _obter_vectorstore(embedding_provider: str) -> object:
     Raises:
         RagNotReadyError: Se o indice nao puder ser aberto.
     """
+    try:
+        from ingestao.geracoes import resolver_geracao_ativa
+
+        geracao = resolver_geracao_ativa().id
+    except Exception:
+        geracao = "legacy"
     em_cache = _CACHE_VECTORSTORE.get(embedding_provider)
-    if em_cache is not None:
-        return em_cache
+    if em_cache is not None and em_cache[0] == geracao:
+        return em_cache[1]
     try:
         vectorstore = carregar_vectorstore_com_provider(embedding_provider)
     except Exception as exc:
         raise RagNotReadyError(
             "Indice indisponivel: {0}".format(exc)
         ) from exc
-    _CACHE_VECTORSTORE[embedding_provider] = vectorstore
+    _CACHE_VECTORSTORE[embedding_provider] = (geracao, vectorstore)
     return vectorstore
 
 
@@ -605,7 +625,7 @@ def obter_status() -> StatusServico:
         StatusServico.
     """
     embeddings = get_embedding_allowed()
-    embedding = embeddings[0]
+    embedding = get_embedding_provider()
     caminho = _caminho_indice(embedding)
     ollama_ok, ollama_msg = verificar_ollama_disponivel()
     provedores = list(get_available_providers().keys())
@@ -618,6 +638,10 @@ def obter_status() -> StatusServico:
         provedores_liberados=provedores,
         embeddings_liberados=list(embeddings),
         embedding_provider=embedding,
+        formatos_upload=get_upload_formats(),
+        formatos_inbox=get_inbox_formats(),
+        indexacao_automatica=incremental_upload_enabled(),
+        reindexacao_em_andamento=reindexacao_em_andamento(),
     )
 
 
@@ -635,11 +659,26 @@ def listar_documentos(
     """
     import json
 
-    if not os.path.exists(relatorio_path):
+    bruto: object
+    if relatorio_path == _RELATORIO:
+        try:
+            from ingestao.geracoes import ler_catalogo_ativo
+
+            catalogo_ativo = ler_catalogo_ativo()
+        except Exception:
+            catalogo_ativo = None
+        if catalogo_ativo is not None:
+            bruto = catalogo_ativo
+        else:
+            bruto = None
+    else:
+        bruto = None
+    if bruto is None and not os.path.exists(relatorio_path):
         return []
     try:
-        with open(relatorio_path, "r", encoding="utf-8") as arquivo:
-            bruto = json.load(arquivo)
+        if bruto is None:
+            with open(relatorio_path, "r", encoding="utf-8") as arquivo:
+                bruto = json.load(arquivo)
     except (OSError, ValueError) as exc:
         logger.warning("Catalogo ilegivel (%s): %s", relatorio_path, exc)
         return []
@@ -759,25 +798,20 @@ def incluir_documento(conteudo: bytes, nome_arquivo: str) -> str:
     Raises:
         PerguntaInvalidaError: Se o conteudo nao for um PDF nomeado.
     """
-    if not isinstance(conteudo, (bytes, bytearray)) or len(conteudo) < 5:
-        raise PerguntaInvalidaError("PDF vazio ou invalido.")
-    if not bytes(conteudo).startswith(b"%PDF"):
-        raise PerguntaInvalidaError("O arquivo nao parece um PDF.")
-    nome = os.path.basename(str(nome_arquivo or "")).strip()
-    if not nome.lower().endswith(".pdf"):
-        raise PerguntaInvalidaError("O arquivo precisa ter extensao .pdf.")
-    seguro = "".join(
-        caractere if caractere.isascii() and (
-            caractere.isalnum() or caractere in "._-"
-        ) else "_"
-        for caractere in nome
-    )
-    if seguro in ("", ".pdf", "_.pdf"):
-        seguro = "documento.pdf"
+    from ingestao.formatos import DocumentoInvalidoError, validar_documento
+
+    try:
+        documento = validar_documento(
+            conteudo,
+            nome_arquivo,
+            formatos=["pdf"],
+        )
+    except DocumentoInvalidoError as exc:
+        raise PerguntaInvalidaError(str(exc)) from exc
     os.makedirs(_PASTA_ENTRADA, exist_ok=True)
-    destino = os.path.join(_PASTA_ENTRADA, seguro)
+    destino = os.path.join(_PASTA_ENTRADA, documento.nome)
     if os.path.exists(destino):
-        base, ext = os.path.splitext(seguro)
+        base, ext = os.path.splitext(documento.nome)
         indice = 2
         while os.path.exists(destino):
             destino = os.path.join(
@@ -786,6 +820,6 @@ def incluir_documento(conteudo: bytes, nome_arquivo: str) -> str:
             )
             indice += 1
     with open(destino, "wb") as arquivo:
-        arquivo.write(bytes(conteudo))
+        arquivo.write(documento.conteudo)
     logger.info("PDF incluido na base comum: %s", destino)
     return destino

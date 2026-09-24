@@ -16,16 +16,16 @@ Recorte do oficio para o componente de IA. Nao ha acesso a banco. Nao ha sincron
 | Responsavel origem | OTI / SIGESC |
 | Responsavel destino | DeepFeed |
 
-## Atualizar base
+## Rebuild completo (operacao tecnica)
 
 | Campo | Valor |
 | --- | --- |
-| Origem | Tela do SIGESC, via backend |
+| Origem | Equipe tecnica autorizada |
 | Destino | RAG-API `POST /api/reindex` |
 | Finalidade | Reindexar a base comum |
 | Dados | Disparo do job. Embedding so se estiver em `RAG_EMBEDDING_ALLOWED` (inicial `local`) |
 | Frequencia | Sob demanda, operacao |
-| Auth | A mesma API Key de servico |
+| Auth | API Key de servico e `X-Ops-Key`, quando configurada |
 | Base | Compartilhada, nao por fiscal. Lock ativo responde 409 |
 | Responsavel origem | OTI / SIGESC |
 | Responsavel destino | DeepFeed |
@@ -34,12 +34,12 @@ Recorte do oficio para o componente de IA. Nao ha acesso a banco. Nao ha sincron
 
 | Campo | Valor |
 | --- | --- |
-| Origem | Tela do SIGESC, via backend |
+| Origem | Tela do SIGESC, via backend, ou inbox PDF por volume |
 | Destino | RAG-API `POST /api/documents` |
-| Finalidade | Gravar um PDF na base comum |
-| Dados | Bytes do PDF e o nome do arquivo |
+| Finalidade | Converter e indexar automaticamente na base comum |
+| Dados | PDF, DOCX ou XLSX pela API; somente PDF na inbox |
 | Frequencia | Sob demanda |
 | Auth | A mesma API Key de servico |
-| Efeito | O arquivo so entra na consulta depois de Atualizar base |
+| Efeito | Retorna `job_id`; no sucesso a proxima consulta usa a nova geracao |
 | Responsavel origem | OTI / SIGESC |
 | Responsavel destino | DeepFeed |

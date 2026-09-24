@@ -42,6 +42,10 @@ vectorstore/
 !vectorstore_local/index.pkl
 embeddings/
 models/
+dados_antt/.jobs/
+dados_antt/.staging/
+dados_antt/.locks/
+dados_antt/.transactions/
 
 # Arquivos de chaves API/segredos
 .env

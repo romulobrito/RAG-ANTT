@@ -3,6 +3,7 @@ import json
 import glob
 import re
 import sys
+import tempfile
 from typing import Optional
 
 _RAIZ = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -198,8 +199,20 @@ def gerar_relatorio_documentos():
     documentos = list(documentos_por_nome.values())
     print(f"Total: {len(documentos)} documentos no catalogo.")
 
-    with open("relatorio_documentos.json", "w", encoding="utf-8") as f:
-        json.dump(documentos, f, ensure_ascii=False, indent=4)
+    descritor, temporario = tempfile.mkstemp(
+        prefix=".relatorio-",
+        suffix=".json",
+        dir=".",
+    )
+    try:
+        with os.fdopen(descritor, "w", encoding="utf-8") as f:
+            json.dump(documentos, f, ensure_ascii=False, indent=4)
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(temporario, "relatorio_documentos.json")
+    finally:
+        if os.path.exists(temporario):
+            os.remove(temporario)
 
     print("Relatorio salvo em relatorio_documentos.json")
 

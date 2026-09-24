@@ -330,6 +330,33 @@ curl --max-time 120 -s -X POST http://localhost:8000/api/query \
 
 `GET http://localhost:8000/api/health` nao leva API Key.
 
+#### Upload e indexacao incremental
+
+A API aceita PDF, DOCX e XLSX. O upload devolve `job_id`; nao e necessario
+acionar Atualizar base. A geracao seguinte do indice contem documentos antigos
+e novos, mas calcula embeddings somente para os chunks novos.
+
+```bash
+curl -s -X POST http://localhost:8000/api/documents \
+  -H "X-API-Key: dev-local" \
+  -F "arquivo=@documento.xlsx"
+
+curl -s http://localhost:8000/api/jobs/SEU_JOB_ID \
+  -H "X-API-Key: dev-local"
+```
+
+Estados finais: `succeeded`, `succeeded_with_warnings` e `failed`. Nome ou
+conteudo SHA-256 duplicado e recusado. Substituicao e exclusao continuam como
+operacao tecnica com rebuild completo.
+
+Arquivos recebidos diretamente pelo volume entram somente em
+`dados_antt/entrada` e precisam ser PDF. Grave primeiro como
+`nome.pdf.part` e renomeie para `nome.pdf` ao concluir. O scanner ignora DOCX,
+XLSX e arquivos parciais nessa pasta.
+
+O embedding ativo e definido por `RAG_EMBEDDING_PROVIDER`, nao pela tela.
+Trocar o modelo exige rebuild completo e uma nova geracao do indice.
+
 #### Compose local
 
 Tres processos, tres imagens: `ollama` (oficial, so CPU), `rag-api` e `streamlit` (profile `qa`). A base `dados_antt/` e o indice `vectorstore_local/` ficam no host e entram por volume. A porta 11434 do Ollama nao e publicada. O SIGESC e o curl falam com `localhost:8000`.
@@ -363,7 +390,8 @@ curl --max-time 600 -s -X POST http://localhost:8000/api/query \
 
 `docker compose ps` nao deve mostrar `0.0.0.0:11434`. Para depurar o Ollama no host: `docker compose --profile debug-ollama up -d` publica so `127.0.0.1:11434`.
 
-A tela de QA, no mesmo indice e no mesmo Ollama, sem passar pela API:
+A tela de QA consulta o mesmo indice e usa a API como unico escritor para
+uploads:
 
 ```bash
 docker compose build rag-api
