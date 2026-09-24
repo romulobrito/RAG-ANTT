@@ -32,6 +32,7 @@ Este projeto implementa um sistema RAG (Retrieval-Augmented Generation) para con
     - [API REST](#api-rest)
       - [Endpoints Disponíveis](#endpoints-disponíveis)
       - [Exemplo de Uso com Python](#exemplo-de-uso-com-python)
+      - [Compose local](#compose-local)
   - [Troubleshooting](#troubleshooting)
     - [Problemas Comuns](#problemas-comuns)
     - [Solução de Erros](#solução-de-erros)
@@ -328,6 +329,49 @@ curl --max-time 120 -s -X POST http://localhost:8000/api/query \
 ```
 
 `GET http://localhost:8000/api/health` nao leva API Key.
+
+#### Compose local
+
+Tres processos, tres imagens: `ollama` (oficial, so CPU), `rag-api` e `streamlit` (profile `qa`). A base `dados_antt/` e o indice `vectorstore_local/` ficam no host e entram por volume. A porta 11434 do Ollama nao e publicada. O SIGESC e o curl falam com `localhost:8000`.
+
+A imagem usa Python 3.10, o mesmo do venv. Usuario do container: UID 1000.
+
+1. Acrescente `RAG_API_KEY` no `.env` (o exemplo esta em `.env.example`; nao apague as chaves que ja existem). O Compose injeta apenas as variaveis declaradas em `docker-compose.yml`; chaves de provedores cloud existentes no `.env` nao entram no container local. Sem `RAG_API_KEY`, a API responde 503.
+2. Suba o Ollama e baixe o modelo. Neste notebook o padrao e `llama3.2:3b`. Em host com RAM livre (~8-10 GiB), troque `RAG_LLM_MODEL` no `.env` para `qwen2.5:7b` e puxe esse modelo.
+
+```bash
+docker compose up -d ollama
+docker compose exec ollama ollama pull llama3.2:3b
+docker compose up -d rag-api
+```
+
+3. Confira o processo e o indice. `ready` so fica 200 com o modelo puxado e o `vectorstore_local` montado. A primeira consulta baixa o embedding `intfloat/multilingual-e5-small` para o volume `huggingface_cache`; recriar o container nao repete o download.
+
+```bash
+curl -s http://localhost:8000/api/health
+curl -s http://localhost:8000/api/ready
+```
+
+4. Consulta autenticada. Em CPU o cliente pode precisar de mais que 120 segundos:
+
+```bash
+curl --max-time 600 -s -X POST http://localhost:8000/api/query \
+  -H "X-API-Key: dev-local" \
+  -H "Content-Type: application/json" \
+  -d '{"pergunta":"Qual o IRI maximo da pista principal na manutencao segundo a INM 34/2024?","filtros":{"tipo_documento":"INM","ano":2024,"numero":"34"},"correlation_id":"sigesc-ticket-8891"}'
+```
+
+`docker compose ps` nao deve mostrar `0.0.0.0:11434`. Para depurar o Ollama no host: `docker compose --profile debug-ollama up -d` publica so `127.0.0.1:11434`.
+
+A tela de QA, no mesmo indice e no mesmo Ollama, sem passar pela API:
+
+```bash
+docker compose build rag-api
+docker compose --profile qa build streamlit
+docker compose --profile qa up -d streamlit
+```
+
+A tela fica em `http://localhost:8501`. Pare o Streamlit e o Uvicorn que ja estiverem nessas portas antes do `up`.
 
 ## Troubleshooting
 

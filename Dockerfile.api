@@ -1,0 +1,79 @@
+# Imagem da API. Nao inclui dados_antt, indice nem pesos do Ollama.
+# Python 3.10: mesma minor do venv do projeto.
+
+FROM python:3.10-slim-bookworm
+
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    PIP_DISABLE_PIP_VERSION_CHECK=1
+
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends \
+        gcc \
+        g++ \
+        libgomp1 \
+        tesseract-ocr \
+        tesseract-ocr-por \
+    && rm -rf /var/lib/apt/lists/* \
+    && groupadd --gid 1000 rag \
+    && useradd --uid 1000 --gid 1000 --create-home --shell /bin/bash rag
+
+WORKDIR /app
+
+COPY requirements.txt /app/requirements.txt
+
+# --index-url sozinho esconde o PyPI. O wheel de typing-extensions
+# nesse indice tem o nome interno errado, o pip tenta compilar e
+# nao acha flit_core. As dependencias puras vem do PyPI; o torch
+# fica pinado no wheel +cpu para o requirements.txt nao troca-lo
+# pelo pacote CUDA.
+RUN pip install --no-cache-dir \
+        "typing-extensions>=4.10.0" \
+        filelock \
+        sympy \
+        networkx \
+        jinja2 \
+        fsspec \
+    && pip install --no-cache-dir \
+        --index-url https://download.pytorch.org/whl/cpu \
+        --extra-index-url https://pypi.org/simple \
+        "torch==2.14.0+cpu"
+
+RUN pip install --no-cache-dir --timeout 120 --retries 10 -r /app/requirements.txt \
+    && python -c "import torch; raise SystemExit(0 if torch.version.cuda is None else 1)"
+
+# OpenCV e img2table carregam estas bibliotecas mesmo na API sem tela.
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends libgl1 libglib2.0-0 \
+    && rm -rf /var/lib/apt/lists/*
+
+ENV HOME=/home/rag \
+    HF_HOME=/home/rag/.cache/huggingface
+
+RUN mkdir -p /home/rag/.cache/huggingface \
+    && chown -R rag:rag /home/rag
+
+COPY --chown=rag:rag api /app/api
+COPY --chown=rag:rag ui /app/ui
+COPY --chown=rag:rag .streamlit /app/.streamlit
+COPY --chown=rag:rag scripts/__init__.py scripts/gerar_relatorio.py /app/scripts/
+COPY --chown=rag:rag \
+    antt_rag_unified.py \
+    config.py \
+    rag_service.py \
+    llm_providers.py \
+    tipos_documento.py \
+    geracao_dois_passos.py \
+    contexto_packing.py \
+    contexto_compartimentado.py \
+    retrieval_hibrido.py \
+    /app/
+
+USER rag
+
+EXPOSE 8000
+
+HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=5 \
+    CMD python -c "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/api/health')"
+
+CMD ["uvicorn", "api.app:app", "--host", "0.0.0.0", "--port", "8000", "--timeout-keep-alive", "120"]

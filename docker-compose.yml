@@ -1,0 +1,97 @@
+# Tres processos: ollama, rag-api e streamlit (profile qa).
+# A porta 11434 fica so na rede interna. O profile debug-ollama
+# publica 127.0.0.1:11434 para depuracao.
+
+services:
+  ollama:
+    image: ollama/ollama:latest
+    restart: unless-stopped
+    volumes:
+      - ollama_models:/root/.ollama
+    healthcheck:
+      test: ["CMD", "ollama", "list"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 15s
+
+  ollama-debug:
+    profiles: ["debug-ollama"]
+    image: ollama/ollama:latest
+    network_mode: "service:ollama"
+    depends_on:
+      - ollama
+    ports:
+      - "127.0.0.1:11434:11434"
+    entrypoint: ["sleep", "infinity"]
+
+  rag-api:
+    image: rag-antt-api:local
+    build:
+      context: .
+      dockerfile: Dockerfile.api
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      OLLAMA_BASE_URL: http://ollama:11434/v1
+      RAG_API_KEY: ${RAG_API_KEY:-}
+      RAG_SWAGGER: "true"
+      RAG_LLM_ALLOWED_PROVIDERS: ${RAG_LLM_ALLOWED_PROVIDERS:-ollama}
+      RAG_LLM_MODEL: ${RAG_LLM_MODEL:-llama3.2:3b}
+      RAG_LLM_TEMPERATURE: "0.1"
+      RAG_LLM_MAX_TOKENS: "4096"
+      RAG_MAX_DOCUMENTOS: "30"
+      RAG_EMBEDDING_ALLOWED: local
+      RAG_VAGAS_GERACAO_LOCAL: "1"
+      RAG_HISTORICO_TURNOS: "10"
+      RAG_HISTORICO_REESCRITA: "8"
+      RAG_HISTORICO_CHARS_RESPOSTA: "1000"
+      RAG_LLM_CLOUD_FALLBACK: "false"
+      RAG_OLLAMA_TIMEOUT: ${RAG_OLLAMA_TIMEOUT:-900}
+    ports:
+      - "${RAG_API_PORT:-8000}:8000"
+    volumes:
+      - ./dados_antt:/app/dados_antt
+      - ./vectorstore_local:/app/vectorstore_local
+      - ./relatorio_documentos.json:/app/relatorio_documentos.json
+      - huggingface_cache:/home/rag/.cache/huggingface
+    depends_on:
+      ollama:
+        condition: service_healthy
+
+  streamlit:
+    profiles: ["qa"]
+    image: rag-antt-streamlit:local
+    build:
+      context: .
+      dockerfile: Dockerfile.streamlit
+    restart: unless-stopped
+    environment:
+      OLLAMA_BASE_URL: http://ollama:11434/v1
+      RAG_LLM_ALLOWED_PROVIDERS: ollama
+      RAG_LLM_MODEL: ${RAG_LLM_MODEL:-llama3.2:3b}
+      RAG_LLM_TEMPERATURE: "0.1"
+      RAG_LLM_MAX_TOKENS: "4096"
+      RAG_MAX_DOCUMENTOS: "30"
+      RAG_EMBEDDING_ALLOWED: local
+      RAG_VAGAS_GERACAO_LOCAL: "1"
+      RAG_HISTORICO_TURNOS: "10"
+      RAG_HISTORICO_REESCRITA: "8"
+      RAG_HISTORICO_CHARS_RESPOSTA: "1000"
+      RAG_LLM_CLOUD_FALLBACK: "false"
+      RAG_OLLAMA_TIMEOUT: ${RAG_OLLAMA_TIMEOUT:-900}
+    ports:
+      - "${RAG_STREAMLIT_PORT:-8501}:8501"
+    volumes:
+      - ./dados_antt:/app/dados_antt
+      - ./vectorstore_local:/app/vectorstore_local
+      - ./relatorio_documentos.json:/app/relatorio_documentos.json
+      - huggingface_cache:/home/rag/.cache/huggingface
+    depends_on:
+      ollama:
+        condition: service_healthy
+
+volumes:
+  ollama_models:
+  huggingface_cache:

@@ -36,6 +36,10 @@ vectorstore/
 *.faiss
 *.pkl
 *.bin
+# Amostra do indice local para quem clonar e testar sem reindexar.
+!vectorstore_local/
+!vectorstore_local/index.faiss
+!vectorstore_local/index.pkl
 embeddings/
 models/
 
@@ -73,6 +77,8 @@ output/
 *.xlsx
 *.json
 *.csv
+# Catalogo da amostra. Os demais JSON continuam de fora.
+!relatorio_documentos.json
 
 # Relatórios gerados pela comparação de modelos
 relatorios_comparacao/

@@ -15,7 +15,7 @@ import os
 
 import pytest
 
-from antt_rag_unified import _substituir_vectorstore
+from antt_rag_unified import _criar_embeddings_local, _substituir_vectorstore
 
 
 def _criar_indice(diretorio, marcador):
@@ -29,6 +29,30 @@ def _ler_indice(diretorio):
     """Le o marcador do indice simulado."""
     with open(os.path.join(diretorio, "index.faiss"), encoding="utf-8") as f:
         return f.read()
+
+
+def test_embeddings_locais_nao_pedem_chave_de_chat(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Abrir o indice local nao cria gerenciador DeepSeek nem OpenAI."""
+    import antt_rag_unified
+
+    class _EmbeddingsFalsos:
+        """Substitui o modelo Hugging Face no teste."""
+
+        def embed_query(self, texto: str) -> list:
+            """Devolve um vetor fixo."""
+            del texto
+            return [0.0]
+
+    def _proibido(*args: object, **kwargs: object) -> object:
+        """Falha se a abertura do indice pedir um provedor de chat."""
+        del args, kwargs
+        raise AssertionError("abertura do indice nao usa gerenciador de chat")
+
+    monkeypatch.setattr(antt_rag_unified, "LocalEmbeddings", lambda model_name=None: _EmbeddingsFalsos())
+    monkeypatch.setattr(antt_rag_unified, "create_llm_manager", _proibido)
+    emb = _criar_embeddings_local()
+    assert emb is not None
+    assert emb.embed_query("IRI") == [0.0]
 
 
 def test_substituicao_coloca_indice_novo_em_producao(tmp_path):

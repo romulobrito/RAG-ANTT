@@ -68,6 +68,7 @@ from config import (
 
 from llm_providers import (
     LLMManager,
+    LocalEmbeddings,
     create_llm_manager,
     identificador_da_instancia,
     vaga_geracao,
@@ -1021,12 +1022,14 @@ def carregar_vectorstore():
 def _criar_embeddings_local():
     """Cria embeddings locais via sentence-transformers.
 
+    O indice FAISS local nao depende de chave de chat. DeepSeek e OpenAI
+    continuam so na geracao da resposta, quando o provedor pedido os usa.
+
     Returns:
         LocalEmbeddings ou None em caso de falha.
     """
     try:
-        llm_manager = create_llm_manager("deepseek", embedding_provider="local")
-        emb = llm_manager.get_embeddings()
+        emb = LocalEmbeddings()
         try:
             _ = emb.embed_query("teste-local")
         except Exception:
