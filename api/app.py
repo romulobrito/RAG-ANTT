@@ -24,6 +24,7 @@ from api.schemas import (
     ErrorBody,
     HealthResponse,
     IngestionJobResponse,
+    LegacyDocumentCreated,
     ProvedorLiberado,
     QueryRequest,
     QueryResponse,
@@ -245,7 +246,18 @@ def criar_aplicacao() -> FastAPI:
 
     @aplicacao.post(
         "/api/query",
-        response_model=None,
+        response_model=QueryResponse,
+        responses={
+            400: {"model": ErrorBody, "description": "Pedido invalido."},
+            503: {
+                "model": ErrorBody,
+                "description": "Indice, modelo ou geracao indisponivel.",
+            },
+            504: {
+                "model": ErrorBody,
+                "description": "Consulta excedeu o tempo permitido.",
+            },
+        },
         dependencies=[Depends(dependencia_api_key)],
     )
     def query(pedido: QueryRequest) -> JSONResponse:
@@ -358,7 +370,20 @@ def criar_aplicacao() -> FastAPI:
 
     @aplicacao.post(
         "/api/documents",
-        response_model=None,
+        status_code=202,
+        response_model=DocumentUploadAccepted,
+        responses={
+            201: {
+                "model": LegacyDocumentCreated,
+                "description": "Documento gravado no modo legado.",
+            },
+            400: {"model": ErrorBody, "description": "Documento invalido."},
+            409: {"model": ErrorBody, "description": "Documento duplicado."},
+            413: {
+                "model": ErrorBody,
+                "description": "Documento excede o tamanho permitido.",
+            },
+        },
         dependencies=[Depends(dependencia_api_key)],
     )
     async def documents_incluir(
@@ -401,6 +426,12 @@ def criar_aplicacao() -> FastAPI:
     @aplicacao.get(
         "/api/jobs/{job_id}",
         response_model=IngestionJobResponse,
+        responses={
+            404: {
+                "model": ErrorBody,
+                "description": "Job de ingestao nao encontrado.",
+            },
+        },
         dependencies=[Depends(dependencia_api_key)],
     )
     def ingestion_job(job_id: str) -> IngestionJobResponse:

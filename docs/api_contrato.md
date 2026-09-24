@@ -141,7 +141,7 @@ Corpo unico, sem stacktrace:
 | 403 | Rebuild completo sem `X-Ops-Key` quando configurada |
 | 409 | Nome/hash duplicado ou reindex com lock ativo |
 | 413 | Upload acima do limite |
-| 503 | Ready falho, ou consulta sem indice ou sem Ollama |
+| 503 | Ready falho, consulta sem indice/modelo ou resposta vazia do provedor |
 | 504 | O modelo estourou o tempo |
 | 500 | Falha generica |
 

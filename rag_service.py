@@ -602,6 +602,8 @@ def consultar(
 
     if not isinstance(resposta, str):
         resposta = str(resposta)
+    if not resposta.strip():
+        raise RagGenerationError("resposta_vazia_do_provedor")
     hits = [_hit_de_documento(documento) for documento in documentos]
     return QueryResult(
         resposta=resposta,

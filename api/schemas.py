@@ -180,6 +180,14 @@ class DocumentUploadAccepted(BaseModel):
     formato: Literal["pdf", "docx", "xlsx"]
 
 
+class LegacyDocumentCreated(BaseModel):
+    """Resposta do modo legado quando o incremental esta desligado."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    caminho: str
+
+
 class IngestionJobResponse(BaseModel):
     """Estado persistido de um job de ingestao."""
 

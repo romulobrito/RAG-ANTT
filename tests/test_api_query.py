@@ -132,6 +132,20 @@ def test_consulta_longa(
     assert resposta.status_code == 504
 
 
+def test_resposta_vazia_do_provedor(
+    cliente: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Falha de conteudo vazio do provedor vira 503."""
+    def _vazia(*args: object, **kwargs: object) -> QueryResult:
+        raise RagGenerationError("resposta_vazia_do_provedor")
+
+    monkeypatch.setattr(rag_service, "consultar", _vazia)
+    resposta = cliente.post("/api/query", headers=_cabecalhos(), json=_PEDIDO)
+    assert resposta.status_code == 503
+    assert resposta.json()["detail"] == "resposta_vazia_do_provedor"
+
+
 def test_ready_ollama_fora(
     cliente: TestClient,
     monkeypatch: pytest.MonkeyPatch,

@@ -46,6 +46,12 @@ dados_antt/.jobs/
 dados_antt/.staging/
 dados_antt/.locks/
 dados_antt/.transactions/
+dados_antt/.ocr_cache/
+dados_antt/entrada/
+backups/
+planning/
+relatorios_avaliacao/
+static/
 
 # Arquivos de chaves API/segredos
 .env
@@ -58,6 +64,11 @@ api_keys.py
 tmp/
 temp/
 .temp/
+*.aux
+*.fdb_latexmk
+*.fls
+*.out
+*.toc
 
 # Arquivos de notebook Jupyter
 .ipynb_checkpoints

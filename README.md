@@ -282,7 +282,8 @@ Contrato: [docs/api_contrato.md](docs/api_contrato.md).
 | `/api/status` | GET | Provedores liberados e quantidade de documentos |
 | `/api/query` | POST | Consulta normativa |
 | `/api/documents` | GET | Catalogo de documentos |
-| `/api/documents` | POST | Grava um PDF. A consulta so o ve depois do reindex |
+| `/api/documents` | POST | Aceita PDF, DOCX ou XLSX e cria job incremental |
+| `/api/jobs/{job_id}` | GET | Consulta o estado persistido da ingestao |
 | `/api/reindex` | POST | Atualizar base |
 
 #### Exemplo de uso com Python
@@ -363,7 +364,10 @@ Tres processos, tres imagens: `ollama` (oficial, so CPU), `rag-api` e `streamlit
 
 A imagem usa Python 3.10, o mesmo do venv. Usuario do container: UID 1000.
 
-1. Acrescente `RAG_API_KEY` no `.env` (o exemplo esta em `.env.example`; nao apague as chaves que ja existem). O Compose injeta apenas as variaveis declaradas em `docker-compose.yml`; chaves de provedores cloud existentes no `.env` nao entram no container local. Sem `RAG_API_KEY`, a API responde 503.
+1. Copie `.env.example` para `.env` e defina `RAG_API_KEY`. O servico
+   `rag-api` le o `.env` por `env_file`; por isso uma chave OpenRouter presente
+   nesse arquivo entra somente na API. O Streamlit chama a API e nao precisa
+   receber a chave cloud. Nunca versione o `.env`.
 2. Suba o Ollama e baixe o modelo. Neste notebook o padrao e `llama3.2:3b`. Em host com RAM livre (~8-10 GiB), troque `RAG_LLM_MODEL` no `.env` para `qwen2.5:7b` e puxe esse modelo.
 
 ```bash
@@ -400,6 +404,138 @@ docker compose --profile qa up -d streamlit
 ```
 
 A tela fica em `http://localhost:8501`. Pare o Streamlit e o Uvicorn que ja estiverem nessas portas antes do `up`.
+
+#### Homologacao em clone limpo
+
+O repositorio inclui 693 arquivos versionados da base processada e a amostra
+baseline
+`vectorstore_local/index.faiss` + `vectorstore_local/index.pkl`. Na primeira
+inicializacao, o modo incremental migra essa amostra para uma geracao imutavel
+sem recalcular os embeddings. Os PDFs originais completos so sao necessarios
+para homologar um rebuild total.
+
+Pre-requisitos:
+
+- Git, Docker Desktop e Docker Compose.
+- Acesso a internet no primeiro uso para baixar a imagem do Ollama, o modelo
+  local e o embedding `intfloat/multilingual-e5-small`.
+- Pelo menos 10 GB livres para build, imagens e cache. Nao use `--no-cache` em
+  host com pouco espaco.
+- Portas `8000` e `8501` livres, ou valores alternativos em
+  `RAG_API_PORT` e `RAG_STREAMLIT_PORT`.
+
+Em PowerShell:
+
+```powershell
+git clone https://github.com/DeepFeedSolutions/RAG.git
+Set-Location RAG
+Copy-Item .env.example .env
+```
+
+Edite somente o `.env`. Para homologacao local:
+
+```env
+RAG_API_KEY=defina-uma-chave-local
+RAG_LLM_ALLOWED_PROVIDERS=ollama
+RAG_LLM_MODEL=llama3.2:3b
+```
+
+Para selecionar Ollama e DeepSeek na mesma API:
+
+```env
+RAG_API_KEY=defina-uma-chave-local
+RAG_LLM_ALLOWED_PROVIDERS=ollama,deepseek
+OPENROUTER_API_KEY=defina-uma-chave-temporaria
+RAG_LLM_MODEL=deepseek-chat
+```
+
+Use uma chave OpenRouter temporaria com limite de gastos. Com
+`RAG_LLM_MODEL=deepseek-chat`, uma consulta com `provider: "ollama"` ainda usa
+o primeiro modelo local compativel. O embedding continua local; trocar apenas
+o LLM nao reindexa a base. Trocar `RAG_EMBEDDING_PROVIDER` exige rebuild total.
+
+Construa e inicie:
+
+```powershell
+docker compose build rag-api
+docker compose --profile qa build streamlit
+docker compose up -d ollama
+docker compose exec ollama ollama pull llama3.2:3b
+docker compose --profile qa up -d rag-api streamlit
+docker compose --profile qa ps
+```
+
+Validacoes:
+
+```powershell
+Invoke-RestMethod http://localhost:8000/api/health
+Invoke-RestMethod http://localhost:8000/api/ready
+```
+
+- Swagger: `http://localhost:8000/api/docs`
+- Streamlit: `http://localhost:8501`
+- Use o valor de `RAG_API_KEY` no botao `Authorize` do Swagger, sem prefixo
+  `Bearer`.
+
+Exemplo local para `POST /api/query`:
+
+```json
+{
+  "pergunta": "Qual o IRI maximo da pista principal segundo a INM 34/2024?",
+  "filtros": {
+    "tipo_documento": "INM",
+    "ano": 2024,
+    "numero": "34"
+  },
+  "provider": "ollama",
+  "max_documentos": 10,
+  "temperatura": 0.1,
+  "historico": [],
+  "correlation_id": "homologacao-local-001"
+}
+```
+
+Para testar DeepSeek, reutilize o corpo e troque somente para
+`"provider": "deepseek"`. Essa chamada usa OpenRouter e pode gerar custo.
+
+#### Checklist de upload incremental
+
+1. No Swagger, execute `POST /api/documents` com um PDF, DOCX ou XLSX novo.
+2. Confirme HTTP `202` e copie o `job_id`.
+3. Consulte `GET /api/jobs/{job_id}` ate `succeeded` ou
+   `succeeded_with_warnings`.
+4. Consulte um texto exclusivo do arquivo em `POST /api/query`.
+5. Consulte tambem um documento baseline para confirmar indice antigo + novo.
+6. Reenvie o mesmo nome ou conteudo e confirme HTTP `409`.
+7. Reinicie `rag-api` e confirme que a consulta nova continua funcionando:
+
+```powershell
+docker compose restart rag-api
+docker compose --profile qa ps
+```
+
+Para testar o scanner, copie somente PDF para `dados_antt/entrada` usando nome
+temporario `.pdf.part` e renomeie para `.pdf` ao terminar. DOCX e XLSX nessa
+pasta devem ser ignorados; esses formatos entram pela API.
+
+Antes de promover uma candidata, preserve tags de retorno:
+
+```powershell
+docker image tag rag-antt-api:local rag-antt-api:rollback
+docker image tag rag-antt-streamlit:local rag-antt-streamlit:rollback
+```
+
+Para retornar:
+
+```powershell
+docker image tag rag-antt-api:rollback rag-antt-api:local
+docker image tag rag-antt-streamlit:rollback rag-antt-streamlit:local
+docker compose --profile qa up -d --no-build --force-recreate rag-api streamlit
+```
+
+O aceite exige: consulta baseline em Ollama e DeepSeek, upload dos tres
+formatos, polling concluido, duplicata recusada, persistencia apos restart e
+repositorio sem chaves ou artefatos de runtime.
 
 ## Troubleshooting
 

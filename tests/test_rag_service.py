@@ -19,6 +19,7 @@ from langchain_core.documents import Document
 from rag_service import (
     PerguntaInvalidaError,
     ProvedorNaoLiberadoError,
+    RagGenerationError,
     consultar,
     incluir_documento,
     limpar_cache_vectorstore,
@@ -201,6 +202,23 @@ def test_deepseek_usa_o_modelo_dele(monkeypatch: pytest.MonkeyPatch) -> None:
 
     assert capturado["provider"] == "deepseek"
     assert capturado["model"] == "deepseek-v4-flash"
+
+
+def test_resposta_vazia_do_provedor_falha(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Resposta vazia nunca pode ser publicada como consulta bem-sucedida."""
+    _instalar_dublagens(monkeypatch)
+    monkeypatch.setattr(
+        "rag_service.gerar_resposta",
+        lambda *args, **kwargs: ("   ", "deepseek-chat"),
+    )
+
+    with pytest.raises(
+        RagGenerationError,
+        match="resposta_vazia_do_provedor",
+    ):
+        consultar("Resuma a planilha", provider="deepseek")
 
 
 def test_incluir_documento_grava_pdf(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
